@@ -109,7 +109,7 @@ $env:JOURNEYIN_MAP_DAILY_LIMIT = '0' # 0 表示不在 JourneyIn 内设置上限
 $env:JOURNEYIN_AMAP_SERVER_KEY = '<amap-webservice-key>'
 ~~~
 
-高德服务端 Key 可通过环境变量或设置页保存。高德 POI 结果使用 GCJ-02，保存地点时会同时保留原始 CRS 和用于百度 BMap 显示的 BD-09LL 转换坐标。地点搜索结果进入本地目录后保留 7 天，设置页可以手动清除。
+高德服务端 Key 优先从设置页保存的 SQLite app_settings 读取；只有设置项为空时才使用环境变量 fallback。高德 POI 结果使用 GCJ-02，保存地点时会同时保留原始 CRS 和用于百度 BMap 显示的 BD-09LL 转换坐标。地点搜索结果进入本地目录后保留 7 天，设置页可以手动清除。
 
 ## MCP
 
@@ -169,7 +169,7 @@ GET  /api/v1/settings
 PUT  /api/v1/settings/map-keys
 ~~~
 
-百度服务端 Key 使用 JOURNEYIN_BAIDU_SERVER_AK；浏览器端 JSAPI 4.0/BMap（兼容 legacy BMapGL）Key 使用 JOURNEYIN_BAIDU_BROWSER_AK。也可以在设置页填写并保存到 SQLite 的 app_settings 表，服务端 Key 只返回已配置状态，不回显原文。没有 Key 时服务返回明确的 provider_unavailable，不伪造路线。设置接口为 GET /api/v1/settings 和 PUT /api/v1/settings/map-keys。
+百度服务端 Key 使用 JOURNEYIN_BAIDU_SERVER_AK；浏览器端 JSAPI 4.0/BMap（兼容 legacy BMapGL）Key 使用 JOURNEYIN_BAIDU_BROWSER_AK。百度和高德服务端 Key 都可以在设置页填写并保存到 SQLite 的 app_settings 表；已保存的设置优先于环境变量，服务端 Key 只返回已配置状态，不回显原文。没有 Key 时服务返回明确的 provider_unavailable，不伪造路线。设置接口为 GET /api/v1/settings 和 PUT /api/v1/settings/map-keys。
 
 使用官方最小 JSAPI 初始化验证：构建 Web 资源和 Go 二进制后打开 /bmap-smoke.html。该页面检查 JSAPI 4.0/BMap、legacy BMapGL、Point、WebGL 和地图初始化；如果它失败，说明问题在百度浏览器端 AK、白名单、SDK 网络或浏览器环境，不在 JourneyIn 行程渲染逻辑。
 
