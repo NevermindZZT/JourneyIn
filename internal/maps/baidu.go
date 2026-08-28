@@ -83,8 +83,13 @@ func (p *BaiduProvider) Geocode(ctx context.Context, address, city string) ([]Pl
 }
 
 func (p *BaiduProvider) SearchPOI(ctx context.Context, query, region string, page, pageSize int) (POISearchResult, error) {
+	return p.SearchPOIWithTag(ctx, query, region, "", page, pageSize)
+}
+
+func (p *BaiduProvider) SearchPOIWithTag(ctx context.Context, query, region, tag string, page, pageSize int) (POISearchResult, error) {
 	query = strings.TrimSpace(query)
 	region = strings.TrimSpace(region)
+	tag = strings.TrimSpace(tag)
 	if query == "" {
 		return POISearchResult{}, fmt.Errorf("poi search query is required")
 	}
@@ -105,6 +110,9 @@ func (p *BaiduProvider) SearchPOI(ctx context.Context, query, region string, pag
 		return POISearchResult{}, unavailable(p.ID())
 	}
 	params := url.Values{"query": {query}, "region": {region}, "output": {"json"}, "scope": {"2"}, "page_num": {strconv.Itoa(page)}, "page_size": {strconv.Itoa(pageSize)}, "ret_coordtype": {"bd09ll"}, "ak": {ak}}
+	if tag != "" {
+		params.Set("tag", tag)
+	}
 	var response struct {
 		Status  int    `json:"status"`
 		Message string `json:"message"`

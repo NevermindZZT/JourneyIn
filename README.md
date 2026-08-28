@@ -80,16 +80,20 @@ pwsh -File scripts/verify-local.ps1 -ServerUrl http://127.0.0.1:8080 -WebUrl htt
 
 1. 点击右上角 `+` 新建一个 draft Trip。
 2. 打开行程面板的“添加地点”。
-3. 输入地点关键词和城市，点击“搜索地点”；搜索只在提交时调用百度 POI API。
+3. 输入地点关键词、城市和搜索类型，点击“搜索地点”；搜索只在提交时调用百度 POI API。对于甘加、白石崖等景区名称，可以选择“景点”类型；无 POI 结果时会降级到已缓存的地理编码结果。
 4. 从候选结果中明确选择一个地点并点击“添加”；Trip 会保存名称、地址、BD-09LL 坐标、CRS、来源和百度 UID。
-5. 添加至少两个规划点后选择路线方式，点击“生成路线”。路线按相邻点分段请求，并将 geometry 保存到 Trip 的 `Day.legs[].snapshots[]`。
-6. 后续地图重绘直接使用已保存的规划点和路线快照，不重复搜索或地理编码。
+5. 打开规划点详情，可以继续关联多个子规划点；只有进入该主规划点详情时，子点 Marker 才会显示在地图上。
+6. 添加至少两个规划点后选择路线方式，点击“生成路线”。路线按相邻点分段请求，并将 geometry 保存到 Trip 的 `Day.legs[].snapshots[]`。
+7. 在规划点详情点击“获取天气/刷新天气”；天气快照写入该点，显示查询时间，6 小时内重复刷新优先使用 SQLite cache。
+8. 后续地图重绘直接使用已保存的规划点、子规划点和路线快照，不重复搜索或地理编码。地图 HUD 的“卫星图/标准图”按钮只切换百度 JSAPI 图层，不触发 POI/路线请求。
 
 规划 API：
 
 ~~~text
 POST /api/v1/maps/pois/search
 POST /api/v1/trips/{trip_id}/days/{day_id}/stops
+POST /api/v1/trips/{trip_id}/days/{day_id}/stops/{stop_id}/children
+POST /api/v1/trips/{trip_id}/days/{day_id}/stops/{stop_id}/weather
 POST /api/v1/trips/{trip_id}/plan
 ~~~
 
@@ -173,7 +177,7 @@ docker compose up --build -d
 
 ## 当前阶段
 
-已完成 Go 单二进制基础、嵌入式资源、Trip 校验、SQLite revision、百度地理编码/路线/天气 Provider、百度/高德导航 URI、响应式 BMapGL Web 壳、持久化只读分享、Trip 同步 push/pull、MCP resources 和 Docker 配置。地图真实 Key、移动原生工程签名和生产 HTTPS 仍需在部署环境验证。
+已完成 Go 单二进制基础、嵌入式资源、Trip 校验、SQLite revision、百度 POI/地理编码/路线/天气 Provider、百度/高德导航 URI、JSAPI 4.0/BMap Web 地图、标准图/卫星图切换、全屏地图浮窗、子规划点、天气快照、持久化只读分享、Trip 同步 push/pull、MCP resources 和 Docker 配置。路线、子规划点和天气数据都通过 Trip revision 持久化；地图 API 访问受 SQLite cache、并发控制和每日上限保护。
 
 方案与实现约束：
 

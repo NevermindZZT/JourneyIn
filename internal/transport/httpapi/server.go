@@ -64,6 +64,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/trips/{id}", s.getTrip)
 	mux.HandleFunc("PUT /api/v1/trips/{id}", s.replaceTrip)
 	mux.HandleFunc("POST /api/v1/trips/{id}/days/{dayID}/stops", s.addStop)
+	mux.HandleFunc("POST /api/v1/trips/{id}/days/{dayID}/stops/{stopID}/children", s.addSubStop)
+	mux.HandleFunc("POST /api/v1/trips/{id}/days/{dayID}/stops/{stopID}/weather", s.refreshWeather)
 	mux.HandleFunc("POST /api/v1/trips/{id}/plan", s.planTrip)
 	mux.HandleFunc("DELETE /api/v1/trips/{id}", s.deleteTrip)
 	mux.HandleFunc("GET /api/v1/trips/{id}/export.json", s.exportTrip)

@@ -55,6 +55,10 @@ type POISearchProvider interface {
 	SearchPOI(context.Context, string, string, int, int) (POISearchResult, error)
 }
 
+type TaggedPOISearchProvider interface {
+	SearchPOIWithTag(context.Context, string, string, string, int, int) (POISearchResult, error)
+}
+
 type RouteRequest struct {
 	Origin      GeoPoint   `json:"origin"`
 	Destination GeoPoint   `json:"destination"`

@@ -205,3 +205,161 @@ func routeSnapshot(snapshot journeymaps.RouteSnapshot) domain.RouteSnapshot {
 func validTravelMode(mode journeymaps.TravelMode) bool {
 	return mode == journeymaps.ModeDriving || mode == journeymaps.ModeWalking || mode == journeymaps.ModeCycling || mode == journeymaps.ModeTransit
 }
+
+type WeatherInput struct {
+	Provider  journeymaps.ProviderID
+	LocalDate string
+}
+
+func (s *TripService) AddSubStop(ctx context.Context, tripID string, expectedRevision int, dayID, parentStopID string, input AddStopInput, source string) (store.TripRecord, error) {
+	if strings.TrimSpace(input.Title) == "" {
+		return store.TripRecord{}, errors.New("sub-stop title is required")
+	}
+	if len(input.Location) == 0 || string(input.Location) == "null" {
+		return store.TripRecord{}, ErrPlanningLocationRequired
+	}
+	record, err := s.store.GetTrip(ctx, tripID)
+	if err != nil {
+		return store.TripRecord{}, err
+	}
+	var trip domain.Trip
+	if err := json.Unmarshal(record.Document, &trip); err != nil {
+		return store.TripRecord{}, fmt.Errorf("decode trip: %w", err)
+	}
+	stopID, err := domain.NewID("substop")
+	if err != nil {
+		return store.TripRecord{}, err
+	}
+	if strings.TrimSpace(input.ID) != "" {
+		stopID = strings.TrimSpace(input.ID)
+	}
+	child := domain.SubStop{ID: stopID, Sequence: input.Sequence, Kind: input.Kind, Title: strings.TrimSpace(input.Title), Address: strings.TrimSpace(input.Address), Location: append(json.RawMessage(nil), input.Location...), TimeWindow: append(json.RawMessage(nil), input.TimeWindow...), DescriptionMarkdown: input.DescriptionMarkdown, Links: input.Links, Weather: append(json.RawMessage(nil), input.Weather...)}
+	found := false
+	for dayIndex := range trip.Days {
+		if trip.Days[dayIndex].ID != dayID {
+			continue
+		}
+		for stopIndex := range trip.Days[dayIndex].Stops {
+			if trip.Days[dayIndex].Stops[stopIndex].ID != parentStopID {
+				continue
+			}
+			found = true
+			parent := &trip.Days[dayIndex].Stops[stopIndex]
+			position := len(parent.Children)
+			if child.Sequence > 0 && child.Sequence <= len(parent.Children) {
+				position = child.Sequence - 1
+			}
+			parent.Children = append(parent.Children, domain.SubStop{})
+			copy(parent.Children[position+1:], parent.Children[position:])
+			parent.Children[position] = child
+			for index := range parent.Children {
+				parent.Children[index].Sequence = index + 1
+			}
+			break
+		}
+		break
+	}
+	if !found {
+		return store.TripRecord{}, fmt.Errorf("parent stop %s not found", parentStopID)
+	}
+	normalized, err := json.Marshal(trip)
+	if err != nil {
+		return store.TripRecord{}, err
+	}
+	return s.Replace(ctx, tripID, expectedRevision, normalized, source)
+}
+
+func (s *TripService) RefreshWeather(ctx context.Context, tripID string, expectedRevision int, dayID, stopID string, input WeatherInput, source string) (store.TripRecord, error) {
+	if s.mapService == nil {
+		return store.TripRecord{}, errors.New("map service is not configured")
+	}
+	record, err := s.store.GetTrip(ctx, tripID)
+	if err != nil {
+		return store.TripRecord{}, err
+	}
+	var trip domain.Trip
+	if err := json.Unmarshal(record.Document, &trip); err != nil {
+		return store.TripRecord{}, err
+	}
+	provider := input.Provider
+	if provider == "" {
+		provider = journeymaps.ProviderBaidu
+	}
+	var targetLocation json.RawMessage
+	var dayDate string
+	found := false
+	for dayIndex := range trip.Days {
+		if trip.Days[dayIndex].ID != dayID {
+			continue
+		}
+		dayDate = trip.Days[dayIndex].Date
+		for stopIndex := range trip.Days[dayIndex].Stops {
+			stop := &trip.Days[dayIndex].Stops[stopIndex]
+			if stop.ID == stopID {
+				targetLocation = stop.Location
+				found = true
+				break
+			}
+			for childIndex := range stop.Children {
+				child := &stop.Children[childIndex]
+				if child.ID == stopID {
+					targetLocation = child.Location
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+		break
+	}
+	if !found {
+		return store.TripRecord{}, fmt.Errorf("stop %s not found", stopID)
+	}
+	point, err := savedPoint(targetLocation)
+	if err != nil {
+		return store.TripRecord{}, err
+	}
+	localDate := input.LocalDate
+	if localDate == "" {
+		localDate = dayDate
+	}
+	snapshot, err := s.mapService.Weather(ctx, provider, journeymaps.WeatherRequest{Location: point, LocalDate: localDate, Timezone: trip.Timezone})
+	if err != nil {
+		return store.TripRecord{}, err
+	}
+	weather, err := json.Marshal(snapshot)
+	if err != nil {
+		return store.TripRecord{}, err
+	}
+	for dayIndex := range trip.Days {
+		if trip.Days[dayIndex].ID != dayID {
+			continue
+		}
+		for stopIndex := range trip.Days[dayIndex].Stops {
+			stop := &trip.Days[dayIndex].Stops[stopIndex]
+			if stop.ID == stopID {
+				stop.Weather = weather
+				found = true
+				break
+			}
+			for childIndex := range stop.Children {
+				if stop.Children[childIndex].ID == stopID {
+					stop.Children[childIndex].Weather = weather
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+		break
+	}
+	normalized, err := json.Marshal(trip)
+	if err != nil {
+		return store.TripRecord{}, err
+	}
+	return s.Replace(ctx, tripID, expectedRevision, normalized, source)
+}

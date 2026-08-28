@@ -98,13 +98,38 @@ func TestNativeNavigationURLsUseAllowedSchemes(t *testing.T) {
 
 func TestBaiduProviderSearchPOI(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/place/v2/search" || r.URL.Query().Get("query") != "西湖" || r.URL.Query().Get("region") != "杭州市" || r.URL.Query().Get("ret_coordtype") != "bd09ll" { t.Fatalf("unexpected search request: %s", r.URL.String()) }
+		if r.URL.Path != "/place/v2/search" || r.URL.Query().Get("query") != "西湖" || r.URL.Query().Get("region") != "杭州市" || r.URL.Query().Get("ret_coordtype") != "bd09ll" {
+			t.Fatalf("unexpected search request: %s", r.URL.String())
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":0,"total":2,"results":[{"uid":"uid-1","name":"西湖","address":"浙江省杭州市","location":{"lat":30.25,"lng":120.15}},{"uid":"uid-2","name":"西湖文化广场","address":"杭州市拱墅区","location":{"lat":30.286,"lng":120.172}}]}`))
 	}))
 	defer server.Close()
-	provider := NewBaiduProvider(BaiduConfig{ServerAK:"test-ak", BaseURL:server.URL})
+	provider := NewBaiduProvider(BaiduConfig{ServerAK: "test-ak", BaseURL: server.URL})
 	result, err := provider.SearchPOI(t.Context(), "西湖", "杭州市", 1, 10)
-	if err != nil { t.Fatal(err) }
-	if result.Total != 2 || len(result.Items) != 2 || result.Items[0].ID != "uid-1" || result.Items[0].Location.CRS != CRSBD09LL { t.Fatalf("unexpected POI result: %+v", result) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 2 || len(result.Items) != 2 || result.Items[0].ID != "uid-1" || result.Items[0].Location.CRS != CRSBD09LL {
+		t.Fatalf("unexpected POI result: %+v", result)
+	}
+}
+
+func TestBaiduProviderSearchPOIWithTag(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("tag") != "旅游景点" {
+			t.Fatalf("missing scenic tag: %s", r.URL.String())
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":0,"total":1,"results":[{"uid":"scenic-1","name":"白石崖","address":"甘肃省","location":{"lat":35.0,"lng":102.0}}]}`))
+	}))
+	defer server.Close()
+	provider := NewBaiduProvider(BaiduConfig{ServerAK: "test-ak", BaseURL: server.URL})
+	result, err := provider.SearchPOIWithTag(t.Context(), "白石崖", "甘肃省", "旅游景点", 1, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 1 || result.Items[0].Name != "白石崖" || result.Items[0].Location.CRS != CRSBD09LL {
+		t.Fatalf("unexpected scenic result: %+v", result)
+	}
 }

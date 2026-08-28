@@ -96,6 +96,23 @@
         "time_window": { "type": "object" },
         "description_markdown": { "type": "string", "maxLength": 10000 },
         "links": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/link" } },
+        "weather": { "type": "object" },
+        "children": { "type": "array", "maxItems": 20, "items": { "$ref": "#/$defs/sub_stop" } }
+      }
+    },
+    "sub_stop": {
+      "type": "object",
+      "required": ["id", "sequence", "title"],
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "kind": { "type": "string", "maxLength": 64 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "address": { "type": "string", "maxLength": 500 },
+        "location": { "$ref": "#/$defs/stop/properties/location" },
+        "time_window": { "type": "object" },
+        "description_markdown": { "type": "string", "maxLength": 10000 },
+        "links": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/link" } },
         "weather": { "type": "object" }
       }
     }

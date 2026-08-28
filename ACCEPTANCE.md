@@ -80,9 +80,11 @@ pwsh -File scripts/verify-local.ps1 -ServerUrl http://127.0.0.1:8080 -WebUrl htt
 - [ ] 添加两个规划点后点击“生成路线”，路线按相邻点生成并保存到 Trip。
 - [ ] 刷新或重启服务后，规划点和路线快照仍存在，不重新调用搜索接口。
 - [ ] 导入一个 Trip JSON 后，列表显示天数和规划点数量。
-- [ ] 点击规划点能打开详情、Markdown、天气和参考链接。
+- [ ] 点击规划点能打开详情、日期、Markdown、天气、天气更新时间和参考链接。
+- [ ] 详情中可以搜索并添加多个子规划点；子规划点显示自己的日期、坐标和天气入口。
 - [ ] 没有浏览器端 Key 时显示明确降级，不绘制假路线。
-- [ ] 配置 BMapGL Key 后加载真实地图和 BD-09LL Marker。
+- [ ] 配置百度浏览器端 Key 后加载真实地图和 BD-09LL Marker。
+- [ ] 地图 HUD 的“卫星图”按钮切换到卫星图，再切回“标准图”；切换不产生 POI、路线或天气请求。
 - [ ] 导出 JSON 能重新导入并保持 revision/内容。
 - [ ] 创建分享后只读页面可访问，share token 不出现在服务端日志。
 
@@ -96,8 +98,10 @@ pwsh -File scripts/verify-local.ps1 -ServerUrl http://127.0.0.1:8080 -WebUrl htt
 4. 从候选中选一个明确地点，点击“添加”；不要默认接受模糊同名地点。
 5. 再搜索并添加第二个地点。
 6. 选择步行/驾车/骑行/公交，点击“生成路线”。
-7. 导出 JSON，检查每个 Stop 的 location 中有 preferred、coordinates、crs、source/provider_refs；检查 Day legs 中有 route snapshot geometry。
-8. 重启同一个二进制并使用同一个绝对数据路径，确认行程点和路线仍在。
+7. 在主规划点详情中添加至少两个子规划点；关闭详情时子点不显示在地图，重新打开详情时子点 Marker 显示。
+8. 点击“获取天气”，确认天气条件/温度和 fetched_at 显示；6 小时内再次刷新不应产生新的上游天气请求。
+9. 导出 JSON，检查每个 Stop 的 location 中有 preferred、coordinates、crs、source/provider_refs；检查 children 和 Day legs 中有 route snapshot geometry。
+10. 重启同一个二进制并使用同一个绝对数据路径，确认行程点、子点、天气和路线仍在。
 
 查询次数原则：
 

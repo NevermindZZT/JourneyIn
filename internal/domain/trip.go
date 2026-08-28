@@ -65,6 +65,20 @@ type Stop struct {
 	DescriptionMarkdown string          `json:"description_markdown,omitempty"`
 	Links               []Link          `json:"links,omitempty"`
 	Weather             json.RawMessage `json:"weather,omitempty"`
+	Children            []SubStop       `json:"children,omitempty"`
+}
+
+type SubStop struct {
+	ID                  string          `json:"id"`
+	Sequence            int             `json:"sequence"`
+	Kind                string          `json:"kind,omitempty"`
+	Title               string          `json:"title"`
+	Address             string          `json:"address,omitempty"`
+	Location            json.RawMessage `json:"location,omitempty"`
+	TimeWindow          json.RawMessage `json:"time_window,omitempty"`
+	DescriptionMarkdown string          `json:"description_markdown,omitempty"`
+	Links               []Link          `json:"links,omitempty"`
+	Weather             json.RawMessage `json:"weather,omitempty"`
 }
 
 type RouteLeg struct {

@@ -48,8 +48,13 @@ func (s *MapService) provider(id journeymaps.ProviderID) (journeymaps.MapProvide
 }
 
 func (s *MapService) SearchPOI(ctx context.Context, providerID journeymaps.ProviderID, query, region string, page, pageSize int) (journeymaps.POISearchResult, error) {
+	return s.SearchPOIWithTag(ctx, providerID, query, region, "", page, pageSize)
+}
+
+func (s *MapService) SearchPOIWithTag(ctx context.Context, providerID journeymaps.ProviderID, query, region, tag string, page, pageSize int) (journeymaps.POISearchResult, error) {
 	query = strings.TrimSpace(query)
 	region = strings.TrimSpace(region)
+	tag = strings.TrimSpace(tag)
 	if region == "" {
 		region = "全国"
 	}
@@ -71,13 +76,26 @@ func (s *MapService) SearchPOI(ctx context.Context, providerID journeymaps.Provi
 		return journeymaps.POISearchResult{}, fmt.Errorf("map provider %s does not support POI search", providerID)
 	}
 	cacheKey := mapCacheKey(struct {
-		Query, Region  string
-		Page, PageSize int
-	}{query, region, page, pageSize})
+		Query, Region, Tag string
+		Page, PageSize     int
+	}{query, region, tag, page, pageSize})
 	data, err := s.cached(ctx, providerID, "poi_search", cacheKey, 15*time.Minute, func() ([]byte, error) {
-		result, err := s.call(ctx, providerID, func() (any, error) { return searcher.SearchPOI(ctx, query, region, page, pageSize) })
+		value, err := s.call(ctx, providerID, func() (any, error) {
+			if tagged, supported := provider.(journeymaps.TaggedPOISearchProvider); supported && tag != "" {
+				return tagged.SearchPOIWithTag(ctx, query, region, tag, page, pageSize)
+			}
+			return searcher.SearchPOI(ctx, query, region, page, pageSize)
+		})
 		if err != nil {
 			return nil, err
+		}
+		result, ok := value.(journeymaps.POISearchResult)
+		if ok && len(result.Items) == 0 && tag == "" {
+			fallback, fallbackErr := s.Geocode(ctx, providerID, query, region)
+			if fallbackErr == nil && len(fallback) > 0 {
+				result.Items = fallback
+				result.Total = len(fallback)
+			}
 		}
 		return json.Marshal(result)
 	})

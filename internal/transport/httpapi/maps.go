@@ -21,6 +21,7 @@ type poiSearchBody struct {
 	Region   string                 `json:"region,omitempty"`
 	Page     int                    `json:"page,omitempty"`
 	PageSize int                    `json:"page_size,omitempty"`
+	Category string                 `json:"category,omitempty"`
 }
 type routeBody struct {
 	Provider journeymaps.ProviderID   `json:"provider"`
@@ -88,7 +89,13 @@ func (s *Server) searchPOI(w http.ResponseWriter, r *http.Request) {
 		writeMapError(w, journeymaps.ErrProviderUnavailable)
 		return
 	}
-	result, err := s.mapService.SearchPOI(r.Context(), body.Provider, body.Query, body.Region, body.Page, body.PageSize)
+	var result journeymaps.POISearchResult
+	var err error
+	if body.Category != "" {
+		result, err = s.mapService.SearchPOIWithTag(r.Context(), body.Provider, body.Query, body.Region, body.Category, body.Page, body.PageSize)
+	} else {
+		result, err = s.mapService.SearchPOI(r.Context(), body.Provider, body.Query, body.Region, body.Page, body.PageSize)
+	}
 	if err != nil {
 		writeMapError(w, err)
 		return

@@ -57,6 +57,50 @@ func (s *Server) addStop(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, tripResponse(record))
 }
 
+func (s *Server) addSubStop(w http.ResponseWriter, r *http.Request) {
+	expected, err := parseRevision(r.Header.Get("If-Match"))
+	if err != nil {
+		writeError(w, http.StatusPreconditionRequired, "if_match_required", "If-Match must be revision-N", nil)
+		return
+	}
+	var body addStopBody
+	if err := decodeBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
+		return
+	}
+	input := application.AddStopInput{ID: body.Stop.ID, Sequence: body.Stop.Sequence, Kind: body.Stop.Kind, Title: body.Stop.Title, Address: body.Stop.Address, Location: body.Stop.Location, TimeWindow: body.Stop.TimeWindow, DescriptionMarkdown: body.Stop.DescriptionMarkdown, Links: body.Stop.Links, Weather: body.Stop.Weather}
+	record, err := s.trips.AddSubStop(r.Context(), r.PathValue("id"), expected, r.PathValue("dayID"), r.PathValue("stopID"), input, "rest:add_sub_stop")
+	if err != nil {
+		writePlanningError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, tripResponse(record))
+}
+
+type weatherRefreshBody struct {
+	Provider  journeymaps.ProviderID `json:"provider,omitempty"`
+	LocalDate string                 `json:"local_date,omitempty"`
+}
+
+func (s *Server) refreshWeather(w http.ResponseWriter, r *http.Request) {
+	expected, err := parseRevision(r.Header.Get("If-Match"))
+	if err != nil {
+		writeError(w, http.StatusPreconditionRequired, "if_match_required", "If-Match must be revision-N", nil)
+		return
+	}
+	var body weatherRefreshBody
+	if err := decodeBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
+		return
+	}
+	record, err := s.trips.RefreshWeather(r.Context(), r.PathValue("id"), expected, r.PathValue("dayID"), r.PathValue("stopID"), application.WeatherInput{Provider: body.Provider, LocalDate: body.LocalDate}, "rest:weather_refresh")
+	if err != nil {
+		writePlanningError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, tripResponse(record))
+}
+
 func (s *Server) planTrip(w http.ResponseWriter, r *http.Request) {
 	expected, err := parseRevision(r.Header.Get("If-Match"))
 	if err != nil {

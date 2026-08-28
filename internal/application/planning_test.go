@@ -14,17 +14,21 @@ import (
 type fakePlanningProvider struct {
 	searchCalls atomic.Int32
 	routeCalls  atomic.Int32
+	emptySearch bool
 }
 
 func (p *fakePlanningProvider) ID() journeymaps.ProviderID { return journeymaps.ProviderID("fake") }
-func (p *fakePlanningProvider) Geocode(context.Context, string, string) ([]journeymaps.PlaceCandidate, error) {
-	return nil, nil
+func (p *fakePlanningProvider) Geocode(_ context.Context, address, _ string) ([]journeymaps.PlaceCandidate, error) {
+	return []journeymaps.PlaceCandidate{{Name: address, Address: address, Location: journeymaps.GeoPoint{Lat: 30.2, Lng: 120.1, CRS: journeymaps.CRSBD09LL}, Provider: p.ID()}}, nil
 }
 func (p *fakePlanningProvider) ReverseGeocode(context.Context, journeymaps.GeoPoint) (string, error) {
 	return "", nil
 }
 func (p *fakePlanningProvider) SearchPOI(context.Context, string, string, int, int) (journeymaps.POISearchResult, error) {
 	p.searchCalls.Add(1)
+	if p.emptySearch {
+		return journeymaps.POISearchResult{Page: 1, PageSize: 10}, nil
+	}
 	return journeymaps.POISearchResult{Items: []journeymaps.PlaceCandidate{{ID: "poi-1", Name: "测试地点", Location: journeymaps.GeoPoint{Lat: 30.2, Lng: 120.1, CRS: journeymaps.CRSBD09LL}, Provider: p.ID()}}, Total: 1, Page: 1, PageSize: 10}, nil
 }
 func (p *fakePlanningProvider) Route(context.Context, journeymaps.RouteRequest) (journeymaps.RouteSnapshot, error) {
@@ -33,7 +37,9 @@ func (p *fakePlanningProvider) Route(context.Context, journeymaps.RouteRequest) 
 	return journeymaps.RouteSnapshot{Provider: p.ID(), CoordinateSystem: journeymaps.CRSBD09LL, Mode: journeymaps.ModeWalking, Geometry: []journeymaps.GeoPoint{{Lat: 30.2, Lng: 120.1, CRS: journeymaps.CRSBD09LL}, {Lat: 30.21, Lng: 120.11, CRS: journeymaps.CRSBD09LL}}, DistanceM: 1000, DurationS: 600, FetchedAt: now, ExpiresAt: now.Add(time.Hour)}, nil
 }
 func (p *fakePlanningProvider) Weather(context.Context, journeymaps.WeatherRequest) (journeymaps.WeatherSnapshot, error) {
-	return journeymaps.WeatherSnapshot{}, nil
+	temperature := 18.5
+	now := time.Now().UTC()
+	return journeymaps.WeatherSnapshot{Provider: p.ID(), LocalDate: "2026-04-18", Condition: "晴", TemperatureC: &temperature, FetchedAt: now, ExpiresAt: now.Add(6 * time.Hour), Available: true}, nil
 }
 func (p *fakePlanningProvider) NavigationURL(journeymaps.NavTarget, journeymaps.TravelMode, journeymaps.Platform) (string, error) {
 	return "https://example.test", nil
@@ -111,5 +117,59 @@ func TestMapServiceHonorsDailyQuotaAfterCacheMiss(t *testing.T) {
 	}
 	if fake.searchCalls.Load() != 1 {
 		t.Fatalf("search calls after quota = %d", fake.searchCalls.Load())
+	}
+}
+
+func TestAddSubStopAndRefreshWeatherPersistSnapshots(t *testing.T) {
+	service := testService(t)
+	fake := &fakePlanningProvider{}
+	service.SetMapService(NewMapService(service.store, journeymaps.NewRegistry(fake), 2, 0))
+	tripJSON := []byte(`{"schema_version":1,"title":"子点天气测试","status":"draft","timezone":"Asia/Shanghai","date_range":{"start":"2026-04-18","end":"2026-04-18"},"days":[{"id":"day-1","date":"2026-04-18","stops":[]}]}`)
+	record, err := service.Create(context.Background(), tripJSON, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	location := json.RawMessage(`{"preferred":"bd09ll","coordinates":{"bd09ll":{"lat":30.2,"lng":120.1,"crs":"bd09ll"}}}`)
+	record, err = service.AddStop(context.Background(), record.ID, record.Revision, "day-1", AddStopInput{Title: "主规划点", Location: location}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var trip domain.Trip
+	if err := json.Unmarshal(record.Document, &trip); err != nil {
+		t.Fatal(err)
+	}
+	parentID := trip.Days[0].Stops[0].ID
+	record, err = service.AddSubStop(context.Background(), record.ID, record.Revision, "day-1", parentID, AddStopInput{Title: "子规划点", Location: location}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(record.Document, &trip); err != nil {
+		t.Fatal(err)
+	}
+	if len(trip.Days[0].Stops[0].Children) != 1 {
+		t.Fatalf("children not persisted: %+v", trip.Days[0].Stops[0])
+	}
+	record, err = service.RefreshWeather(context.Background(), record.ID, record.Revision, "day-1", parentID, WeatherInput{Provider: "fake"}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(record.Document, &trip); err != nil {
+		t.Fatal(err)
+	}
+	if len(trip.Days[0].Stops[0].Weather) == 0 {
+		t.Fatal("weather snapshot not persisted")
+	}
+}
+
+func TestMapServiceFallsBackToGeocodeForMissingPOI(t *testing.T) {
+	service := testService(t)
+	fake := &fakePlanningProvider{emptySearch: true}
+	mapService := NewMapService(service.store, journeymaps.NewRegistry(fake), 2, 0)
+	result, err := mapService.SearchPOI(context.Background(), "fake", "甘加", "青海省", 1, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 1 || result.Items[0].Name != "甘加" {
+		t.Fatalf("expected geocode fallback: %+v", result)
 	}
 }
