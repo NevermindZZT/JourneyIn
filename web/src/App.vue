@@ -68,6 +68,7 @@ const amapJSKeyInput = ref('')
 const amapServerKeyInput = ref('')
 const settingsSaving = ref(false)
 const panelOpen = ref(localStorage.getItem('journeyin.panelOpen') !== 'false')
+const tripView = ref<'list' | 'detail'>('list')
 const mapType = ref<'normal' | 'satellite'>((localStorage.getItem('journeyin.mapType') as 'normal' | 'satellite') || 'normal')
 const showMapLabels = ref(localStorage.getItem('journeyin.mapLabels') !== 'false')
 const panelMode = ref<'journey' | 'search'>('journey')
@@ -120,14 +121,18 @@ async function loadTrips() {
     if (!tripResponse.ok) throw new Error('无法读取旅行规划')
     trips.value = ((await tripResponse.json()) as { items?: TripSummary[] }).items || []
     capabilities.value = capabilityResponse.ok ? await capabilityResponse.json() as Capabilities : null
-    if (trips.value[0]) await loadDetail(trips.value[0])
-    else { selected.value = null; tripDocument.value = null; renderMap() }
+    const currentID = selected.value?.id
+    const nextTrip = trips.value.find(trip => trip.id === currentID) || trips.value[0]
+    if (nextTrip) { await loadDetail(nextTrip); if (!currentID) tripView.value = 'list' }
+    else { selected.value = null; tripDocument.value = null; tripView.value = 'list'; renderMap() }
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '网络请求失败'
   } finally {
     loading.value = false
   }
 }
+
+function selectTrip(trip: TripSummary) { tripView.value = 'detail'; void loadDetail(trip) }
 
 async function loadDetail(trip: TripSummary) {
   selected.value = trip
@@ -285,7 +290,10 @@ async function renderMap() {
       const snapshot = chooseSnapshot(leg)
       if (!snapshot?.geometry) continue
       const line = snapshot.geometry.map(value => { const point = routePoint(value, snapshot.coordinate_system || 'bd09ll'); return new mapAPI.Point(point.lng, point.lat) })
-      if (line.length > 1) mapInstance.addOverlay(new mapAPI.Polyline(line, { strokeColor: '#006874', strokeWeight: 5, strokeOpacity: .82 }))
+      if (line.length > 1) {
+        mapInstance.addOverlay(new mapAPI.Polyline(line, { strokeColor: '#006874', strokeWeight: 5, strokeOpacity: .82 }))
+        attachRouteLabel(snapshot)
+      }
     }
     if (points.length) mapInstance.setViewport(points)
     else mapInstance.centerAndZoom('中国', 5)
@@ -307,6 +315,16 @@ function attachMapLabel(marker: any, title: string, date: string) {
   const label = new mapAPI.Label(title + ' · ' + date, { offset: new mapAPI.Size(16, -20) })
   label.setStyle?.({ color: '#172624', backgroundColor: '#ffffffdd', border: '1px solid #6f797a', borderRadius: '8px', padding: '4px 7px', fontSize: '12px', lineHeight: '16px', whiteSpace: 'nowrap', boxShadow: '0 3px 10px #0003' })
   marker.setLabel(label)
+}
+function formatDistance(meters?: number) { if (!meters || meters < 0) return ''; return meters < 1000 ? Math.round(meters) + ' m' : (Math.round(meters / 100) / 10).toFixed(1).replace(/\.0$/, '') + ' km' }
+function formatDuration(seconds?: number) { if (!seconds || seconds < 0) return ''; const minutes = Math.max(1, Math.round(seconds / 60)); return minutes < 60 ? minutes + ' 分钟' : Math.floor(minutes / 60) + ' 小时' + (minutes % 60 ? ' ' + minutes % 60 + ' 分钟' : '') }
+function attachRouteLabel(snapshot: { geometry?: Array<[number, number]> | Array<Coord>; distance_m?: number; duration_s?: number; coordinate_system?: string }) {
+  if (!showMapLabels.value || !mapAPI?.Label || !mapAPI?.Size || !snapshot.geometry?.length) return
+  const text = [formatDistance(snapshot.distance_m), formatDuration(snapshot.duration_s)].filter(Boolean).join(' · '); if (!text) return
+  const middle = routePoint(snapshot.geometry[Math.floor(snapshot.geometry.length / 2)], snapshot.coordinate_system || 'bd09ll')
+  const label = new mapAPI.Label(text, { offset: new mapAPI.Size(-24, -10) })
+  label.setStyle?.({ color: '#ffffff', backgroundColor: '#006874dd', border: '0', borderRadius: '999px', padding: '4px 8px', fontSize: '12px', lineHeight: '16px', whiteSpace: 'nowrap', boxShadow: '0 3px 10px #0003' })
+  label.setPosition?.(new mapAPI.Point(middle.lng, middle.lat)); mapInstance.addOverlay(label)
 }
 function applyTripPayload(payload: { document?: TripDocument; revision?: number; stops?: number; days?: number }) {
   if (payload.document) tripDocument.value = payload.document
@@ -488,7 +506,7 @@ onUnmounted(() => mediaQuery?.removeEventListener?.('change', systemThemeChanged
           </section>
           <aside v-if="panelOpen" class="floating-panel plan-panel" aria-label="行程规划面板">
             <div class="panel-head">
-              <div><p class="eyebrow">JOURNEYIN</p><h2>{{ selected?.title || '旅行规划' }}</h2><p class="panel-subtitle">{{ selected ? selected.start_date + ' — ' + selected.end_date : '本地行程工作区' }}</p></div>
+              <div><p class="eyebrow">JOURNEYIN</p><h2>{{ tripView === 'detail' && selected ? selected.title : '旅行规划' }}</h2><p class="panel-subtitle">{{ tripView === 'detail' && selected ? selected.start_date + ' — ' + selected.end_date : '选择一条行程查看详情' }}</p></div>
               <button class="panel-close" aria-label="隐藏行程面板" @click="togglePanel">×</button>
             </div>
             <div class="panel-tabs">
@@ -497,15 +515,19 @@ onUnmounted(() => mediaQuery?.removeEventListener?.('change', systemThemeChanged
             </div>
             <div class="panel-scroll">
               <template v-if="panelMode === 'journey'">
-                <div class="section-heading"><div><p class="eyebrow">YOUR JOURNEYS</p><h3>旅行规划</h3></div><IonBadge color="primary">{{ trips.length }}</IonBadge></div>
-                <p v-if="loading" class="muted">正在加载…</p>
-                <div v-else-if="!trips.length" class="empty"><p>还没有旅行规划。</p><IonButton size="small" @click="newTripOpen = true"><IonIcon slot="start" :icon="addOutline" /> 新建规划</IonButton><p class="empty-hint">也可以导入已有 Trip JSON。</p></div>
-                <div v-else class="trip-cards">
-                  <button v-for="trip in trips" :key="trip.id" class="trip-card" :class="{ active: selected?.id === trip.id }" @click="loadDetail(trip)">
-                    <span><b>{{ trip.title }}</b><small>{{ trip.start_date }} — {{ trip.end_date }}</small><small>{{ trip.days ?? '—' }} 天 · {{ trip.stops ?? '—' }} 个规划点</small></span><IonChip color="light">v{{ trip.revision }}</IonChip>
-                  </button>
-                </div>
-                <template v-if="selected && tripDocument">
+                <template v-if="tripView === 'list'">
+                  <div class="section-heading"><div><p class="eyebrow">YOUR JOURNEYS</p><h3>旅行规划</h3></div><IonBadge color="primary">{{ trips.length }}</IonBadge></div>
+                  <p v-if="loading" class="muted">正在加载…</p>
+                  <div v-else-if="!trips.length" class="empty"><p>还没有旅行规划。</p><IonButton size="small" @click="newTripOpen = true"><IonIcon slot="start" :icon="addOutline" /> 新建规划</IonButton><p class="empty-hint">也可以导入已有 Trip JSON。</p></div>
+                  <div v-else class="trip-cards">
+                    <button v-for="trip in trips" :key="trip.id" class="trip-card" :class="{ active: selected?.id === trip.id }" @click="selectTrip(trip)">
+                      <span><b>{{ trip.title }}</b><small>{{ trip.start_date }} — {{ trip.end_date }}</small><small>{{ trip.days ?? '—' }} 天 · {{ trip.stops ?? '—' }} 个规划点</small></span><IonChip color="light">v{{ trip.revision }}</IonChip>
+                    </button>
+                  </div>
+                </template>
+                <template v-else-if="tripView === 'detail' && selected && tripDocument">
+                  <button class="panel-back detail-list-back" @click="tripView = 'list'">‹ 行程列表</button>
+                  <div class="trip-detail-kicker"><span class="eyebrow">SELECTED JOURNEY</span><span>{{ selected.start_date }} — {{ selected.end_date }}</span></div>
                   <div class="trip-overview"><div class="description-header"><h3>行程总体说明</h3><button v-if="!tripDescriptionEditing" class="text-button" @click="beginEditTripDescription">编辑行程说明</button></div><template v-if="tripDescriptionEditing"><textarea v-model="tripDescriptionDraft" class="description-editor" rows="5" placeholder="补充整个行程的背景、节奏和注意事项"></textarea><div class="description-actions"><button class="text-button" @click="cancelEditTripDescription">取消</button><button class="primary-text-button" :disabled="tripDescriptionSaving" @click="saveTripDescription">{{ tripDescriptionSaving ? '保存中…' : '保存说明' }}</button></div></template><div v-else-if="tripDocument.description_markdown" class="markdown" v-html="renderMarkdown(tripDocument.description_markdown)"></div><p v-else class="muted">暂无行程总体说明，点击“编辑行程说明”添加。</p></div>
                   <div class="panel-section">
                     <div class="section-heading compact"><div><p class="eyebrow">ITINERARY</p><h3>规划点</h3></div><span class="count-label">{{ visibleStops.length }}</span></div>
