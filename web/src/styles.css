@@ -67,8 +67,8 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .map-hud > * { pointer-events: auto; }
 .map-status-pill, .panel-open-button { display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 9px 14px; border: 1px solid color-mix(in srgb, var(--line) 78%, transparent); border-radius: 999px; color: var(--ink); background: color-mix(in srgb, var(--panel) 90%, transparent); box-shadow: 0 8px 24px #0002; backdrop-filter: blur(14px); }
 .panel-open-button { border: 1px solid var(--line); color: var(--p); }
-.map-type-button { min-height: 40px; padding: 9px 14px; border: 1px solid color-mix(in srgb, var(--line) 78%, transparent); border-radius: 999px; color: var(--ink); background: color-mix(in srgb, var(--panel) 90%, transparent); box-shadow: 0 8px 24px #0002; backdrop-filter: blur(14px); }
-.map-type-button.active { border-color: var(--p); color: var(--md-on-primary); background: var(--p); }
+.map-type-button, .map-label-button { min-height: 40px; padding: 9px 14px; border: 1px solid color-mix(in srgb, var(--line) 78%, transparent); border-radius: 999px; color: var(--ink); background: color-mix(in srgb, var(--panel) 90%, transparent); box-shadow: 0 8px 24px #0002; backdrop-filter: blur(14px); }
+.map-type-button.active, .map-label-button.active { border-color: var(--p); color: var(--md-on-primary); background: var(--p); }
 .map-notices { position: absolute; z-index: 18; top: 68px; right: 18px; width: min(460px, calc(100vw - 36px)); }
 .global-error, .share-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 8px 24px #0002; backdrop-filter: blur(14px); }
 .global-error { color: var(--md-error); background: color-mix(in srgb, var(--md-error) 11%, var(--panel)); }
@@ -140,7 +140,9 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .weather span { display: grid; gap: 4px; }
 .weather small { color: var(--muted); font-size: 11px; }
 .description-section { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
+.trip-overview { margin-top: 18px; padding: 16px; border: 1px solid var(--line); border-radius: 17px; background: color-mix(in srgb, var(--surface) 62%, var(--panel)); }
 .description-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.description-header-actions { display: inline-flex; align-items: center; gap: 6px; }
 .description-header h3 { margin: 0; color: var(--ink); font-size: 17px; }
 .description-editor { width: 100%; min-height: 130px; padding: 11px; border: 1px solid var(--line); border-radius: 13px; outline: none; resize: vertical; color: var(--ink); background: var(--surface); line-height: 1.6; }
 .description-editor:focus { border-color: var(--p); box-shadow: 0 0 0 3px color-mix(in srgb, var(--p) 20%, transparent); }
@@ -148,6 +150,12 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .text-button, .primary-text-button { min-height: 36px; padding: 7px 12px; border-radius: 999px; font-size: 12px; }
 .text-button { border: 1px solid var(--line); color: var(--p); background: transparent; }
 .primary-text-button { border: 1px solid var(--p); color: var(--md-on-primary); background: var(--p); }
+.fullscreen-editor-backdrop { position: fixed; z-index: 80; inset: 0; display: grid; place-items: stretch; padding: 0; background: color-mix(in srgb, var(--md-surface) 95%, transparent); }
+.fullscreen-editor { display: flex; min-height: 100%; flex-direction: column; padding: clamp(18px, 4vw, 48px); }
+.fullscreen-editor > header { display: flex; align-items: center; justify-content: space-between; min-height: 48px; color: var(--ink); }
+.fullscreen-editor > header h2 { margin: 0; font-size: clamp(22px, 4vw, 34px); }
+.fullscreen-description-editor { flex: 1; width: 100%; min-height: 0; margin: 18px 0; padding: 18px; border: 1px solid var(--line); border-radius: 18px; outline: none; resize: none; color: var(--ink); background: var(--surface); font-size: 17px; line-height: 1.75; }
+.fullscreen-description-editor:focus { border-color: var(--p); box-shadow: 0 0 0 3px color-mix(in srgb, var(--p) 20%, transparent); }
 .children-panel { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
 .children-help { margin: 0 0 10px; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .child-list { display: grid; gap: 7px; }
