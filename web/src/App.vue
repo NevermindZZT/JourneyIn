@@ -504,6 +504,7 @@ onUnmounted(() => mediaQuery?.removeEventListener?.('change', systemThemeChanged
             </div>
           </aside>
           <aside v-if="selectedStop" class="details-drawer">
+            <div class="details-scroll">
             <button class="close-button" aria-label="关闭详情" @click="closeDetail"><IonIcon :icon="closeOutline" /></button>
             <p class="eyebrow">{{ selectedSubStop ? 'SUB-STOP ' + selectedSubStop.sequence : 'STOP ' + selectedStop.sequence }}</p>
             <button v-if="selectedSubStop" class="detail-parent" @click="selectedSubStopId = ''">返回主规划点：{{ selectedStop.title }}</button>
@@ -517,6 +518,7 @@ onUnmounted(() => mediaQuery?.removeEventListener?.('change', systemThemeChanged
             <div class="description-section"><div class="description-header"><h3>地点说明</h3><button v-if="!descriptionEditing" class="text-button" @click="beginEditDescription">编辑地点说明</button></div><template v-if="descriptionEditing"><textarea v-model="descriptionDraft" class="description-editor" rows="7" placeholder="补充这个地点的门票、开放时间、行程备注等信息"></textarea><div class="description-actions"><button class="text-button" @click="cancelEditDescription">取消</button><button class="primary-text-button" :disabled="descriptionSaving" @click="saveDescription">{{ descriptionSaving ? '保存中…' : '保存说明' }}</button></div></template><template v-else><div v-if="selectedTarget?.description_markdown" class="markdown" v-html="renderMarkdown(selectedTarget.description_markdown)"></div><p v-else class="muted">暂无地点说明，点击“编辑地点说明”添加。</p></template></div>
             <div class="links" v-if="selectedTarget?.links?.length"><a v-for="link in selectedTarget.links" :key="link.id || link.url" :href="safeURL(link.url)" target="_blank" rel="noopener noreferrer"><IonIcon :icon="linkOutline" /> {{ link.title }}</a></div>
             <div class="nav-actions"><IonButton size="small" @click="openNavigation('baidu')"><IonIcon slot="start" :icon="navigateOutline" /> 百度导航</IonButton><IonButton size="small" fill="outline" @click="openNavigation('amap')"><IonIcon slot="start" :icon="navigateOutline" /> 高德导航</IonButton></div>
+            </div>
           </aside>
         </main>
       </IonContent>
