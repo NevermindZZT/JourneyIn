@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -207,3 +209,42 @@ func TestPOIPreferencesAndDirectoryClear(t *testing.T) {
 	}
 	_ = clearResponse.Body.Close()
 }
+
+func TestDeleteStopHTTPWorkflow(t *testing.T) {
+	server := testPlanningServer(t); defer server.Close()
+	trip := []byte(`{"schema_version":1,"title":"HTTP delete","status":"draft","timezone":"Asia/Shanghai","date_range":{"start":"2026-04-18","end":"2026-04-18"},"days":[{"id":"day-1","date":"2026-04-18","stops":[{"id":"stop-1","sequence":1,"title":"地点","location":{"preferred":"bd09ll","coordinates":{"bd09ll":{"lat":30.2,"lng":120.1,"crs":"bd09ll"}}}}]}]}`)
+	response, err := http.Post(server.URL+"/api/v1/trips", "application/json", strings.NewReader(string(trip))); if err != nil { t.Fatal(err) }; defer response.Body.Close(); var created map[string]any; if err := json.NewDecoder(response.Body).Decode(&created); err != nil { t.Fatal(err) }; id := created["id"].(string)
+	request, err := http.NewRequest(http.MethodDelete, server.URL+"/api/v1/trips/"+id+"/days/day-1/stops/stop-1", nil); if err != nil { t.Fatal(err) }; request.Header.Set("If-Match", "revision-1"); deleted, err := http.DefaultClient.Do(request); if err != nil { t.Fatal(err) }; defer deleted.Body.Close(); if deleted.StatusCode != http.StatusOK { t.Fatalf("delete status %d", deleted.StatusCode) }
+}
+
+func TestMoveStopHTTPWorkflow(t *testing.T) {
+	server := testPlanningServer(t)
+	defer server.Close()
+	trip := []byte(`{"schema_version":1,"title":"HTTP reorder","status":"draft","timezone":"Asia/Shanghai","date_range":{"start":"2026-04-18","end":"2026-04-18"},"days":[{"id":"day-1","date":"2026-04-18","stops":[{"id":"stop-a","sequence":1,"title":"A"},{"id":"stop-b","sequence":2,"title":"B"},{"id":"stop-c","sequence":3,"title":"C"}]}]}`)
+	response, err := http.Post(server.URL+"/api/v1/trips", "application/json", strings.NewReader(string(trip)))
+	if err != nil { t.Fatal(err) }
+	defer response.Body.Close()
+	var created struct { ID string `json:"id"`; Revision int `json:"revision"` }
+	if err := json.NewDecoder(response.Body).Decode(&created); err != nil { t.Fatal(err) }
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/trips/"+created.ID+"/days/day-1/stops/stop-c/move", strings.NewReader(`{"direction":"up"}`))
+	if err != nil { t.Fatal(err) }
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("If-Match", "revision-"+strconv.Itoa(created.Revision))
+	moved, err := http.DefaultClient.Do(request)
+	if err != nil { t.Fatal(err) }
+	defer moved.Body.Close()
+	if moved.StatusCode != http.StatusOK { t.Fatalf("move status %d", moved.StatusCode) }
+	var payload struct { Revision int `json:"revision"`; Document struct { Days []struct { Stops []struct { ID string `json:"id"`; Sequence int `json:"sequence"` } `json:"stops"` } `json:"days"` } `json:"document"` }
+	if err := json.NewDecoder(moved.Body).Decode(&payload); err != nil { t.Fatal(err) }
+	if payload.Revision != created.Revision+1 { t.Fatalf("revision=%d", payload.Revision) }
+	if got := []string{payload.Document.Days[0].Stops[0].ID, payload.Document.Days[0].Stops[1].ID, payload.Document.Days[0].Stops[2].ID}; !reflect.DeepEqual(got, []string{"stop-a", "stop-c", "stop-b"}) { t.Fatalf("order=%v", got) }
+	bad, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/trips/"+created.ID+"/days/day-1/stops/stop-c/move", strings.NewReader(`{"direction":"up"}`))
+	if err != nil { t.Fatal(err) }
+	bad.Header.Set("Content-Type", "application/json")
+	bad.Header.Set("If-Match", "revision-"+strconv.Itoa(created.Revision))
+	conflict, err := http.DefaultClient.Do(bad)
+	if err != nil { t.Fatal(err) }
+	defer conflict.Body.Close()
+	if conflict.StatusCode != http.StatusConflict { t.Fatalf("stale move status %d", conflict.StatusCode) }
+}
+

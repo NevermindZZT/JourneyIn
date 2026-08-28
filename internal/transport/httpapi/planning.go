@@ -77,6 +77,49 @@ func (s *Server) addSubStop(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, tripResponse(record))
 }
 
+type moveStopBody struct {
+	Direction      string `json:"direction"`
+	TargetSequence int    `json:"target_sequence,omitempty"`
+}
+
+func (s *Server) moveStop(w http.ResponseWriter, r *http.Request) {
+	expected, err := parseRevision(r.Header.Get("If-Match"))
+	if err != nil {
+		writeError(w, http.StatusPreconditionRequired, "if_match_required", "If-Match must be revision-N", nil)
+		return
+	}
+	var body moveStopBody
+	if err := decodeBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
+		return
+	}
+	var record store.TripRecord
+	if body.TargetSequence > 0 {
+		record, err = s.trips.ReorderStop(r.Context(), r.PathValue("id"), expected, r.PathValue("dayID"), r.PathValue("stopID"), body.TargetSequence, "rest:reorder_stop")
+	} else {
+		record, err = s.trips.MoveStop(r.Context(), r.PathValue("id"), expected, r.PathValue("dayID"), r.PathValue("stopID"), body.Direction, "rest:move_stop")
+	}
+	if err != nil {
+		writePlanningError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, tripResponse(record))
+}
+
+func (s *Server) deleteStop(w http.ResponseWriter, r *http.Request) {
+	expected, err := parseRevision(r.Header.Get("If-Match"))
+	if err != nil {
+		writeError(w, http.StatusPreconditionRequired, "if_match_required", "If-Match must be revision-N", nil)
+		return
+	}
+	record, err := s.trips.DeleteStop(r.Context(), r.PathValue("id"), expected, r.PathValue("dayID"), r.PathValue("stopID"), "rest:delete_stop")
+	if err != nil {
+		writePlanningError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, tripResponse(record))
+}
+
 type weatherRefreshBody struct {
 	Provider  journeymaps.ProviderID `json:"provider,omitempty"`
 	LocalDate string                 `json:"local_date,omitempty"`

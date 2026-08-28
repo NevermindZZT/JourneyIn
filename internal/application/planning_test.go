@@ -3,12 +3,15 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"reflect"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"journeyin/internal/domain"
 	journeymaps "journeyin/internal/maps"
+	"journeyin/internal/store"
 )
 
 type fakePlanningProvider struct {
@@ -171,5 +174,136 @@ func TestMapServiceFallsBackToGeocodeForMissingPOI(t *testing.T) {
 	}
 	if len(result.Items) != 1 || result.Items[0].Name != "甘加" {
 		t.Fatalf("expected geocode fallback: %+v", result)
+	}
+}
+
+func TestDeleteStopAndChildUsesRevision(t *testing.T) {
+	service := testService(t)
+	tripJSON := []byte(`{"schema_version":1,"title":"删除测试","status":"draft","timezone":"Asia/Shanghai","date_range":{"start":"2026-04-18","end":"2026-04-18"},"days":[{"id":"day-1","date":"2026-04-18","stops":[]}] }`)
+	record, err := service.Create(context.Background(), tripJSON, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	location := json.RawMessage(`{"preferred":"bd09ll","coordinates":{"bd09ll":{"lat":30.2,"lng":120.1,"crs":"bd09ll"}}}`)
+	record, err = service.AddStop(context.Background(), record.ID, record.Revision, "day-1", AddStopInput{Title: "主点", Location: location}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var trip domain.Trip
+	if err := json.Unmarshal(record.Document, &trip); err != nil {
+		t.Fatal(err)
+	}
+	parentID := trip.Days[0].Stops[0].ID
+	record, err = service.AddSubStop(context.Background(), record.ID, record.Revision, "day-1", parentID, AddStopInput{Title: "子点", Location: location}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(record.Document, &trip); err != nil {
+		t.Fatal(err)
+	}
+	childID := trip.Days[0].Stops[0].Children[0].ID
+	record, err = service.DeleteStop(context.Background(), record.ID, record.Revision, "day-1", childID, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	trip = domain.Trip{}
+	if err := json.Unmarshal(record.Document, &trip); err != nil {
+		t.Fatal(err)
+	}
+	if len(trip.Days[0].Stops[0].Children) != 0 {
+		t.Fatal("child was not deleted")
+	}
+	if _, err = service.DeleteStop(context.Background(), record.ID, record.Revision-1, "day-1", parentID, "test"); !errors.Is(err, store.ErrRevisionConflict) {
+		t.Fatalf("expected revision conflict, got %v", err)
+	}
+	record, err = service.DeleteStop(context.Background(), record.ID, record.Revision, "day-1", parentID, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(record.Document, &trip); err != nil {
+		t.Fatal(err)
+	}
+	if len(trip.Days[0].Stops) != 0 {
+		t.Fatal("parent was not deleted")
+	}
+}
+
+func TestMoveStopAndChildUsesRevision(t *testing.T) {
+	service := testService(t)
+	tripJSON := []byte(`{"schema_version":1,"title":"顺序测试","status":"draft","timezone":"Asia/Shanghai","date_range":{"start":"2026-04-18","end":"2026-04-18"},"days":[{"id":"day-1","date":"2026-04-18","stops":[{"id":"stop-a","sequence":1,"title":"A","location":{"preferred":"bd09ll","coordinates":{"bd09ll":{"lat":30.2,"lng":120.1,"crs":"bd09ll"}}}},{"id":"stop-b","sequence":2,"title":"B","location":{"preferred":"bd09ll","coordinates":{"bd09ll":{"lat":30.21,"lng":120.11,"crs":"bd09ll"}}}},{"id":"stop-c","sequence":3,"title":"C","location":{"preferred":"bd09ll","coordinates":{"bd09ll":{"lat":30.22,"lng":120.12,"crs":"bd09ll"}}}}],"legs":[{"id":"leg-1","from_stop_id":"stop-a","to_stop_id":"stop-b"}]}]}`)
+	record, err := service.Create(context.Background(), tripJSON, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err = service.MoveStop(context.Background(), record.ID, record.Revision, "day-1", "stop-c", "up", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var trip domain.Trip
+	if err := json.Unmarshal(record.Document, &trip); err != nil {
+		t.Fatal(err)
+	}
+	if got := []string{trip.Days[0].Stops[0].ID, trip.Days[0].Stops[1].ID, trip.Days[0].Stops[2].ID}; !reflect.DeepEqual(got, []string{"stop-a", "stop-c", "stop-b"}) {
+		t.Fatalf("main order=%v", got)
+	}
+	if trip.Days[0].Stops[0].Sequence != 1 || trip.Days[0].Stops[1].Sequence != 2 || trip.Days[0].Stops[2].Sequence != 3 {
+		t.Fatalf("main sequences not normalized: %+v", trip.Days[0].Stops)
+	}
+	if len(trip.Days[0].Legs) != 0 {
+		t.Fatal("main reorder must clear route legs")
+	}
+	if _, err := service.MoveStop(context.Background(), record.ID, record.Revision-1, "day-1", "stop-c", "up", "test"); !errors.Is(err, store.ErrRevisionConflict) {
+		t.Fatalf("expected revision conflict, got %v", err)
+	}
+	record, err = service.AddSubStop(context.Background(), record.ID, record.Revision, "day-1", "stop-a", AddStopInput{Title: "child-a", Location: json.RawMessage(`{"preferred":"bd09ll","coordinates":{"bd09ll":{"lat":30.2,"lng":120.1,"crs":"bd09ll"}}}`)}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err = service.AddSubStop(context.Background(), record.ID, record.Revision, "day-1", "stop-a", AddStopInput{Title: "child-b", Location: json.RawMessage(`{"preferred":"bd09ll","coordinates":{"bd09ll":{"lat":30.2,"lng":120.1,"crs":"bd09ll"}}}`)}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	trip = domain.Trip{}
+	if err := json.Unmarshal(record.Document, &trip); err != nil {
+		t.Fatal(err)
+	}
+	children := trip.Days[0].Stops[0].Children
+	childB := children[1].ID
+	record, err = service.MoveStop(context.Background(), record.ID, record.Revision, "day-1", childB, "up", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	trip = domain.Trip{}
+	if err := json.Unmarshal(record.Document, &trip); err != nil {
+		t.Fatal(err)
+	}
+	if got := []string{trip.Days[0].Stops[0].Children[0].Title, trip.Days[0].Stops[0].Children[1].Title}; !reflect.DeepEqual(got, []string{"child-b", "child-a"}) {
+		t.Fatalf("child order=%v", got)
+	}
+	if trip.Days[0].Stops[0].Children[0].Sequence != 1 || trip.Days[0].Stops[0].Children[1].Sequence != 2 {
+		t.Fatalf("child sequences not normalized: %+v", trip.Days[0].Stops[0].Children)
+	}
+}
+
+func TestReorderStopToTargetSequence(t *testing.T) {
+	service := testService(t)
+	tripJSON := []byte(`{"schema_version":1,"title":"精确排序测试","status":"draft","timezone":"Asia/Shanghai","date_range":{"start":"2026-04-18","end":"2026-04-18"},"days":[{"id":"day-1","date":"2026-04-18","stops":[{"id":"a","sequence":1,"title":"A"},{"id":"b","sequence":2,"title":"B"},{"id":"c","sequence":3,"title":"C"}]}]}`)
+	record, err := service.Create(context.Background(), tripJSON, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err = service.ReorderStop(context.Background(), record.ID, record.Revision, "day-1", "c", 1, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var trip domain.Trip
+	if err := json.Unmarshal(record.Document, &trip); err != nil {
+		t.Fatal(err)
+	}
+	if got := []string{trip.Days[0].Stops[0].ID, trip.Days[0].Stops[1].ID, trip.Days[0].Stops[2].ID}; !reflect.DeepEqual(got, []string{"c", "a", "b"}) {
+		t.Fatalf("order=%v", got)
+	}
+	if _, err := service.ReorderStop(context.Background(), record.ID, record.Revision-1, "day-1", "a", 3, "test"); !errors.Is(err, store.ErrRevisionConflict) {
+		t.Fatalf("expected revision conflict, got %v", err)
 	}
 }
