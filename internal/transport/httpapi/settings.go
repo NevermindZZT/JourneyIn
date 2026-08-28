@@ -1,0 +1,103 @@
+package httpapi
+
+import (
+	"net/http"
+	"strings"
+
+	journeymaps "journeyin/internal/maps"
+)
+
+type mapKeysBody struct {
+	BaiduBrowserKey *string `json:"baidu_browser_key"`
+	BaiduServerKey  *string `json:"baidu_server_key"`
+	AMapJSKey       *string `json:"amap_js_key"`
+	AMapServerKey   *string `json:"amap_server_key"`
+}
+
+func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
+	if s.settingsStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "settings_unavailable", "settings store is not configured", nil)
+		return
+	}
+	_, browserOK, err := s.settingsStore.GetSetting(r.Context(), "map.baidu.browser_key")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
+		return
+	}
+	browserOK = browserOK || strings.TrimSpace(s.browserMapKey) != ""
+	_, serverOK, err := s.settingsStore.GetSetting(r.Context(), "map.baidu.server_key")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
+		return
+	}
+	if s.mapRegistry != nil {
+		if provider, ok := s.mapRegistry.Get(journeymaps.ProviderBaidu); ok {
+			if baidu, ok := provider.(*journeymaps.BaiduProvider); ok {
+				serverOK = serverOK || baidu.ServerAKConfigured()
+			}
+		}
+	}
+	_, amapJSOK, err := s.settingsStore.GetSetting(r.Context(), "map.amap.js_key")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
+		return
+	}
+	_, amapServerOK, err := s.settingsStore.GetSetting(r.Context(), "map.amap.server_key")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"map": map[string]any{
+		"baidu": map[string]any{"browser_key_configured": browserOK, "server_key_configured": serverOK},
+		"amap":  map[string]any{"js_key_configured": amapJSOK, "server_key_configured": amapServerOK},
+	}})
+}
+
+func (s *Server) updateMapKeys(w http.ResponseWriter, r *http.Request) {
+	if s.settingsStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "settings_unavailable", "settings store is not configured", nil)
+		return
+	}
+	var body mapKeysBody
+	if err := decodeBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
+		return
+	}
+	updates := []struct {
+		key    string
+		value  *string
+		secret bool
+	}{
+		{"map.baidu.browser_key", body.BaiduBrowserKey, false},
+		{"map.baidu.server_key", body.BaiduServerKey, true},
+		{"map.amap.js_key", body.AMapJSKey, false},
+		{"map.amap.server_key", body.AMapServerKey, true},
+	}
+	for _, update := range updates {
+		if update.value == nil {
+			continue
+		}
+		value := strings.TrimSpace(*update.value)
+		var err error
+		if value == "" {
+			err = s.settingsStore.DeleteSetting(r.Context(), update.key)
+		} else {
+			err = s.settingsStore.SetSetting(r.Context(), update.key, value, update.secret)
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
+			return
+		}
+	}
+	if body.BaiduBrowserKey != nil {
+		s.browserMapKey = strings.TrimSpace(*body.BaiduBrowserKey)
+	}
+	if body.BaiduServerKey != nil && s.mapRegistry != nil {
+		if provider, ok := s.mapRegistry.Get(journeymaps.ProviderBaidu); ok {
+			if baidu, ok := provider.(*journeymaps.BaiduProvider); ok {
+				baidu.SetServerAK(strings.TrimSpace(*body.BaiduServerKey))
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"saved": true})
+}

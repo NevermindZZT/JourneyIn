@@ -1,0 +1,224 @@
+package application
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"sync"
+	"time"
+
+	journeymaps "journeyin/internal/maps"
+	"journeyin/internal/store"
+)
+
+type MapService struct {
+	registry   *journeymaps.Registry
+	store      *store.Store
+	semaphore  chan struct{}
+	dailyLimit int
+	mu         sync.Mutex
+	flights    map[string]*mapFlight
+}
+
+type mapFlight struct {
+	done chan struct{}
+	data []byte
+	err  error
+}
+
+func NewMapService(database *store.Store, registry *journeymaps.Registry, maxConcurrency, dailyLimit int) *MapService {
+	if maxConcurrency < 1 {
+		maxConcurrency = 2
+	}
+	return &MapService{registry: registry, store: database, semaphore: make(chan struct{}, maxConcurrency), dailyLimit: dailyLimit, flights: make(map[string]*mapFlight)}
+}
+
+func (s *MapService) provider(id journeymaps.ProviderID) (journeymaps.MapProvider, error) {
+	if s.registry == nil {
+		return nil, fmt.Errorf("map registry is not configured")
+	}
+	provider, ok := s.registry.Get(id)
+	if !ok {
+		return nil, fmt.Errorf("map provider %s is not registered", id)
+	}
+	return provider, nil
+}
+
+func (s *MapService) SearchPOI(ctx context.Context, providerID journeymaps.ProviderID, query, region string, page, pageSize int) (journeymaps.POISearchResult, error) {
+	query = strings.TrimSpace(query)
+	region = strings.TrimSpace(region)
+	if region == "" {
+		region = "全国"
+	}
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 10
+	}
+	if pageSize > 20 {
+		pageSize = 20
+	}
+	provider, err := s.provider(providerID)
+	if err != nil {
+		return journeymaps.POISearchResult{}, err
+	}
+	searcher, ok := provider.(journeymaps.POISearchProvider)
+	if !ok {
+		return journeymaps.POISearchResult{}, fmt.Errorf("map provider %s does not support POI search", providerID)
+	}
+	cacheKey := mapCacheKey(struct {
+		Query, Region  string
+		Page, PageSize int
+	}{query, region, page, pageSize})
+	data, err := s.cached(ctx, providerID, "poi_search", cacheKey, 15*time.Minute, func() ([]byte, error) {
+		result, err := s.call(ctx, providerID, func() (any, error) { return searcher.SearchPOI(ctx, query, region, page, pageSize) })
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(result)
+	})
+	if err != nil {
+		return journeymaps.POISearchResult{}, err
+	}
+	var result journeymaps.POISearchResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+func (s *MapService) Geocode(ctx context.Context, providerID journeymaps.ProviderID, address, city string) ([]journeymaps.PlaceCandidate, error) {
+	provider, err := s.provider(providerID)
+	if err != nil {
+		return nil, err
+	}
+	cacheKey := mapCacheKey(struct{ Address, City string }{strings.TrimSpace(address), strings.TrimSpace(city)})
+	data, err := s.cached(ctx, providerID, "geocode", cacheKey, 24*time.Hour, func() ([]byte, error) {
+		result, err := s.call(ctx, providerID, func() (any, error) { return provider.Geocode(ctx, address, city) })
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(result)
+	})
+	if err != nil {
+		return nil, err
+	}
+	var result []journeymaps.PlaceCandidate
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s *MapService) Route(ctx context.Context, providerID journeymaps.ProviderID, request journeymaps.RouteRequest) (journeymaps.RouteSnapshot, error) {
+	provider, err := s.provider(providerID)
+	if err != nil {
+		return journeymaps.RouteSnapshot{}, err
+	}
+	cacheRequest := request
+	if cacheRequest.DepartureAt != nil {
+		bucket := cacheRequest.DepartureAt.UTC().Truncate(15 * time.Minute)
+		cacheRequest.DepartureAt = &bucket
+	}
+	cacheKey := mapCacheKey(cacheRequest)
+	data, err := s.cached(ctx, providerID, "route", cacheKey, 30*time.Minute, func() ([]byte, error) {
+		result, err := s.call(ctx, providerID, func() (any, error) { return provider.Route(ctx, request) })
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(result)
+	})
+	if err != nil {
+		return journeymaps.RouteSnapshot{}, err
+	}
+	var result journeymaps.RouteSnapshot
+	if err := json.Unmarshal(data, &result); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+func (s *MapService) Weather(ctx context.Context, providerID journeymaps.ProviderID, request journeymaps.WeatherRequest) (journeymaps.WeatherSnapshot, error) {
+	provider, err := s.provider(providerID)
+	if err != nil {
+		return journeymaps.WeatherSnapshot{}, err
+	}
+	cacheKey := mapCacheKey(request)
+	data, err := s.cached(ctx, providerID, "weather", cacheKey, 6*time.Hour, func() ([]byte, error) {
+		result, err := s.call(ctx, providerID, func() (any, error) { return provider.Weather(ctx, request) })
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(result)
+	})
+	if err != nil {
+		return journeymaps.WeatherSnapshot{}, err
+	}
+	var result journeymaps.WeatherSnapshot
+	if err := json.Unmarshal(data, &result); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+func (s *MapService) call(ctx context.Context, providerID journeymaps.ProviderID, fn func() (any, error)) (any, error) {
+	select {
+	case s.semaphore <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	defer func() { <-s.semaphore }()
+	if s.store != nil && s.dailyLimit > 0 {
+		if err := s.store.ReserveMapRequest(ctx, string(providerID), time.Now().UTC().Format("2006-01-02"), s.dailyLimit); err != nil {
+			return nil, err
+		}
+	}
+	return fn()
+}
+
+func (s *MapService) cached(ctx context.Context, providerID journeymaps.ProviderID, kind, cacheKey string, ttl time.Duration, fetch func() ([]byte, error)) ([]byte, error) {
+	provider := string(providerID)
+	if s.store != nil {
+		if entry, ok, err := s.store.GetMapCache(ctx, provider, kind, cacheKey); err != nil {
+			return nil, err
+		} else if ok {
+			return entry.ResponseJSON, nil
+		}
+	}
+	flightKey := provider + "|" + kind + "|" + cacheKey
+	s.mu.Lock()
+	if flight, ok := s.flights[flightKey]; ok {
+		done := flight.done
+		s.mu.Unlock()
+		select {
+		case <-done:
+			return flight.data, flight.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	flight := &mapFlight{done: make(chan struct{})}
+	s.flights[flightKey] = flight
+	s.mu.Unlock()
+	data, err := fetch()
+	if err == nil && s.store != nil {
+		err = s.store.PutMapCache(ctx, provider, kind, cacheKey, data, time.Now().UTC().Add(ttl), time.Now().UTC())
+	}
+	s.mu.Lock()
+	flight.data = data
+	flight.err = err
+	close(flight.done)
+	delete(s.flights, flightKey)
+	s.mu.Unlock()
+	return data, err
+}
+
+func mapCacheKey(value any) string {
+	encoded, _ := json.Marshal(value)
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:])
+}

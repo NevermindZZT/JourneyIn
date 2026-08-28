@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JourneyIn Baidu JSAPI Smoke Test</title><style>body{margin:0;padding:24px;font:16px system-ui;background:#f7faf9;color:#172624}#result{padding:16px;border:1px solid #cbd9d5;border-radius:12px;white-space:pre-wrap}#map{width:100%;height:520px;margin-top:16px;border-radius:12px;background:#e6f0ed}</style></head>
+<body><h1>百度 JSAPI 4.0 / GL 官方初始化 Smoke Test</h1><div id="result">正在检查 capabilities 和百度 JSAPI…</div><div id="map"></div><script>
+(async function(){
+  var result=document.getElementById('result');
+  function show(value){result.textContent=JSON.stringify(value,null,2)}
+  window.addEventListener('error',function(event){if(event.filename&&event.filename.indexOf('api.map.baidu.com')>=0){show({status:'sdk_runtime_error',message:event.message,source:event.filename})}});
+  window.addEventListener('unhandledrejection',function(event){show({status:'sdk_promise_error',message:String(event.reason)})});
+  function load(url){return new Promise(function(resolve,reject){var script=document.createElement('script');script.src=url;script.onload=resolve;script.onerror=reject;document.head.appendChild(script)})}
+  function webgl(){try{var canvas=document.createElement('canvas');return !!(window.WebGLRenderingContext&&(canvas.getContext('webgl')||canvas.getContext('experimental-webgl')))}catch(e){return false}}
+  function test(namespace,name){var info={sdk:name,map:typeof namespace.Map,point:typeof namespace.Point,webgl:webgl()};if(typeof namespace.Map!=='function'){show(Object.assign(info,{status:'map_constructor_unavailable',hint:'请检查浏览器端 AK、JSAPI 服务和白名单'}));return}try{var map=new namespace.Map('map',{enableIconClick:false});map.centerAndZoom('中国',5);map.enableScrollWheelZoom();show(Object.assign(info,{status:'map_constructed',hint:'若地图瓦片仍未出现，请检查浏览器网络和白名单'}))}catch(error){show(Object.assign(info,{status:'map_constructor_failed',error:String(error)}))}}
+  try{
+    var response=await fetch('/api/v1/capabilities');var caps=await response.json();var key=caps.map_providers&&caps.map_providers.baidu&&caps.map_providers.baidu.browser_key;if(!key){show({status:'no_browser_key',hint:'请配置浏览器端 AK'});return}
+    try{await load(window.location.protocol+'//api.map.baidu.com/api?v=4.0&ak='+encodeURIComponent(key))}catch(e){}
+    if(window.BMap&&typeof window.BMap.Map==='function'){test(window.BMap,'BMap JSAPI 4.0');return}
+    try{await load(window.location.protocol+'//api.map.baidu.com/api?v=1.0&type=webgl&ak='+encodeURIComponent(key))}catch(e){}
+    if(window.BMapGL&&typeof window.BMapGL.Map==='function'){test(window.BMapGL,'BMapGL legacy');return}
+    show({status:'namespace_unavailable',bmap:typeof window.BMap,bmapgl:typeof window.BMapGL,webgl:webgl(),hint:'JSAPI 4.0 和 legacy GL 均未注册，请检查浏览器端 AK、服务权限、白名单和浏览器网络'})
+  }catch(error){show({status:'capabilities_failed',error:String(error)})}
+})();
+</script></body></html>

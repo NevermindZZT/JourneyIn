@@ -1,0 +1,19 @@
+# Local build and runtime data
+/data/
+*.db
+*.db-shm
+*.db-wal
+.cache/
+.pnpm-store/
+/dist/
+node_modules/
+web/dist/assets/
+web/dist/bmap-smoke.html
+
+# Local agent and planning artifacts
+/plan.md
+/AGENTS.md
+/.agents/
+/.planning/
+/plans/
+*.plan.md

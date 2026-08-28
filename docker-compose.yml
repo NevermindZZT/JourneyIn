@@ -1,0 +1,23 @@
+services:
+  journeyin:
+    build: .
+    image: journeyin:dev
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      JOURNEYIN_LISTEN: 0.0.0.0:8080
+      JOURNEYIN_DATA_DIR: /data/journeyin.db
+      JOURNEYIN_PUBLIC_URL: ${JOURNEYIN_PUBLIC_URL:-http://localhost:8080}
+      JOURNEYIN_MCP_TOKEN: ${JOURNEYIN_MCP_TOKEN:?set a strong MCP token}
+      JOURNEYIN_API_TOKEN: ${JOURNEYIN_API_TOKEN:-}
+      JOURNEYIN_MAP_PROVIDER: ${JOURNEYIN_MAP_PROVIDER:-baidu}
+      JOURNEYIN_BAIDU_BROWSER_AK: ${JOURNEYIN_BAIDU_BROWSER_AK:-}
+      JOURNEYIN_BAIDU_SERVER_AK: ${JOURNEYIN_BAIDU_SERVER_AK:-}
+      JOURNEYIN_AMAP_JS_KEY: ${JOURNEYIN_AMAP_JS_KEY:-}
+      JOURNEYIN_AMAP_SERVER_KEY: ${JOURNEYIN_AMAP_SERVER_KEY:-}
+    volumes:
+      - journeyin-data:/data
+
+volumes:
+  journeyin-data:
