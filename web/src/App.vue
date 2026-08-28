@@ -32,6 +32,9 @@ const selectedStopId = ref('')
 const selectedSubStopId = ref('')
 const searchParentStopId = ref('')
 const weatherLoading = ref(false)
+const descriptionEditing = ref(false)
+const descriptionDraft = ref('')
+const descriptionSaving = ref(false)
 const selectedDay = ref<number | 'all'>('all')
 const loading = ref(false)
 const detailLoading = ref(false)
@@ -184,6 +187,19 @@ function chooseSnapshot(leg: Leg) { return (leg.snapshots || []).find(snapshot =
 function selectStop(stop: Stop) { selectedStopId.value = stop.id; selectedSubStopId.value = ''; void renderMap(); if (window.matchMedia('(max-width: 900px)').matches) { panelOpen.value = false; localStorage.setItem('journeyin.panelOpen', 'false') }; if (mapInstance && mapAPI) { const point = pointFor(stop); if (point) mapInstance.panTo(new mapAPI.Point(point.lng, point.lat)) } }
 function selectSubStop(child: SubStop, parent: Stop) { selectedStopId.value = parent.id; selectedSubStopId.value = child.id; void renderMap(); if (window.matchMedia('(max-width: 900px)').matches) { panelOpen.value = false; localStorage.setItem('journeyin.panelOpen', 'false') }; if (mapInstance && mapAPI) { const point = pointFor(child); if (point) mapInstance.panTo(new mapAPI.Point(point.lng, point.lat)) } }
 function openChildSearch(parent: Stop) { selectedStopId.value = parent.id; selectedSubStopId.value = ''; searchParentStopId.value = parent.id; panelOpen.value = true; panelMode.value = 'search'; searchMessage.value = '为“' + parent.title + '”添加子规划点' }
+function beginEditDescription() { descriptionDraft.value = selectedTarget.value?.description_markdown || ''; descriptionEditing.value = true }
+function cancelEditDescription() { descriptionEditing.value = false; descriptionDraft.value = '' }
+async function saveDescription() {
+  if (!selected.value || !tripDocument.value || !selectedTarget.value) return
+  const target = selectedTarget.value; const previous = target.description_markdown || ''; target.description_markdown = descriptionDraft.value.trim(); descriptionSaving.value = true; error.value = ''
+  const parentID = selectedStop.value?.id || ''; const childID = selectedSubStop.value?.id || ''
+  try {
+    const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id), { method: 'PUT', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision }, body: JSON.stringify(tripDocument.value) })
+    const payload = await response.json() as { document?: TripDocument; revision?: number; stops?: number; days?: number; error?: { message?: string } }
+    if (!response.ok) throw new Error(payload.error?.message || '保存地点说明失败')
+    applyTripPayload(payload); selectedStopId.value = parentID; selectedSubStopId.value = childID; descriptionEditing.value = false; descriptionDraft.value = ''
+  } catch (cause) { target.description_markdown = previous; error.value = cause instanceof Error ? cause.message : '保存地点说明失败' } finally { descriptionSaving.value = false }
+}
 
 function resetBaiduMapSDK() {
   try { mapInstance?.destroy?.() } catch { /* SDK cleanup is best effort */ }
@@ -432,7 +448,7 @@ onUnmounted(() => mediaQuery?.removeEventListener?.('change', systemThemeChanged
             </div>
             <div v-if="keyConfigured && tripDocument && !mapError && !mapReady" class="map-loading"><IonIcon :icon="mapOutline" /><span>正在加载百度地图…</span></div>
           </div>
-          <div class="map-hud">
+          <div v-if="!selectedStop" class="map-hud">
             <button v-if="!panelOpen" class="panel-open-button" aria-label="显示行程面板" @click="togglePanel"><IonIcon :icon="menuOutline" /> 行程面板</button>
             <button class="map-type-button" :class="{ active: mapType === 'satellite' }" @click="toggleMapType">{{ mapType === 'satellite' ? '标准图' : '卫星图' }}</button>
             <div class="map-status-pill"><IonIcon :icon="keyConfigured && mapReady && !mapError ? sunnyOutline : cloudOfflineOutline" /> {{ !tripDocument ? '等待行程' : !keyConfigured ? '离线数据可用' : mapError ? '百度地图不可用' : mapReady ? '百度地图已连接' : '百度地图加载中' }} · {{ visibleStops.length }} 个规划点</div>
@@ -498,7 +514,7 @@ onUnmounted(() => mediaQuery?.removeEventListener?.('change', systemThemeChanged
             <div class="weather"><IonIcon :icon="sunnyOutline" /><span>{{ weatherText(selectedTarget || selectedStop) }}<small v-if="weatherUpdatedAt(selectedTarget || selectedStop)">更新于 {{ weatherUpdatedAt(selectedTarget || selectedStop) }}</small></span></div>
             <IonButton size="small" fill="outline" :disabled="weatherLoading" @click="refreshWeather">{{ weatherLoading ? '天气查询中…' : selectedTarget?.weather ? '刷新天气' : '获取天气' }}</IonButton>
             <div v-if="!selectedSubStop" class="children-panel"><div class="section-heading compact"><div><p class="eyebrow">CHILD POINTS</p><h3>子规划点</h3></div><span class="count-label">{{ selectedStop.children?.length || 0 }}</span></div><p class="children-help">进入主规划点详情后，子规划点才会显示在地图上。</p><div v-if="selectedStop.children?.length" class="child-list"><button v-for="child in selectedStop.children" :key="child.id" class="child-row" :class="{ selected: selectedSubStopId === child.id }" @click="selectSubStop(child, selectedStop)"><span class="child-number">{{ child.sequence }}</span><span><b>{{ child.title }}</b><small>{{ stopDate(child) }} · {{ child.address || '地址已保存' }}</small></span><span>›</span></button></div><button class="add-place-cta" @click="openChildSearch(selectedStop)"><IonIcon :icon="searchOutline" /> 添加子规划点</button></div>
-            <div v-if="selectedTarget?.description_markdown" class="markdown" v-html="renderMarkdown(selectedTarget.description_markdown)"></div><p v-else class="muted">暂无地点说明。</p>
+            <div class="description-section"><div class="description-header"><h3>地点说明</h3><button v-if="!descriptionEditing" class="text-button" @click="beginEditDescription">编辑地点说明</button></div><template v-if="descriptionEditing"><textarea v-model="descriptionDraft" class="description-editor" rows="7" placeholder="补充这个地点的门票、开放时间、行程备注等信息"></textarea><div class="description-actions"><button class="text-button" @click="cancelEditDescription">取消</button><button class="primary-text-button" :disabled="descriptionSaving" @click="saveDescription">{{ descriptionSaving ? '保存中…' : '保存说明' }}</button></div></template><template v-else><div v-if="selectedTarget?.description_markdown" class="markdown" v-html="renderMarkdown(selectedTarget.description_markdown)"></div><p v-else class="muted">暂无地点说明，点击“编辑地点说明”添加。</p></template></div>
             <div class="links" v-if="selectedTarget?.links?.length"><a v-for="link in selectedTarget.links" :key="link.id || link.url" :href="safeURL(link.url)" target="_blank" rel="noopener noreferrer"><IonIcon :icon="linkOutline" /> {{ link.title }}</a></div>
             <div class="nav-actions"><IonButton size="small" @click="openNavigation('baidu')"><IonIcon slot="start" :icon="navigateOutline" /> 百度导航</IonButton><IonButton size="small" fill="outline" @click="openNavigation('amap')"><IonIcon slot="start" :icon="navigateOutline" /> 高德导航</IonButton></div>
           </aside>
