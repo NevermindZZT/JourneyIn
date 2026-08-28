@@ -82,25 +82,29 @@ func (s *Server) searchPOI(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
 		return
 	}
-	if body.Provider == "" {
-		body.Provider = journeymaps.ProviderBaidu
+	preferred := body.Provider
+	if preferred == "" && s.settingsStore != nil {
+		if value, ok, err := s.settingsStore.GetSetting(r.Context(), "map.poi.provider_priority"); err == nil && ok {
+			preferred = journeymaps.ProviderID(value)
+		}
+	}
+	if preferred == "" {
+		preferred = journeymaps.ProviderAMap
+	}
+	if preferred != journeymaps.ProviderAMap && preferred != journeymaps.ProviderBaidu {
+		writeError(w, http.StatusBadRequest, "invalid_provider", "provider must be amap or baidu", nil)
+		return
 	}
 	if s.mapService == nil {
 		writeMapError(w, journeymaps.ErrProviderUnavailable)
 		return
 	}
-	var result journeymaps.POISearchResult
-	var err error
-	if body.Category != "" {
-		result, err = s.mapService.SearchPOIWithTag(r.Context(), body.Provider, body.Query, body.Region, body.Category, body.Page, body.PageSize)
-	} else {
-		result, err = s.mapService.SearchPOI(r.Context(), body.Provider, body.Query, body.Region, body.Page, body.PageSize)
-	}
+	usedProvider, result, err := s.mapService.SearchPOIByPriority(r.Context(), preferred, body.Query, body.Region, body.Category, body.Page, body.PageSize)
 	if err != nil {
 		writeMapError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"provider": body.Provider, "items": result.Items, "total": result.Total, "page": result.Page, "page_size": result.PageSize})
+	writeJSON(w, http.StatusOK, map[string]any{"provider": usedProvider, "items": result.Items, "total": result.Total, "page": result.Page, "page_size": result.PageSize})
 }
 
 func (s *Server) reverseGeocode(w http.ResponseWriter, r *http.Request) {

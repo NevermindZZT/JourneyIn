@@ -70,9 +70,13 @@ func main() {
 	if strings.TrimSpace(baiduBrowserKey) == "" {
 		baiduBrowserKey = settingValue(ctx, database, "map.baidu.browser_key", "")
 	}
+	amapServerKey := os.Getenv("JOURNEYIN_AMAP_SERVER_KEY")
+	if strings.TrimSpace(amapServerKey) == "" {
+		amapServerKey = settingValue(ctx, database, "map.amap.server_key", "")
+	}
 	mapRegistry := journeymaps.NewRegistry(
 		journeymaps.NewBaiduProvider(journeymaps.BaiduConfig{ServerAK: baiduServerAK}),
-		journeymaps.NewAMapProvider("journeyin"),
+		journeymaps.NewAMapProviderWithConfig("journeyin", journeymaps.AMapConfig{ServerKey: amapServerKey}),
 	)
 	mapService := application.NewMapService(database, mapRegistry, intEnv("JOURNEYIN_MAP_MAX_CONCURRENCY", 2), intEnv("JOURNEYIN_MAP_DAILY_LIMIT", 0))
 	app.SetMapService(mapService)

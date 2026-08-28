@@ -82,6 +82,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/sync/push", s.syncPush)
 	mux.HandleFunc("GET /api/v1/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/v1/settings/map-keys", s.updateMapKeys)
+	mux.HandleFunc("PUT /api/v1/settings/poi", s.updatePOIPreferences)
+	mux.HandleFunc("DELETE /api/v1/settings/place-directory", s.clearPlaceDirectory)
 	mux.Handle("/", s.staticHandler())
 	return requestLogger(mux, s.logger)
 }

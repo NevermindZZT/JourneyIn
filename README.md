@@ -80,7 +80,7 @@ pwsh -File scripts/verify-local.ps1 -ServerUrl http://127.0.0.1:8080 -WebUrl htt
 
 1. 点击右上角 `+` 新建一个 draft Trip。
 2. 打开行程面板的“添加地点”。
-3. 输入地点关键词、城市和搜索类型，点击“搜索地点”；搜索只在提交时调用百度 POI API。对于甘加、白石崖等景区名称，可以选择“景点”类型；无 POI 结果时会降级到已缓存的地理编码结果。
+3. 输入地点关键词、城市和搜索类型，点击“搜索地点”；系统先查本地 7 天地点目录，再按“地点检索”设置选择高德或百度。高德景点搜索使用 POI 类型码；Provider 不可用时自动尝试另一家。无 POI 结果时会降级到已缓存的地理编码结果。对于甘加、白石崖等景区名称，可以选择“景点”类型。
 4. 从候选结果中明确选择一个地点并点击“添加”；Trip 会保存名称、地址、BD-09LL 坐标、CRS、来源和百度 UID。
 5. 打开规划点详情，可以继续关联多个子规划点；只有进入该主规划点详情时，子点 Marker 才会显示在地图上。
 6. 添加至少两个规划点后选择路线方式，点击“生成路线”。路线按相邻点分段请求，并将 geometry、距离和耗时保存到 Trip 的 `Day.legs[].snapshots[]`；地图标签开启时会在每段路线中点显示例如 `1.2 km · 10 分钟`。
@@ -97,6 +97,8 @@ POST /api/v1/trips/{trip_id}/days/{day_id}/stops
 POST /api/v1/trips/{trip_id}/days/{day_id}/stops/{stop_id}/children
 POST /api/v1/trips/{trip_id}/days/{day_id}/stops/{stop_id}/weather
 POST /api/v1/trips/{trip_id}/plan
+PUT  /api/v1/settings/poi
+DELETE /api/v1/settings/place-directory
 ~~~
 
 默认只在显式规划操作时调用地图服务；POI/geocode/route/weather 由 SQLite cache、同请求 singleflight、并发信号量和可选每日上限控制。配置：
@@ -104,7 +106,10 @@ POST /api/v1/trips/{trip_id}/plan
 ~~~powershell
 $env:JOURNEYIN_MAP_MAX_CONCURRENCY = '2'
 $env:JOURNEYIN_MAP_DAILY_LIMIT = '0' # 0 表示不在 JourneyIn 内设置上限
+$env:JOURNEYIN_AMAP_SERVER_KEY = '<amap-webservice-key>'
 ~~~
+
+高德服务端 Key 可通过环境变量或设置页保存。高德 POI 结果使用 GCJ-02，保存地点时会同时保留原始 CRS 和用于百度 BMap 显示的 BD-09LL 转换坐标。地点搜索结果进入本地目录后保留 7 天，设置页可以手动清除。
 
 ## MCP
 

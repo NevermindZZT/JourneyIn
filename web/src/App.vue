@@ -9,7 +9,7 @@ import { addOutline, closeOutline, cloudOfflineOutline, linkOutline, logInOutlin
 
 type Theme = 'system' | 'light' | 'dark'
 type Coord = { lat: number; lng: number }
-type LocationData = { preferred?: string; coordinates?: Record<string, Coord>; source?: string; provider_refs?: Record<string, unknown> }
+type LocationData = { preferred?: string; coordinates?: Record<string, Coord>; source?: string; provider_refs?: Record<string, unknown>; geocoded_at?: string; precision?: string; confidence?: number }
 type LinkData = { id?: string; title: string; url: string; kind?: string }
 type Stop = { id: string; sequence: number; kind?: string; title: string; address?: string; location?: LocationData; time_window?: { arrival?: string; departure?: string }; description_markdown?: string; links?: LinkData[]; weather?: Record<string, unknown>; children?: SubStop[] }
 type SubStop = { id: string; sequence: number; kind?: string; title: string; address?: string; location?: LocationData; time_window?: { arrival?: string; departure?: string }; description_markdown?: string; links?: LinkData[]; weather?: Record<string, unknown> }
@@ -18,7 +18,7 @@ type Day = { id: string; date: string; title?: string; notes_markdown?: string; 
 type TripDocument = { title: string; timezone: string; description_markdown?: string; links?: LinkData[]; days: Day[] }
 type TripSummary = { id: string; title: string; status: string; start_date: string; end_date: string; timezone: string; revision: number; days?: number; stops?: number }
 type Capabilities = { map_providers?: { baidu?: { browser_key_configured?: boolean; browser_key?: string }; amap?: { browser_key_configured?: boolean } }; mcp?: { http_endpoint?: string } }
-type KeySettings = { map?: { baidu?: { browser_key_configured?: boolean; server_key_configured?: boolean }; amap?: { js_key_configured?: boolean; server_key_configured?: boolean } } }
+type KeySettings = { map?: { baidu?: { browser_key_configured?: boolean; server_key_configured?: boolean }; amap?: { js_key_configured?: boolean; server_key_configured?: boolean } }; poi?: { provider_priority?: 'amap' | 'baidu'; local_directory_count?: number } }
 type PlaceCandidate = { id?: string; name: string; address?: string; location: Coord & { crs?: string }; provider?: string }
 type TravelMode = 'driving' | 'walking' | 'cycling' | 'transit'
 
@@ -66,6 +66,8 @@ const baiduBrowserKeyInput = ref('')
 const baiduServerKeyInput = ref('')
 const amapJSKeyInput = ref('')
 const amapServerKeyInput = ref('')
+const poiProviderPriority = ref<'amap' | 'baidu'>('amap')
+const localDirectoryCount = ref(0)
 const settingsSaving = ref(false)
 const panelOpen = ref(localStorage.getItem('journeyin.panelOpen') !== 'false')
 const tripView = ref<'list' | 'detail'>('list')
@@ -116,11 +118,12 @@ async function loadTrips() {
   loading.value = true
   error.value = ''
   try {
-    const [tripResponse, capabilityResponse] = await Promise.all([apiFetch('/api/v1/trips'), apiFetch('/api/v1/capabilities')])
+    const [tripResponse, capabilityResponse, settingsResponse] = await Promise.all([apiFetch('/api/v1/trips'), apiFetch('/api/v1/capabilities'), apiFetch('/api/v1/settings')])
     if (tripResponse.status === 401) return
     if (!tripResponse.ok) throw new Error('无法读取旅行规划')
     trips.value = ((await tripResponse.json()) as { items?: TripSummary[] }).items || []
     capabilities.value = capabilityResponse.ok ? await capabilityResponse.json() as Capabilities : null
+    if (settingsResponse.ok) { const settings = await settingsResponse.json() as KeySettings; settingsData.value = settings; poiProviderPriority.value = settings.poi?.provider_priority === 'baidu' ? 'baidu' : 'amap'; localDirectoryCount.value = settings.poi?.local_directory_count || 0 }
     const currentID = selected.value?.id
     const nextTrip = trips.value.find(trip => trip.id === currentID) || trips.value[0]
     if (nextTrip) { await loadDetail(nextTrip); if (!currentID) tripView.value = 'list' }
@@ -181,6 +184,12 @@ async function createTrip() {
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '新建旅行规划失败' } finally { actionLoading.value = false }
 }
 
+function gcj02ToBd09(point: Coord) {
+  const x = point.lng; const y = point.lat; const z = Math.sqrt(x * x + y * y) + 0.00002 * Math.sin(y * Math.PI * 3000 / 180); const theta = Math.atan2(y, x) + 0.000003 * Math.cos(x * Math.PI * 3000 / 180); return { lng: z * Math.cos(theta) + 0.0065, lat: z * Math.sin(theta) + 0.006, crs: 'bd09ll' }
+}
+function savedLocationFor(candidate: PlaceCandidate): LocationData {
+  const sourceCRS = candidate.location.crs || (candidate.provider === 'amap' ? 'gcj02' : 'bd09ll'); const coordinates: Record<string, Coord & { crs?: string }> = { [sourceCRS]: { lat: candidate.location.lat, lng: candidate.location.lng, crs: sourceCRS } }; if (sourceCRS === 'gcj02') coordinates.bd09ll = gcj02ToBd09(candidate.location); const provider = candidate.provider === 'amap' ? 'amap' : 'baidu'; return { preferred: coordinates.bd09ll ? 'bd09ll' : sourceCRS, coordinates, source: provider + '-place-search', provider_refs: candidate.id ? { [provider + '_uid']: candidate.id } : {}, geocoded_at: new Date().toISOString(), precision: 'poi' }
+}
 function pointFor(stop: Stop | SubStop): (Coord & { crs: string }) | null {
   const coordinates = stop.location?.coordinates
   if (!coordinates) return null
@@ -339,7 +348,7 @@ async function searchPlaces() {
   if (!searchQuery.value.trim()) { searchMessage.value = '请输入景点、酒店、餐厅或地址'; return }
   searchLoading.value = true; searchMessage.value = ''; searchResults.value = []
   try {
-    const response = await apiFetch('/api/v1/maps/pois/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: 'baidu', query: searchQuery.value.trim(), region: searchRegion.value.trim(), category: searchCategory.value === 'all' ? undefined : searchCategory.value, page: 1, page_size: 10 }) })
+    const response = await apiFetch('/api/v1/maps/pois/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: poiProviderPriority.value, query: searchQuery.value.trim(), region: searchRegion.value.trim(), category: searchCategory.value === 'all' ? undefined : searchCategory.value, page: 1, page_size: 10 }) })
     const payload = await response.json() as { items?: PlaceCandidate[]; error?: { message?: string } }
     if (!response.ok) throw new Error(payload.error?.message || '地点搜索失败')
     searchResults.value = payload.items || []
@@ -356,7 +365,7 @@ async function addPlaceToTrip(candidate: PlaceCandidate) {
   const parentID = searchParentStopId.value
   const endpoint = parentID ? '/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(day.id) + '/stops/' + encodeURIComponent(parentID) + '/children' : '/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(day.id) + '/stops'
   try {
-    const response = await apiFetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision }, body: JSON.stringify({ stop: { title: candidate.name, address: candidate.address, location: { preferred: 'bd09ll', coordinates: { bd09ll: { lat: location.lat, lng: location.lng, crs: 'bd09ll' } }, source: 'baidu-place-search', provider_refs: candidate.id ? { baidu_uid: candidate.id } : {}, geocoded_at: new Date().toISOString(), precision: 'poi' } } }) })
+    const response = await apiFetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision }, body: JSON.stringify({ stop: { title: candidate.name, address: candidate.address, location: savedLocationFor(candidate) } }) })
     const payload = await response.json() as { document?: TripDocument; revision?: number; stops?: number; days?: number; error?: { message?: string } }
     if (!response.ok) throw new Error(payload.error?.message || '添加规划点失败')
     applyTripPayload(payload)
@@ -434,6 +443,8 @@ async function openSettings() {
     const response = await apiFetch('/api/v1/settings')
     if (!response.ok) throw new Error('无法读取设置')
     settingsData.value = await response.json() as KeySettings
+    poiProviderPriority.value = settingsData.value.poi?.provider_priority === 'baidu' ? 'baidu' : 'amap'
+    localDirectoryCount.value = settingsData.value.poi?.local_directory_count || 0
     baiduBrowserKeyInput.value = ''
     baiduServerKeyInput.value = ''
     amapJSKeyInput.value = ''
@@ -441,6 +452,23 @@ async function openSettings() {
   } catch (cause) { settingsMessage.value = cause instanceof Error ? cause.message : '无法读取设置' }
 }
 
+async function savePOIPreferences() {
+  try {
+    const response = await apiFetch('/api/v1/settings/poi', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider_priority: poiProviderPriority.value }) })
+    const payload = await response.json() as { error?: { message?: string } }
+    if (!response.ok) throw new Error(payload.error?.message || '保存地点检索优先级失败')
+    settingsMessage.value = '地点检索优先级已保存：' + (poiProviderPriority.value === 'amap' ? '高德优先' : '百度优先')
+  } catch (cause) { settingsMessage.value = cause instanceof Error ? cause.message : '保存地点检索优先级失败' }
+}
+async function clearLocalDirectory() {
+  if (!window.confirm('确认清除本地地点检索记录吗？已保存到 Trip 的规划点不会被删除。')) return
+  try {
+    const response = await apiFetch('/api/v1/settings/place-directory', { method: 'DELETE' })
+    const payload = await response.json() as { error?: { message?: string } }
+    if (!response.ok) throw new Error(payload.error?.message || '清除本地地点记录失败')
+    localDirectoryCount.value = 0; settingsMessage.value = '本地地点检索记录已清除；Trip 中已保存的规划点不受影响。'
+  } catch (cause) { settingsMessage.value = cause instanceof Error ? cause.message : '清除本地地点记录失败' }
+}
 async function saveMapKeys() {
   settingsSaving.value = true
   try {
@@ -549,9 +577,9 @@ onUnmounted(() => mediaQuery?.removeEventListener?.('change', systemThemeChanged
                   <label>搜索类型<select v-model="searchCategory"><option value="all">全部地点</option><option value="旅游景点">景点</option><option value="酒店">酒店</option><option value="餐饮">餐饮</option></select></label>
                   <IonButton type="submit" expand="block" :disabled="searchLoading"><IonIcon slot="start" :icon="searchOutline" /> {{ searchLoading ? '搜索中…' : '搜索地点' }}</IonButton>
                 </form>
-                <p class="search-help">只在点击搜索时调用百度 POI 接口。选择结果后保存名称、地址、坐标、CRS 和百度 UID；景点类型会使用旅游景点分类，无 POI 结果时降级到缓存地理编码。</p>
+                <p class="search-help">先查询本地 7 天地点目录，未命中后调用当前优先 Provider（高德或百度）；选择结果后保存名称、地址、坐标、CRS 和 Provider UID。景点类型会使用分类检索，Provider 不可用时自动回退另一家。</p>
                 <p v-if="searchMessage" class="inline-message">{{ searchMessage }}</p>
-                <div class="search-results"><article v-for="(result, index) in searchResults" :key="result.id || result.name + index" class="search-result"><div><h4>{{ result.name }}</h4><p>{{ result.address || '地址待补充' }}</p><small v-if="result.location">BD-09LL · {{ result.location.lat.toFixed(6) }}, {{ result.location.lng.toFixed(6) }}</small></div><IonButton size="small" @click="addPlaceToTrip(result)">{{ searchParentStopId ? '添加子点' : '添加' }}</IonButton></article></div>
+                <div class="search-results"><article v-for="(result, index) in searchResults" :key="result.id || result.name + index" class="search-result"><div><h4>{{ result.name }}</h4><p>{{ result.address || '地址待补充' }}</p><small v-if="result.location">{{ result.location.crs || '坐标' }} · {{ result.location.lat.toFixed(6) }}, {{ result.location.lng.toFixed(6) }}</small></div><IonButton size="small" @click="addPlaceToTrip(result)">{{ searchParentStopId ? '添加子点' : '添加' }}</IonButton></article></div>
               </template>
             </div>
           </aside>
@@ -576,7 +604,7 @@ onUnmounted(() => mediaQuery?.removeEventListener?.('change', systemThemeChanged
       </IonContent>
       <div v-if="descriptionFullscreen && descriptionEditing" class="fullscreen-editor-backdrop"><section class="fullscreen-editor" role="dialog" aria-modal="true" aria-labelledby="fullscreen-description-title"><header><h2 id="fullscreen-description-title">编辑地点说明</h2><button class="modal-close" aria-label="退出全屏编辑" @click="closeDescriptionFullscreen">×</button></header><textarea v-model="descriptionDraft" class="fullscreen-description-editor" autofocus placeholder="补充门票、开放时间、行程备注等信息"></textarea><div class="description-actions"><button class="text-button" @click="cancelEditDescription">取消</button><button class="primary-text-button" :disabled="descriptionSaving" @click="saveDescription">{{ descriptionSaving ? '保存中…' : '保存说明' }}</button></div></section></div>
       <div v-if="newTripOpen" class="modal-backdrop" @click.self="newTripOpen = false"><section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="new-trip-title"><button class="modal-close" aria-label="关闭" @click="newTripOpen = false">×</button><p class="eyebrow">NEW JOURNEY</p><h2 id="new-trip-title">新建旅行规划</h2><form @submit.prevent="createTrip"><label>规划名称<input v-model="newTitle" maxlength="120" required /></label><div class="form-grid"><label>开始日期<input v-model="newStartDate" type="date" required /></label><label>结束日期<input v-model="newEndDate" type="date" required /></label></div><label>时区<input v-model="newTimezone" placeholder="Asia/Shanghai" required /></label><label>总体说明（Markdown）<textarea v-model="newDescription" rows="5" placeholder="写下这次旅行的总体说明"></textarea></label><div class="modal-actions"><button type="button" @click="newTripOpen = false">取消</button><button class="primary" type="submit" :disabled="actionLoading">创建草稿</button></div></form></section></div>
-      <div v-if="settingsOpen" class="modal-backdrop" @click.self="settingsOpen = false"><section class="modal-panel settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title"><button class="modal-close" aria-label="关闭" @click="settingsOpen = false">×</button><p class="eyebrow">JOURNEYIN SETTINGS</p><h2 id="settings-title">设置</h2><p class="settings-intro">当前主题：{{ themeLabel }}。Key 配置保存到 SQLite，服务端 Key 不会回显。</p><section class="settings-section"><h3>外观</h3><p class="settings-label">主题：{{ themeLabel }}</p><div class="theme-options"><button type="button" :class="{ selected: theme === 'system' }" @click="setTheme('system')">跟随系统</button><button type="button" :class="{ selected: theme === 'light' }" @click="setTheme('light')">浅色</button><button type="button" :class="{ selected: theme === 'dark' }" @click="setTheme('dark')">深色</button></div></section><section class="settings-section"><h3>服务端连接</h3><label>当前服务地址<input v-model="serverURL" readonly /></label><label>REST/MCP 访问令牌<input v-model="authTokenInput" type="password" placeholder="Docker 开启认证时填写" autocomplete="off" /></label><div class="modal-actions"><button type="button" @click="logout">清除令牌</button><button type="button" class="primary" @click="saveAuth">保存令牌</button></div><p v-if="settingsMessage" class="settings-message">{{ settingsMessage }}</p></section><section class="settings-section"><h3>百度地图</h3><p class="key-status">浏览器端 Key：<strong>{{ keyConfigured ? '已配置' : '未配置' }}</strong> · 服务端 Key：<strong>{{ settingsData?.map?.baidu?.server_key_configured ? '已配置' : '未配置' }}</strong></p><label>百度浏览器端 Key<input v-model="baiduBrowserKeyInput" type="password" :placeholder="settingsData?.map?.baidu?.browser_key_configured ? '已配置，输入新 Key 可替换' : '用于 JSAPI 4.0/BMap 网页地图'" autocomplete="off" /></label><label>百度服务端 Key<input v-model="baiduServerKeyInput" type="password" placeholder="已配置时输入新 Key 可替换；留空保持当前值" autocomplete="off" /></label><p class="key-help">浏览器端 Key 用于地图底图；服务端 Key 用于 POI 搜索、地理编码、路线和天气。请确认当前访问 host 在百度控制台白名单内。</p><a href="https://lbsyun.baidu.com/apiconsole/key" target="_blank" rel="noopener noreferrer">申请/管理百度地图 Key ↗</a></section><section class="settings-section"><h3>高德地图</h3><p class="key-status">JS Key：<strong>{{ settingsData?.map?.amap?.js_key_configured ? '已配置' : '未配置' }}</strong> · 服务端 Key：<strong>{{ settingsData?.map?.amap?.server_key_configured ? '已配置' : '未配置' }}</strong></p><label>高德 JS Key<input v-model="amapJSKeyInput" type="password" placeholder="用于高德 Web 地图" autocomplete="off" /></label><label>高德服务端 Key<input v-model="amapServerKeyInput" type="password" placeholder="已配置时输入新 Key 可替换；留空保持当前值" autocomplete="off" /></label><a href="https://console.amap.com/dev/key/app" target="_blank" rel="noopener noreferrer">申请/管理高德 Key ↗</a><p class="key-help">保存后，规划点会优先使用已经保存的坐标，不会因为重新绘制地图重复查询。</p><div class="modal-actions"><button type="button" class="primary" :disabled="settingsSaving" @click="saveMapKeys">{{ settingsSaving ? '保存中…' : '保存地图 Key 到数据库' }}</button></div></section><section class="settings-section"><h3>MCP</h3><p>MCP 地址：{{ capabilities?.mcp?.http_endpoint || '/mcp' }}</p><p class="key-help">Docker 远程部署时设置 JOURNEYIN_MCP_TOKEN；本地 localhost 调试可不设置。</p></section></section></div>
+      <div v-if="settingsOpen" class="modal-backdrop" @click.self="settingsOpen = false"><section class="modal-panel settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title"><button class="modal-close" aria-label="关闭" @click="settingsOpen = false">×</button><p class="eyebrow">JOURNEYIN SETTINGS</p><h2 id="settings-title">设置</h2><p class="settings-intro">当前主题：{{ themeLabel }}。Key 配置保存到 SQLite，服务端 Key 不会回显。</p><section class="settings-section"><h3>外观</h3><p class="settings-label">主题：{{ themeLabel }}</p><div class="theme-options"><button type="button" :class="{ selected: theme === 'system' }" @click="setTheme('system')">跟随系统</button><button type="button" :class="{ selected: theme === 'light' }" @click="setTheme('light')">浅色</button><button type="button" :class="{ selected: theme === 'dark' }" @click="setTheme('dark')">深色</button></div></section><section class="settings-section"><h3>服务端连接</h3><label>当前服务地址<input v-model="serverURL" readonly /></label><label>REST/MCP 访问令牌<input v-model="authTokenInput" type="password" placeholder="Docker 开启认证时填写" autocomplete="off" /></label><div class="modal-actions"><button type="button" @click="logout">清除令牌</button><button type="button" class="primary" @click="saveAuth">保存令牌</button></div><p v-if="settingsMessage" class="settings-message">{{ settingsMessage }}</p></section><section class="settings-section"><h3>百度地图</h3><p class="key-status">浏览器端 Key：<strong>{{ keyConfigured ? '已配置' : '未配置' }}</strong> · 服务端 Key：<strong>{{ settingsData?.map?.baidu?.server_key_configured ? '已配置' : '未配置' }}</strong></p><label>百度浏览器端 Key<input v-model="baiduBrowserKeyInput" type="password" :placeholder="settingsData?.map?.baidu?.browser_key_configured ? '已配置，输入新 Key 可替换' : '用于 JSAPI 4.0/BMap 网页地图'" autocomplete="off" /></label><label>百度服务端 Key<input v-model="baiduServerKeyInput" type="password" placeholder="已配置时输入新 Key 可替换；留空保持当前值" autocomplete="off" /></label><p class="key-help">浏览器端 Key 用于地图底图；服务端 Key 用于 POI 搜索、地理编码、路线和天气。请确认当前访问 host 在百度控制台白名单内。</p><a href="https://lbsyun.baidu.com/apiconsole/key" target="_blank" rel="noopener noreferrer">申请/管理百度地图 Key ↗</a></section><section class="settings-section"><h3>高德地图</h3><p class="key-status">JS Key：<strong>{{ settingsData?.map?.amap?.js_key_configured ? '已配置' : '未配置' }}</strong> · 服务端 Key：<strong>{{ settingsData?.map?.amap?.server_key_configured ? '已配置' : '未配置' }}</strong></p><label>高德 JS Key<input v-model="amapJSKeyInput" type="password" placeholder="用于高德 Web 地图" autocomplete="off" /></label><label>高德服务端 Key<input v-model="amapServerKeyInput" type="password" placeholder="已配置时输入新 Key 可替换；留空保持当前值" autocomplete="off" /></label><a href="https://console.amap.com/dev/key/app" target="_blank" rel="noopener noreferrer">申请/管理高德 Key ↗</a><p class="key-help">保存后，规划点会优先使用已经保存的坐标，不会因为重新绘制地图重复查询。</p><div class="modal-actions"><button type="button" class="primary" :disabled="settingsSaving" @click="saveMapKeys">{{ settingsSaving ? '保存中…' : '保存地图 Key 到数据库' }}</button></div></section><section class="settings-section"><h3>地点检索</h3><label>优先 Provider<select v-model="poiProviderPriority"><option value="amap">高德优先</option><option value="baidu">百度优先</option></select></label><p class="key-help">当前策略会先查询本地地点目录；未命中后使用所选 Provider，Provider 不可用时自动尝试另一家。新搜索结果只保留 7 天。</p><p class="key-status">本地地点记录：<strong>{{ localDirectoryCount }}</strong> 条</p><div class="modal-actions"><button type="button" @click="savePOIPreferences">保存检索优先级</button><button type="button" @click="clearLocalDirectory">清除本地记录</button></div></section><section class="settings-section"><h3>MCP</h3><p>MCP 地址：{{ capabilities?.mcp?.http_endpoint || '/mcp' }}</p><p class="key-help">Docker 远程部署时设置 JOURNEYIN_MCP_TOKEN；本地 localhost 调试可不设置。</p></section></section></div>
       <div v-if="authOpen" class="modal-backdrop" @click.self="authOpen = false"><section class="modal-panel auth-panel" role="dialog" aria-modal="true" aria-labelledby="auth-title"><IonIcon class="auth-icon" :icon="logInOutline" /><h2 id="auth-title">连接到 JourneyIn</h2><p>当前服务启用了访问认证，请输入服务端访问令牌。令牌只保存在本机浏览器，不会写入旅行规划 JSON。</p><label>访问令牌<input v-model="authTokenInput" type="password" autofocus autocomplete="off" /></label><div class="modal-actions"><button type="button" @click="authOpen = false">稍后</button><button type="button" class="primary" @click="saveAuth">登录并重试</button></div></section></div>
     </IonPage>
   </IonApp>

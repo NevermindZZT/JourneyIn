@@ -47,10 +47,30 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
 		return
 	}
+	if s.mapRegistry != nil {
+		if provider, ok := s.mapRegistry.Get(journeymaps.ProviderAMap); ok {
+			if amap, ok := provider.(*journeymaps.AMapProvider); ok {
+				amapServerOK = amapServerOK || amap.ServerKeyConfigured()
+			}
+		}
+	}
+	priority, priorityOK, err := s.settingsStore.GetSetting(r.Context(), "map.poi.provider_priority")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
+		return
+	}
+	if !priorityOK || (priority != string(journeymaps.ProviderAMap) && priority != string(journeymaps.ProviderBaidu)) {
+		priority = string(journeymaps.ProviderAMap)
+	}
+	directoryCount, err := s.settingsStore.PlaceDirectoryCount(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"map": map[string]any{
 		"baidu": map[string]any{"browser_key_configured": browserOK, "server_key_configured": serverOK},
 		"amap":  map[string]any{"js_key_configured": amapJSOK, "server_key_configured": amapServerOK},
-	}})
+	}, "poi": map[string]any{"provider_priority": priority, "local_directory_count": directoryCount}})
 }
 
 func (s *Server) updateMapKeys(w http.ResponseWriter, r *http.Request) {
@@ -99,5 +119,49 @@ func (s *Server) updateMapKeys(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	if body.AMapServerKey != nil && s.mapRegistry != nil {
+		if provider, ok := s.mapRegistry.Get(journeymaps.ProviderAMap); ok {
+			if amap, ok := provider.(*journeymaps.AMapProvider); ok {
+				amap.SetServerKey(strings.TrimSpace(*body.AMapServerKey))
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"saved": true})
+}
+
+type poiPreferencesBody struct {
+	ProviderPriority string `json:"provider_priority"`
+}
+
+func (s *Server) updatePOIPreferences(w http.ResponseWriter, r *http.Request) {
+	if s.settingsStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "settings_unavailable", "settings store is not configured", nil)
+		return
+	}
+	var body poiPreferencesBody
+	if err := decodeBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
+		return
+	}
+	priority := strings.TrimSpace(body.ProviderPriority)
+	if priority != string(journeymaps.ProviderAMap) && priority != string(journeymaps.ProviderBaidu) {
+		writeError(w, http.StatusBadRequest, "invalid_provider_priority", "provider_priority must be amap or baidu", nil)
+		return
+	}
+	if err := s.settingsStore.SetSetting(r.Context(), "map.poi.provider_priority", priority, false); err != nil {
+		writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"saved": true, "provider_priority": priority})
+}
+func (s *Server) clearPlaceDirectory(w http.ResponseWriter, r *http.Request) {
+	if s.settingsStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "settings_unavailable", "settings store is not configured", nil)
+		return
+	}
+	if err := s.settingsStore.ClearPlaceDirectory(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"cleared": true})
 }

@@ -125,7 +125,7 @@ $env:JOURNEYIN_BAIDU_SERVER_AK = "<server-ak>"
 $env:JOURNEYIN_BAIDU_BROWSER_AK = "<browser-ak>"
 ~~~
 
-浏览器端 Key 必须在百度控制台配置正确的域名白名单；服务端 Key 可以通过环境变量或设置页写入 SQLite。没有 Key 时页面会显示降级模式，路线/天气请求返回 provider_unavailable，不会生成假路线。
+浏览器端 Key 必须在百度控制台配置正确的域名白名单；百度和高德服务端 Key 可以通过环境变量或设置页写入 SQLite。建议配置 `JOURNEYIN_AMAP_SERVER_KEY` 后，在设置的“地点检索”中选择高德优先；Provider 不可用时会自动回退另一家。没有可用服务端 Key 时页面会显示降级模式，不会生成假路线。
 
 官方百度 JSAPI 4.0 / legacy BMapGL 最小 smoke test：
 

@@ -21,7 +21,7 @@ import (
 
 type httpPlanningProvider struct{}
 
-func (p *httpPlanningProvider) ID() journeymaps.ProviderID { return journeymaps.ProviderID("fake") }
+func (p *httpPlanningProvider) ID() journeymaps.ProviderID { return journeymaps.ProviderAMap }
 func (p *httpPlanningProvider) Geocode(context.Context, string, string) ([]journeymaps.PlaceCandidate, error) {
 	return nil, nil
 }
@@ -92,7 +92,7 @@ func TestPlanningHTTPWorkflow(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := created["id"].(string)
-	searchBody := strings.NewReader(`{"provider":"fake","query":"地点","region":"测试"}`)
+	searchBody := strings.NewReader(`{"provider":"amap","query":"地点","region":"测试"}`)
 	search, err := http.Post(server.URL+"/api/v1/maps/pois/search", "application/json", searchBody)
 	if err != nil {
 		t.Fatal(err)
@@ -124,7 +124,7 @@ func TestPlanningHTTPWorkflow(t *testing.T) {
 		}
 		_ = resp.Body.Close()
 	}
-	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/trips/"+id+"/plan", strings.NewReader(`{"provider":"fake","mode":"walking"}`))
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/trips/"+id+"/plan", strings.NewReader(`{"provider":"amap","mode":"walking"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,4 +151,59 @@ func TestPlanningHTTPWorkflow(t *testing.T) {
 	if len(result.Document.Days) != 1 || len(result.Document.Days[0].Legs) != 1 {
 		t.Fatalf("unexpected planned document: %+v", result)
 	}
+}
+
+func TestPOIPreferencesAndDirectoryClear(t *testing.T) {
+	server := testPlanningServer(t)
+	defer server.Close()
+	search, err := http.Post(server.URL+"/api/v1/maps/pois/search", "application/json", strings.NewReader(`{"provider":"amap","query":"地点"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if search.StatusCode != http.StatusOK {
+		t.Fatalf("search status %d", search.StatusCode)
+	}
+	_ = search.Body.Close()
+	settingsResponse, err := http.Get(server.URL + "/api/v1/settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer settingsResponse.Body.Close()
+	var settings struct {
+		POI struct {
+			ProviderPriority    string `json:"provider_priority"`
+			LocalDirectoryCount int    `json:"local_directory_count"`
+		} `json:"poi"`
+	}
+	if err := json.NewDecoder(settingsResponse.Body).Decode(&settings); err != nil {
+		t.Fatal(err)
+	}
+	if settings.POI.LocalDirectoryCount != 1 {
+		t.Fatalf("directory count=%d", settings.POI.LocalDirectoryCount)
+	}
+	preference, err := http.NewRequest(http.MethodPut, server.URL+"/api/v1/settings/poi", strings.NewReader(`{"provider_priority":"baidu"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	preference.Header.Set("Content-Type", "application/json")
+	preferenceResponse, err := http.DefaultClient.Do(preference)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preferenceResponse.StatusCode != http.StatusOK {
+		t.Fatalf("preference status %d", preferenceResponse.StatusCode)
+	}
+	_ = preferenceResponse.Body.Close()
+	clear, err := http.NewRequest(http.MethodDelete, server.URL+"/api/v1/settings/place-directory", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clearResponse, err := http.DefaultClient.Do(clear)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clearResponse.StatusCode != http.StatusOK {
+		t.Fatalf("clear status %d", clearResponse.StatusCode)
+	}
+	_ = clearResponse.Body.Close()
 }

@@ -47,6 +47,63 @@ func (s *MapService) provider(id journeymaps.ProviderID) (journeymaps.MapProvide
 	return provider, nil
 }
 
+func (s *MapService) SearchPOIByPriority(ctx context.Context, preferred journeymaps.ProviderID, query, region, tag string, page, pageSize int) (journeymaps.ProviderID, journeymaps.POISearchResult, error) {
+	query = strings.TrimSpace(query)
+	region = strings.TrimSpace(region)
+	tag = strings.TrimSpace(tag)
+	if s.store != nil {
+		_ = s.store.PurgeExpiredPlaceDirectory(ctx, time.Now().UTC())
+		records, err := s.store.FindPlaceDirectory(ctx, query, region, tag, 20)
+		if err != nil {
+			return "", journeymaps.POISearchResult{}, err
+		}
+		if len(records) > 0 {
+			items := make([]journeymaps.PlaceCandidate, 0, len(records))
+			for _, record := range records {
+				var point journeymaps.GeoPoint
+				if json.Unmarshal(record.LocationJSON, &point) != nil {
+					continue
+				}
+				items = append(items, journeymaps.PlaceCandidate{ID: record.ProviderID, Name: record.Name, Address: record.Address, Location: point, Provider: journeymaps.ProviderID(record.Provider)})
+			}
+			if len(items) > 0 {
+				return journeymaps.ProviderID(records[0].Provider), journeymaps.POISearchResult{Items: items, Total: len(items), Page: page, PageSize: pageSize}, nil
+			}
+		}
+	}
+	providers := []journeymaps.ProviderID{journeymaps.ProviderAMap, journeymaps.ProviderBaidu}
+	if preferred == journeymaps.ProviderBaidu {
+		providers = []journeymaps.ProviderID{journeymaps.ProviderBaidu, journeymaps.ProviderAMap}
+	}
+	var firstErr error
+	var emptyProvider journeymaps.ProviderID
+	var emptyResult *journeymaps.POISearchResult
+	for _, providerID := range providers {
+		result, err := s.SearchPOIWithTag(ctx, providerID, query, region, tag, page, pageSize)
+		if err == nil {
+			if len(result.Items) > 0 {
+				return providerID, result, nil
+			}
+			if emptyResult == nil {
+				copyResult := result
+				emptyResult = &copyResult
+				emptyProvider = providerID
+			}
+			continue
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	if emptyResult != nil {
+		return emptyProvider, *emptyResult, nil
+	}
+	if firstErr == nil {
+		firstErr = journeymaps.ErrProviderUnavailable
+	}
+	return "", journeymaps.POISearchResult{}, firstErr
+}
+
 func (s *MapService) SearchPOI(ctx context.Context, providerID journeymaps.ProviderID, query, region string, page, pageSize int) (journeymaps.POISearchResult, error) {
 	return s.SearchPOIWithTag(ctx, providerID, query, region, "", page, pageSize)
 }
@@ -106,7 +163,31 @@ func (s *MapService) SearchPOIWithTag(ctx context.Context, providerID journeymap
 	if err := json.Unmarshal(data, &result); err != nil {
 		return result, err
 	}
+	if s.store != nil {
+		s.persistPlaceDirectory(ctx, result, region, tag)
+	}
 	return result, nil
+}
+
+func (s *MapService) persistPlaceDirectory(ctx context.Context, result journeymaps.POISearchResult, region, category string) {
+	now := time.Now().UTC()
+	for _, item := range result.Items {
+		if item.Name == "" || item.Location.CRS == "" {
+			continue
+		}
+		location, err := json.Marshal(item.Location)
+		if err != nil {
+			continue
+		}
+		providerID := item.ID
+		if providerID == "" {
+			providerID = mapCacheKey(struct {
+				Name, Address string
+				Location      journeymaps.GeoPoint
+			}{item.Name, item.Address, item.Location})
+		}
+		_ = s.store.UpsertPlaceDirectory(ctx, store.PlaceDirectoryRecord{Provider: string(item.Provider), ProviderID: providerID, Name: item.Name, Address: item.Address, Region: region, Category: category, LocationJSON: location, CreatedAt: now, LastSeenAt: now, ExpiresAt: now.Add(7 * 24 * time.Hour)})
+	}
 }
 
 func (s *MapService) Geocode(ctx context.Context, providerID journeymaps.ProviderID, address, city string) ([]journeymaps.PlaceCandidate, error) {
