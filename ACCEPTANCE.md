@@ -153,7 +153,7 @@ http://127.0.0.1:8080/bmap-smoke.html
 
 页面会输出 sdk、Map、Point、WebGL 和 tiles 状态。若 sdk 为 undefined 或 Map 不可用，应优先检查浏览器端 AK、当前 host 白名单（localhost 与 127.0.0.1 需分别配置）、JSAPI WebGL 服务和浏览器控制台错误。
 
-高德导航无需配置路线服务 Key 即可验证 HTTPS URI/native scheme；高德路线、POI 和天气 Provider 后续按官方账号能力补充。
+规划点详情中的百度/高德导航按钮必须可用：PC 浏览器打开 HTTPS 导航页，Android/iOS 优先尝试对应 App scheme，未安装 App 时回退 HTTPS；BD09LL/WGS84 坐标由 Provider 边界转换为高德所需的 GCJ-02。高德路线、POI 和天气 Provider 后续按官方账号能力补充。
 
 设置页 Key 持久化验收：
 

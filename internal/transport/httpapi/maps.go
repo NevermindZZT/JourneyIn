@@ -209,7 +209,13 @@ func (s *Server) navigation(w http.ResponseWriter, r *http.Request) {
 		writeMapError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"provider": body.Provider, "url": raw})
+	response := map[string]any{"provider": body.Provider, "url": raw}
+	if body.Platform == journeymaps.PlatformAndroid || body.Platform == journeymaps.PlatformIOS {
+		if fallback, fallbackErr := provider.NavigationURL(body.Target, body.Mode, journeymaps.PlatformWeb); fallbackErr == nil && journeymaps.ValidateNavigationURL(fallback) == nil {
+			response["fallback_url"] = fallback
+		}
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func decodeBody(r *http.Request, value any) error {

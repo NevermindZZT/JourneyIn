@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -197,12 +198,61 @@ func normalizeAMapTypes(tag string) string {
 	}
 }
 
+func bd09llToGCJ02(point GeoPoint) GeoPoint {
+	const xPi = math.Pi * 3000.0 / 180.0
+	x := point.Lng - 0.0065
+	y := point.Lat - 0.006
+	z := math.Sqrt(x*x+y*y) - 0.00002*math.Sin(y*xPi)
+	theta := math.Atan2(y, x) - 0.000003*math.Cos(x*xPi)
+	return GeoPoint{Lat: z * math.Sin(theta), Lng: z * math.Cos(theta), CRS: CRSGCJ02}
+}
+
+func wgs84ToGCJ02(point GeoPoint) GeoPoint {
+	if point.Lng < 72.004 || point.Lng > 137.8347 || point.Lat < 0.8293 || point.Lat > 55.8271 {
+		return GeoPoint{Lat: point.Lat, Lng: point.Lng, CRS: CRSGCJ02}
+	}
+	const a = 6378245.0
+	const ee = 0.00669342162296594323
+	dLat := transformLatitude(point.Lng-105.0, point.Lat-35.0)
+	dLng := transformLongitude(point.Lng-105.0, point.Lat-35.0)
+	radLat := point.Lat / 180.0 * math.Pi
+	magic := math.Sin(radLat)
+	magic = 1 - ee*magic*magic
+	sqrtMagic := math.Sqrt(magic)
+	dLat = dLat * 180.0 / ((a * (1 - ee)) / (magic * sqrtMagic) * math.Pi)
+	dLng = dLng * 180.0 / (a / sqrtMagic * math.Cos(radLat) * math.Pi)
+	return GeoPoint{Lat: point.Lat + dLat, Lng: point.Lng + dLng, CRS: CRSGCJ02}
+}
+
+func transformLatitude(x, y float64) float64 {
+	ret := -100.0 + 2.0*x + 3.0*y + 0.2*y*y + 0.1*x*y + 0.2*math.Sqrt(math.Abs(x))
+	ret += (20.0*math.Sin(6.0*x*math.Pi) + 20.0*math.Sin(2.0*x*math.Pi)) * 2.0 / 3.0
+	ret += (20.0*math.Sin(y*math.Pi) + 40.0*math.Sin(y/3.0*math.Pi)) * 2.0 / 3.0
+	ret += (160.0*math.Sin(y/12.0*math.Pi) + 320.0*math.Sin(y*math.Pi/30.0)) * 2.0 / 3.0
+	return ret
+}
+
+func transformLongitude(x, y float64) float64 {
+	ret := 300.0 + x + 2.0*y + 0.1*x*x + 0.1*x*y + 0.1*math.Sqrt(math.Abs(x))
+	ret += (20.0*math.Sin(6.0*x*math.Pi) + 20.0*math.Sin(2.0*x*math.Pi)) * 2.0 / 3.0
+	ret += (20.0*math.Sin(x*math.Pi) + 40.0*math.Sin(x/3.0*math.Pi)) * 2.0 / 3.0
+	ret += (150.0*math.Sin(x/12.0*math.Pi) + 300.0*math.Sin(x/30.0*math.Pi)) * 2.0 / 3.0
+	return ret
+}
+
 func (p *AMapProvider) NavigationURL(target NavTarget, mode TravelMode, platform Platform) (string, error) {
 	if target.Name == "" {
 		return "", fmt.Errorf("navigation target name is required")
 	}
-	if target.Location.CRS != CRSGCJ02 {
-		return "", fmt.Errorf("amap navigation requires gcj02 target coordinates")
+	location := target.Location
+	switch location.CRS {
+	case CRSBD09LL:
+		location = bd09llToGCJ02(location)
+	case CRSWGS84:
+		location = wgs84ToGCJ02(location)
+	}
+	if location.CRS != CRSGCJ02 {
+		return "", fmt.Errorf("amap navigation requires gcj02, bd09ll, or wgs84 target coordinates")
 	}
 	modeValue := "car"
 	switch mode {
@@ -214,7 +264,7 @@ func (p *AMapProvider) NavigationURL(target NavTarget, mode TravelMode, platform
 		modeValue = "bus"
 	}
 	query := url.Values{}
-	query.Set("to", fmt.Sprintf("%.8f,%.8f,%s", target.Location.Lng, target.Location.Lat, target.Name))
+	query.Set("to", fmt.Sprintf("%.8f,%.8f,%s", location.Lng, location.Lat, target.Name))
 	query.Set("mode", modeValue)
 	query.Set("coordinate", "gaode")
 	query.Set("callnative", "0")
@@ -225,8 +275,8 @@ func (p *AMapProvider) NavigationURL(target NavTarget, mode TravelMode, platform
 		query.Del("coordinate")
 		query.Del("callnative")
 		query.Set("sourceApplication", p.SourceApplication)
-		query.Set("dlat", fmt.Sprintf("%.8f", target.Location.Lat))
-		query.Set("dlon", fmt.Sprintf("%.8f", target.Location.Lng))
+		query.Set("dlat", fmt.Sprintf("%.8f", location.Lat))
+		query.Set("dlon", fmt.Sprintf("%.8f", location.Lng))
 		query.Set("dname", target.Name)
 		query.Set("dev", "0")
 		tValue := "0"

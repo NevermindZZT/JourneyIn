@@ -6,7 +6,7 @@ COPY web ./
 RUN pnpm build
 
 FROM golang:1.26-alpine AS go-build
-ARG VERSION=0.2.2
+ARG VERSION=0.2.3
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 WORKDIR /src
@@ -20,7 +20,7 @@ FROM alpine:3.22 AS runtime-data
 RUN install -d -o 65532 -g 65532 /data
 
 FROM gcr.io/distroless/static-debian12:nonroot
-ARG VERSION=0.2.2
+ARG VERSION=0.2.3
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 LABEL org.opencontainers.image.title=JourneyIn \

@@ -23,7 +23,7 @@ type KeySettings = { map?: { baidu?: { browser_key_configured?: boolean; server_
 type PlaceCandidate = { id?: string; name: string; address?: string; location: Coord & { crs?: string }; provider?: string }
 type TravelMode = 'driving' | 'walking' | 'cycling' | 'transit'
 
-const APP_VERSION = '0.2.2'
+const APP_VERSION = '0.2.3'
 const APP_SLOGAN = '在地图上规划每一段旅程'
 const GITHUB_URL = 'https://github.com/NevermindZZT/JourneyIn'
 const shareMode = window.location.pathname.startsWith('/s/') && !window.location.pathname.endsWith('.json')
@@ -272,6 +272,49 @@ function pointFor(stop: Stop | SubStop): (Coord & { crs: string }) | null {
   const point = preferred ? coordinates[preferred] : null
   if (!point || !Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return null
   return { ...point, crs: preferred }
+}
+function navigationPointFor(stop: Stop | SubStop, provider: 'baidu' | 'amap'): (Coord & { crs: string }) | null {
+  const coordinates = stop.location?.coordinates
+  if (!coordinates) return null
+  const order = provider === 'amap' ? ['gcj02', 'bd09ll', 'wgs84'] : ['bd09ll', 'gcj02', 'wgs84']
+  for (const crs of order) {
+    const point = coordinates[crs]
+    if (point && Number.isFinite(point.lat) && Number.isFinite(point.lng)) return { ...point, crs }
+  }
+  return null
+}
+function navigationPlatform(): 'android' | 'ios' | 'web' {
+  const userAgent = navigator.userAgent
+  if (/Android/i.test(userAgent)) return 'android'
+  if (/iPhone|iPad|iPod/i.test(userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) return 'ios'
+  return 'web'
+}
+function reserveNavigationWindow(platform: 'android' | 'ios' | 'web') {
+  if (platform !== 'web') return null
+  const opened = window.open('about:blank', '_blank')
+  if (opened) { try { opened.opener = null } catch { /* best effort */ } }
+  return opened
+}
+function openNavigationURL(url: string, platform: 'android' | 'ios' | 'web', reservedWindow: Window | null, fallbackURL = '') {
+  if (platform === 'web' && reservedWindow && !reservedWindow.closed) {
+    reservedWindow.location.replace(url)
+    return
+  }
+  if (platform === 'web') {
+    window.location.assign(url)
+    return
+  }
+  let appOpened = false
+  const onPageHide = () => { appOpened = true }
+  const onVisibilityChange = () => { if (document.visibilityState === 'hidden') appOpened = true }
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  window.addEventListener('pagehide', onPageHide, { once: true })
+  window.location.assign(url)
+  if (fallbackURL) window.setTimeout(() => {
+    document.removeEventListener('visibilitychange', onVisibilityChange)
+    window.removeEventListener('pagehide', onPageHide)
+    if (!appOpened && document.visibilityState === 'visible') window.location.assign(fallbackURL)
+  }, 1800)
 }
 function mapPointFor(stop: Stop | SubStop): (Coord & { crs: string }) | null {
   const point = pointFor(stop)
@@ -574,9 +617,20 @@ function renderMarkdown(source: string) {
   return formatted.split(/\n{2,}/).map(block => block.startsWith('<h') ? block : '<p>' + block.replaceAll('\n', '<br>') + '</p>').join('')
 }
 async function openNavigation(provider: 'baidu' | 'amap') {
-  const stop = selectedTarget.value; const point = stop && pointFor(stop)
+  const stop = selectedTarget.value
+  const point = stop && navigationPointFor(stop, provider)
   if (!stop || !point) { error.value = '该规划点没有可靠坐标，无法生成导航链接'; return }
-  try { const response = await apiFetch('/api/v1/maps/navigation', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider, target: { name: stop.title, address: stop.address, location: point }, mode: 'walking', platform: /Android/i.test(navigator.userAgent) ? 'android' : 'web' }) }); const payload = await response.json() as { url?: string; error?: { message?: string } }; if (!response.ok || !payload.url) throw new Error(payload.error?.message || '导航链接生成失败'); window.open(payload.url, '_blank', 'noopener,noreferrer') } catch (cause) { error.value = cause instanceof Error ? cause.message : '导航失败' }
+  const platform = navigationPlatform()
+  const reservedWindow = reserveNavigationWindow(platform)
+  try {
+    const response = await apiFetch('/api/v1/maps/navigation', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider, target: { name: stop.title, address: stop.address, location: point }, mode: 'walking', platform }) })
+    const payload = await response.json() as { url?: string; fallback_url?: string; error?: { message?: string } }
+    if (!response.ok || !payload.url) throw new Error(payload.error?.message || '导航链接生成失败')
+    openNavigationURL(payload.url, platform, reservedWindow, payload.fallback_url || '')
+  } catch (cause) {
+    if (reservedWindow && !reservedWindow.closed) reservedWindow.close()
+    error.value = cause instanceof Error ? cause.message : '导航失败'
+  }
 }
 function weatherText(stop: Stop | SubStop) { const weather = stop.weather || {}; const condition = weather.condition || weather.text_day || weather.text || '暂无天气快照'; const temperature = weather.temperature_c ?? weather.temp; return temperature === undefined ? String(condition) : String(condition) + ' · ' + String(temperature) + '°C' }
 function weatherUpdatedAt(stop: Stop | SubStop) { const value = stop.weather?.fetched_at; return value ? new Date(String(value)).toLocaleString() : '' }

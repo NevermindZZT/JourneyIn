@@ -128,7 +128,9 @@ func RequireAPIAuthWithAuthenticator(next http.Handler, authenticator *Authentic
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/api/v1/health" || r.URL.Path == "/api/v1/auth/login" {
+		// Navigation URL generation is stateless and carries no trip or credential data,
+		// so shared read-only pages can use it without an owner session.
+		if !strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/api/v1/health" || r.URL.Path == "/api/v1/auth/login" || r.URL.Path == "/api/v1/maps/navigation" {
 			next.ServeHTTP(w, r)
 			return
 		}
