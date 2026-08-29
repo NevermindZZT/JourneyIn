@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   IonApp, IonBadge, IonButton, IonChip, IonContent, IonHeader, IonIcon,
-  IonPage, IonRefresher, IonRefresherContent, IonTitle, IonToolbar,
+  IonPage, IonTitle, IonToolbar,
 } from '@ionic/vue'
 import BMapLoader from '@baidumap/jsapi-loader'
 import { addOutline, closeOutline, cloudOfflineOutline, linkOutline, logInOutline, mapOutline, menuOutline, navigateOutline, searchOutline, settingsOutline, sunnyOutline } from 'ionicons/icons'
@@ -17,10 +17,14 @@ type Leg = { id: string; from_stop_id: string; to_stop_id: string; mode?: string
 type Day = { id: string; date: string; title?: string; notes_markdown?: string; stops: Stop[]; legs?: Leg[] }
 type TripDocument = { title: string; timezone: string; description_markdown?: string; links?: LinkData[]; days: Day[] }
 type TripSummary = { id: string; title: string; status: string; start_date: string; end_date: string; timezone: string; revision: number; days?: number; stops?: number }
-type Capabilities = { map_providers?: { baidu?: { browser_key_configured?: boolean; browser_key?: string }; amap?: { browser_key_configured?: boolean } }; mcp?: { http_endpoint?: string } }
+type Capabilities = { version?: string; map_providers?: { baidu?: { browser_key_configured?: boolean; browser_key?: string }; amap?: { browser_key_configured?: boolean } }; mcp?: { http_endpoint?: string } }
 type KeySettings = { map?: { baidu?: { browser_key_configured?: boolean; server_key_configured?: boolean }; amap?: { js_key_configured?: boolean; server_key_configured?: boolean } }; poi?: { provider_priority?: 'amap' | 'baidu'; local_directory_count?: number } }
 type PlaceCandidate = { id?: string; name: string; address?: string; location: Coord & { crs?: string }; provider?: string }
 type TravelMode = 'driving' | 'walking' | 'cycling' | 'transit'
+
+const APP_VERSION = '0.2.0'
+const APP_SLOGAN = '在地图上规划每一段旅程'
+const GITHUB_URL = 'https://github.com/NevermindZZT/JourneyIn'
 
 declare global { interface Window { BMap?: any; BMapGL?: any; BMAP_NORMAL_MAP?: any; BMAP_SATELLITE_MAP?: any } }
 
@@ -37,6 +41,7 @@ const descriptionDraft = ref('')
 const descriptionSaving = ref(false)
 const descriptionFullscreen = ref(false)
 const tripDescriptionEditing = ref(false)
+const tripDescriptionFullscreen = ref(false)
 const tripDescriptionDraft = ref('')
 const tripDescriptionSaving = ref(false)
 const selectedDay = ref<number | 'all'>('all')
@@ -106,6 +111,15 @@ const visibleDays = computed(() => {
   return selectedDay.value === 'all' ? tripDocument.value.days : tripDocument.value.days.filter((_, index) => index + 1 === selectedDay.value)
 })
 const visibleStops = computed(() => visibleDays.value.flatMap(day => day.stops || []).sort((a, b) => a.sequence - b.sequence))
+const visibleRouteSummary = computed(() => {
+  let distanceM = 0; let durationS = 0; let segments = 0
+  for (const day of visibleDays.value) for (const leg of day.legs || []) {
+    const snapshot = (leg.snapshots || []).find(item => item.distance_m !== undefined || item.duration_s !== undefined)
+    if (!snapshot) continue
+    distanceM += snapshot.distance_m || 0; durationS += snapshot.duration_s || 0; segments++
+  }
+  return { distanceM, durationS, segments }
+})
 const plannableDays = computed(() => visibleDays.value.filter(day => (day.stops || []).length >= 2))
 const selectedStop = computed(() => visibleStops.value.find(stop => stop.id === selectedStopId.value) || null)
 const selectedSubStop = computed(() => selectedStop.value?.children?.find(child => child.id === selectedSubStopId.value) || null)
@@ -227,7 +241,9 @@ function cancelEditDescription() { descriptionEditing.value = false; description
 function openDescriptionFullscreen() { descriptionFullscreen.value = true }
 function closeDescriptionFullscreen() { descriptionFullscreen.value = false }
 function beginEditTripDescription() { tripDescriptionDraft.value = tripDocument.value?.description_markdown || ''; tripDescriptionEditing.value = true }
-function cancelEditTripDescription() { tripDescriptionEditing.value = false; tripDescriptionDraft.value = '' }
+function openTripDescriptionFullscreen() { tripDescriptionFullscreen.value = true }
+function closeTripDescriptionFullscreen() { tripDescriptionFullscreen.value = false }
+function cancelEditTripDescription() { tripDescriptionEditing.value = false; tripDescriptionDraft.value = ''; tripDescriptionFullscreen.value = false }
 async function saveTripDescription() {
   if (!selected.value || !tripDocument.value) return
   const previous = tripDocument.value.description_markdown || ''; tripDocument.value.description_markdown = tripDescriptionDraft.value.trim(); tripDescriptionSaving.value = true; error.value = ''
@@ -463,7 +479,6 @@ async function refreshWeather() {
     applyTripPayload(payload); selectedStopId.value = parent.id; selectedSubStopId.value = childID
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '天气查询失败' } finally { weatherLoading.value = false }
 }
-function refresh(event: CustomEvent) { loadTrips().finally(() => event.detail.complete()) }
 function closeDetail() { selectedStopId.value = ''; selectedSubStopId.value = ''; void renderMap() }
 function parentForStop(stop: Stop | SubStop, day: Day | null = dayForStop(stop)) {
   if (!day) return null
@@ -637,7 +652,7 @@ onUnmounted(() => mediaQuery?.removeEventListener?.('change', systemThemeChanged
     <IonPage class="journey-page">
       <IonHeader translucent>
         <IonToolbar>
-          <IonTitle><span class="brand-dot"></span>JourneyIn</IonTitle>
+          <IonTitle><span class="brand-dot"></span><span class="brand-name">JourneyIn</span><span class="brand-slogan">{{ APP_SLOGAN }}</span><a class="brand-github" :href="GITHUB_URL" target="_blank" rel="noopener noreferrer">GitHub</a><span class="app-version">v{{ capabilities?.version || APP_VERSION }}</span></IonTitle>
           <div slot="end" class="header-actions">
             <IonButton fill="clear" aria-label="显示或隐藏行程面板" @click="togglePanel"><IonIcon :icon="menuOutline" /></IonButton>
             <IonButton fill="clear" aria-label="打开设置" @click="openSettings()"><IonIcon :icon="settingsOutline" /></IonButton>
@@ -646,7 +661,7 @@ onUnmounted(() => mediaQuery?.removeEventListener?.('change', systemThemeChanged
         </IonToolbar>
       </IonHeader>
       <IonContent :fullscreen="true">
-        <IonRefresher slot="fixed" @ionRefresh="refresh"><IonRefresherContent /></IonRefresher>
+
         <main class="map-shell">
           <div class="map-canvas" :class="{ 'map-pick-active': mapPickMode }">
             <div v-if="keyConfigured && tripDocument && !mapError" ref="mapContainer" id="bmap"></div>
@@ -674,6 +689,7 @@ onUnmounted(() => mediaQuery?.removeEventListener?.('change', systemThemeChanged
               <div><p class="eyebrow">JOURNEYIN</p><h2>{{ tripView === 'detail' && selected ? selected.title : '旅行规划' }}</h2><p class="panel-subtitle">{{ tripView === 'detail' && selected ? selected.start_date + ' — ' + selected.end_date : '选择一条行程查看详情' }}</p></div>
               <button class="panel-close" aria-label="隐藏行程面板" @click="togglePanel">×</button>
             </div>
+            <button v-if="tripView === 'detail' && selected" class="panel-back panel-detail-back" @click="tripView = 'list'">‹ 行程列表</button>
             <div class="panel-tabs">
               <button :class="{ selected: panelMode === 'journey' }" @click="panelMode = 'journey'">行程</button>
               <button :class="{ selected: panelMode === 'search' }" :disabled="!selected" @click="searchParentStopId = ''; panelMode = 'search'"><IonIcon :icon="searchOutline" /> 添加地点</button>
@@ -692,13 +708,13 @@ onUnmounted(() => mediaQuery?.removeEventListener?.('change', systemThemeChanged
                   </div>
                 </template>
                 <template v-else-if="tripView === 'detail' && selected && tripDocument">
-                  <button class="panel-back detail-list-back" @click="tripView = 'list'">‹ 行程列表</button>
                   <div class="trip-detail-kicker"><span class="eyebrow">SELECTED JOURNEY</span><span>{{ selected.start_date }} — {{ selected.end_date }}</span></div>
-                  <div class="trip-overview"><div class="description-header"><h3>行程总体说明</h3><button v-if="!tripDescriptionEditing" class="text-button" @click="beginEditTripDescription">编辑行程说明</button></div><template v-if="tripDescriptionEditing"><textarea v-model="tripDescriptionDraft" class="description-editor" rows="5" placeholder="补充整个行程的背景、节奏和注意事项"></textarea><div class="description-actions"><button class="text-button" @click="cancelEditTripDescription">取消</button><button class="primary-text-button" :disabled="tripDescriptionSaving" @click="saveTripDescription">{{ tripDescriptionSaving ? '保存中…' : '保存说明' }}</button></div></template><div v-else-if="tripDocument.description_markdown" class="markdown" v-html="renderMarkdown(tripDocument.description_markdown)"></div><p v-else class="muted">暂无行程总体说明，点击“编辑行程说明”添加。</p></div>
+                  <div class="trip-overview"><div class="description-header"><h3>行程总体说明</h3><span class="description-header-actions"><button v-if="!tripDescriptionEditing" class="text-button" @click="beginEditTripDescription">编辑行程说明</button><button v-if="tripDescriptionEditing" class="text-button" @click="openTripDescriptionFullscreen">全屏编辑</button></span></div><template v-if="tripDescriptionEditing"><textarea v-model="tripDescriptionDraft" class="description-editor" rows="5" placeholder="补充整个行程的背景、节奏和注意事项"></textarea><div class="description-actions"><button class="text-button" @click="cancelEditTripDescription">取消</button><button class="primary-text-button" :disabled="tripDescriptionSaving" @click="saveTripDescription">{{ tripDescriptionSaving ? '保存中…' : '保存说明' }}</button></div></template><div v-else-if="tripDocument.description_markdown" class="markdown" v-html="renderMarkdown(tripDocument.description_markdown)"></div><p v-else class="muted">暂无行程总体说明，点击“编辑行程说明”添加。</p></div>
                   <div class="panel-section">
                     <div class="section-heading compact"><div><p class="eyebrow">ITINERARY</p><h3>规划点</h3></div><div class="itinerary-actions"><span class="count-label">{{ visibleStops.length }} 个</span><button class="text-button reorder-toggle" :class="{ selected: reorderMode }" :aria-pressed="reorderMode" @click="toggleReorderMode">{{ reorderMode ? '完成排序' : '调整顺序' }}</button></div></div>
                     <div class="day-tabs"><button :class="{ selected: selectedDay === 'all' }" @click="selectedDay = 'all'">全程</button><button v-for="(_, index) in tripDocument.days" :key="index" :class="{ selected: selectedDay === index + 1 }" @click="selectedDay = index + 1">D{{ index + 1 }} · {{ tripDocument.days[index].date }}</button></div>
                     <div class="plan-controls"><label>路线方式<select v-model="planningMode"><option value="walking">步行</option><option value="driving">驾车</option><option value="cycling">骑行</option><option value="transit">公交</option></select></label><IonButton size="small" :disabled="planningLoading || !plannableDays.length" @click="planRoutes"><IonIcon slot="start" :icon="navigateOutline" /> {{ planningLoading ? '规划中…' : '生成路线' }}</IonButton></div>
+                    <div class="route-summary"><div><span class="route-summary-label">{{ selectedDay === 'all' ? '全程路线' : 'D' + selectedDay + ' 当天路线' }}</span><strong v-if="visibleRouteSummary.segments">{{ formatDistance(visibleRouteSummary.distanceM) || '距离未知' }} · {{ formatDuration(visibleRouteSummary.durationS) || '时间未知' }}</strong><span v-else>尚未生成路线</span></div><small v-if="visibleRouteSummary.segments">{{ visibleRouteSummary.segments }} 段相邻路线</small></div>
                     <p class="order-help">{{ reorderMode ? '排序模式已开启：拖动每行左侧的 ⋮⋮ 手柄到目标位置，松开后立即保存。' : '需要调整规划点顺序？点击上方“调整顺序”，然后拖动左侧手柄。' }}</p>
                     <p v-if="reorderMessage" class="inline-message">{{ reorderMessage }}</p>
                     <p v-if="!plannableDays.length" class="hint">同一天添加至少两个地点后，点击“生成路线”。</p>
@@ -743,6 +759,7 @@ onUnmounted(() => mediaQuery?.removeEventListener?.('change', systemThemeChanged
         </main>
       </IonContent>
       <div v-if="descriptionFullscreen && descriptionEditing" class="fullscreen-editor-backdrop"><section class="fullscreen-editor" role="dialog" aria-modal="true" aria-labelledby="fullscreen-description-title"><header><h2 id="fullscreen-description-title">编辑地点说明</h2><button class="modal-close" aria-label="退出全屏编辑" @click="closeDescriptionFullscreen">×</button></header><textarea v-model="descriptionDraft" class="fullscreen-description-editor" autofocus placeholder="补充门票、开放时间、行程备注等信息"></textarea><div class="description-actions"><button class="text-button" @click="cancelEditDescription">取消</button><button class="primary-text-button" :disabled="descriptionSaving" @click="saveDescription">{{ descriptionSaving ? '保存中…' : '保存说明' }}</button></div></section></div>
+      <div v-if="tripDescriptionFullscreen && tripDescriptionEditing" class="fullscreen-editor-backdrop"><section class="fullscreen-editor" role="dialog" aria-modal="true" aria-labelledby="fullscreen-trip-description-title"><header><h2 id="fullscreen-trip-description-title">编辑行程总体说明</h2><button class="modal-close" aria-label="退出全屏编辑" @click="closeTripDescriptionFullscreen">×</button></header><textarea v-model="tripDescriptionDraft" class="fullscreen-description-editor" autofocus placeholder="补充整个行程的背景、节奏和注意事项"></textarea><div class="description-actions"><button class="text-button" @click="cancelEditTripDescription">取消</button><button class="primary-text-button" :disabled="tripDescriptionSaving" @click="saveTripDescription">{{ tripDescriptionSaving ? '保存中…' : '保存说明' }}</button></div></section></div>
       <div v-if="mapPickOpen" class="modal-backdrop" @click.self="cancelMapPick"><section class="modal-panel map-pick-panel" role="dialog" aria-modal="true" aria-labelledby="map-pick-title"><button class="modal-close" aria-label="取消地图选点" @click="cancelMapPick">×</button><p class="eyebrow">MAP PICK</p><h2 id="map-pick-title">保存地图选点</h2><p class="map-pick-coordinate">{{ mapPickLocation?.crs }} · {{ mapPickLocation?.lat.toFixed(6) }}, {{ mapPickLocation?.lng.toFixed(6) }}</p><label>地点名称<input v-model="mapPickTitle" required autofocus placeholder="例如：临时观景点" /></label><label>地址或备注（可选）<input v-model="mapPickAddress" placeholder="补充位置说明" /></label><label>加入日期<select v-model="mapPickDayID"><option v-for="day in tripDocument?.days || []" :key="day.id" :value="day.id">{{ day.date }}{{ day.title ? ' · ' + day.title : '' }}</option></select></label><div class="modal-actions"><button type="button" @click="cancelMapPick">取消</button><button type="button" class="primary" :disabled="actionLoading || !mapPickTitle.trim()" @click="saveMapPick">{{ actionLoading ? '保存中…' : '保存规划点' }}</button></div></section></div>
       <div v-if="newTripOpen" class="modal-backdrop" @click.self="newTripOpen = false"><section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="new-trip-title"><button class="modal-close" aria-label="关闭" @click="newTripOpen = false">×</button><p class="eyebrow">NEW JOURNEY</p><h2 id="new-trip-title">新建旅行规划</h2><form @submit.prevent="createTrip"><label>规划名称<input v-model="newTitle" maxlength="120" required /></label><div class="form-grid"><label>开始日期<input v-model="newStartDate" type="date" required /></label><label>结束日期<input v-model="newEndDate" type="date" required /></label></div><label>时区<input v-model="newTimezone" placeholder="Asia/Shanghai" required /></label><label>总体说明（Markdown）<textarea v-model="newDescription" rows="5" placeholder="写下这次旅行的总体说明"></textarea></label><div class="modal-actions"><button type="button" @click="newTripOpen = false">取消</button><button class="primary" type="submit" :disabled="actionLoading">创建草稿</button></div></form></section></div>
       <div v-if="settingsOpen" class="modal-backdrop" @click.self="settingsOpen = false"><section class="modal-panel settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title"><button class="modal-close" aria-label="关闭" @click="settingsOpen = false">×</button><p class="eyebrow">JOURNEYIN SETTINGS</p><h2 id="settings-title">设置</h2><p class="settings-intro">当前主题：{{ themeLabel }}。Key 配置保存到 SQLite，服务端 Key 不会回显。</p><section class="settings-section"><h3>外观</h3><p class="settings-label">主题：{{ themeLabel }}</p><div class="theme-options"><button type="button" :class="{ selected: theme === 'system' }" @click="setTheme('system')">跟随系统</button><button type="button" :class="{ selected: theme === 'light' }" @click="setTheme('light')">浅色</button><button type="button" :class="{ selected: theme === 'dark' }" @click="setTheme('dark')">深色</button></div></section><section class="settings-section"><h3>服务端连接</h3><label>当前服务地址<input v-model="serverURL" readonly /></label><label>REST/MCP 访问令牌<input v-model="authTokenInput" type="password" placeholder="Docker 开启认证时填写" autocomplete="off" /></label><div class="modal-actions"><button type="button" @click="logout">清除令牌</button><button type="button" class="primary" @click="saveAuth">保存令牌</button></div><p v-if="settingsMessage" class="settings-message">{{ settingsMessage }}</p></section><section class="settings-section"><h3>百度地图</h3><p class="key-status">浏览器端 Key：<strong>{{ keyConfigured ? '已配置' : '未配置' }}</strong> · 服务端 Key：<strong>{{ settingsData?.map?.baidu?.server_key_configured ? '已配置' : '未配置' }}</strong></p><label>百度浏览器端 Key<input v-model="baiduBrowserKeyInput" type="password" :placeholder="settingsData?.map?.baidu?.browser_key_configured ? '已配置，输入新 Key 可替换' : '用于 JSAPI 4.0/BMap 网页地图'" autocomplete="off" /></label><label>百度服务端 Key<input v-model="baiduServerKeyInput" type="password" placeholder="已配置时输入新 Key 可替换；留空保持当前值" autocomplete="off" /></label><p class="key-help">浏览器端 Key 用于地图底图；服务端 Key 用于 POI 搜索、地理编码、路线和天气。请确认当前访问 host 在百度控制台白名单内。</p><a href="https://lbsyun.baidu.com/apiconsole/key" target="_blank" rel="noopener noreferrer">申请/管理百度地图 Key ↗</a></section><section class="settings-section"><h3>高德地图</h3><p class="key-status">JS Key：<strong>{{ settingsData?.map?.amap?.js_key_configured ? '已配置' : '未配置' }}</strong> · 服务端 Key：<strong>{{ settingsData?.map?.amap?.server_key_configured ? '已配置' : '未配置' }}</strong></p><label>高德 JS Key<input v-model="amapJSKeyInput" type="password" placeholder="用于高德 Web 地图" autocomplete="off" /></label><label>高德服务端 Key<input v-model="amapServerKeyInput" type="password" placeholder="已配置时输入新 Key 可替换；留空保持当前值" autocomplete="off" /></label><a href="https://console.amap.com/dev/key/app" target="_blank" rel="noopener noreferrer">申请/管理高德 Key ↗</a><p class="key-help">保存后，规划点会优先使用已经保存的坐标，不会因为重新绘制地图重复查询。</p><div class="modal-actions"><button type="button" class="primary" :disabled="settingsSaving" @click="saveMapKeys">{{ settingsSaving ? '保存中…' : '保存地图 Key 到数据库' }}</button></div></section><section class="settings-section"><h3>地点检索</h3><label>优先 Provider<select v-model="poiProviderPriority"><option value="amap">高德优先</option><option value="baidu">百度优先</option></select></label><p class="key-help">当前策略会先查询本地地点目录；未命中后使用所选 Provider，Provider 不可用时自动尝试另一家。新搜索结果只保留 7 天。</p><p class="key-status">本地地点记录：<strong>{{ localDirectoryCount }}</strong> 条</p><div class="modal-actions"><button type="button" @click="savePOIPreferences">保存检索优先级</button><button type="button" @click="clearLocalDirectory">清除本地记录</button></div></section><section class="settings-section"><h3>MCP</h3><p>MCP 地址：{{ capabilities?.mcp?.http_endpoint || '/mcp' }}</p><p class="key-help">Docker 远程部署时设置 JOURNEYIN_MCP_TOKEN；本地 localhost 调试可不设置。</p></section></section></div>

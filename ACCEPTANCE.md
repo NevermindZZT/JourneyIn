@@ -73,6 +73,8 @@ pwsh -File scripts/verify-local.ps1 -ServerUrl http://127.0.0.1:8080 -WebUrl htt
 - [ ] 默认主题跟随系统；切换浅色/深色后立即生效，刷新页面仍保持选择。
 - [ ] 开启 API Token 的服务端返回 401 时自动显示登录窗口；令牌只保存在本机浏览器。
 - [ ] 页面显示全屏地图；行程、搜索和详情显示为可隐藏的浮窗卡片。
+- [ ] 顶部显示版本号、产品 slogan，并提供 JourneyIn GitHub 仓库链接。
+- [ ] 地图任意方向拖动不会触发下拉刷新图标或刷新动作。
 - [ ] 点击右上角面板按钮可以隐藏/恢复行程浮窗。
 - [ ] 点击右上角 + 可以创建 draft Trip。
 - [ ] 创建 Trip 后点击“添加地点”，搜索结果显示候选地点、地址、BD-09LL 坐标。
@@ -82,6 +84,8 @@ pwsh -File scripts/verify-local.ps1 -ServerUrl http://127.0.0.1:8080 -WebUrl htt
 - [ ] 主规划点拖动后旧路线清除，并提示重新生成路线；点击“完成排序”退出排序模式。
 - [ ] 主规划点详情中的子规划点也可通过拖动手柄调整顺序，且不改变主点路线。
 - [ ] 添加两个规划点后点击“生成路线”，路线按相邻点生成并保存到 Trip。
+- [ ] 规划点区域显示当前选择范围的路线总距离、预计总时长和路线段数；切换“全程/D1/D2”后统计跟随更新。
+- [ ] 编辑行程总体说明时可点击“全屏编辑”，全屏保存和取消行为正确。
 - [ ] 刷新或重启服务后，规划点和路线快照仍存在，不重新调用搜索接口。
 - [ ] 导入一个 Trip JSON 后，列表显示天数和规划点数量。
 - [ ] 点击规划点能打开详情、日期、Markdown、天气、天气更新时间和参考链接。
@@ -112,9 +116,10 @@ pwsh -File scripts/verify-local.ps1 -ServerUrl http://127.0.0.1:8080 -WebUrl htt
 5. 再搜索并添加第二个地点。
 6. 选择步行/驾车/骑行/公交，点击“生成路线”。
 7. 在主规划点详情中添加至少两个子规划点；关闭详情时子点不显示在地图，重新打开详情时子点 Marker 显示。
-8. 点击“获取天气”，确认天气条件/温度和 fetched_at 显示；6 小时内再次刷新不应产生新的上游天气请求。
-9. 导出 JSON，检查每个 Stop 的 location 中有 preferred、coordinates、crs、source/provider_refs；检查 children 和 Day legs 中有 route snapshot geometry。
-10. 重启同一个二进制并使用同一个绝对数据路径，确认行程点、子点、天气和路线仍在。
+8. 切换“全程”和具体 Day，确认路线总距离、总时长和路线段数随选择变化。
+9. 点击“获取天气”，确认天气条件/温度和 fetched_at 显示；6 小时内再次刷新不应产生新的上游天气请求。
+10. 导出 JSON，检查每个 Stop 的 location 中有 preferred、coordinates、crs、source/provider_refs；检查 children 和 Day legs 中有 route snapshot geometry。
+11. 重启同一个二进制并使用同一个绝对数据路径，确认行程点、子点、天气和路线仍在。
 
 查询次数原则：
 

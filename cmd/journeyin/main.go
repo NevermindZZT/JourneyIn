@@ -23,7 +23,7 @@ import (
 	mcptransport "journeyin/internal/transport/mcp"
 )
 
-var version = "dev"
+var version = "0.2.0"
 
 func main() {
 	if len(os.Args) >= 3 && os.Args[1] == "mcp" && os.Args[2] == "stdio" {

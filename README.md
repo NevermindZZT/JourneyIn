@@ -1,6 +1,16 @@
 # JourneyIn
 
-JourneyIn 是一个以地图为核心的旅行规划项目。当前版本提供 Go + SQLite 服务端、Vue/Ionic Web 客户端、Trip JSON、地图 Provider、只读分享、同步接口、MCP 和 Docker 配置。
+[![CI](https://github.com/NevermindZZT/JourneyIn/actions/workflows/ci.yml/badge.svg)](https://github.com/NevermindZZT/JourneyIn/actions/workflows/ci.yml)
+[![Docker Image Version](https://img.shields.io/docker/v/nevermindzzt/journeyin?sort=semver)](https://hub.docker.com/r/nevermindzzt/journeyin)
+[![Docker Pulls](https://img.shields.io/docker/pulls/nevermindzzt/journeyin)](https://hub.docker.com/r/nevermindzzt/journeyin)
+
+> **v0.2.0 · 在地图上规划每一段旅程**
+>
+> JourneyIn 是地图优先的旅行规划工具：把地点、顺序、路线、天气和备注放在同一张可保存的行程地图上。
+
+项目主页：[github.com/NevermindZZT/JourneyIn](https://github.com/NevermindZZT/JourneyIn)。
+
+JourneyIn 当前提供 Go + SQLite 服务端、Vue/Ionic Web 客户端、Trip JSON、地图 Provider、只读分享、同步接口、MCP 和 Docker 配置。
 
 ## 本地运行
 
@@ -12,6 +22,23 @@ go run ./cmd/journeyin -listen 127.0.0.1:8080 -data D:/data/journeyin/journeyin.
 ~~~
 
 打开 http://127.0.0.1:8080 。
+
+### Docker 镜像
+
+发布镜像位于 Docker Hub：
+
+~~~text
+nevermindzzt/journeyin:latest
+nevermindzzt/journeyin:0.2.0
+~~~
+
+使用持久化卷启动：
+
+~~~powershell
+docker run --detach --name journeyin --publish 8080:8080 --volume journeyin-data:/data --env JOURNEYIN_MCP_TOKEN=<strong-random-token> nevermindzzt/journeyin:latest
+~~~
+
+镜像由 GitHub Actions 在推送 `v*.*.*` tag 时构建并发布，同时生成 `linux/amd64` 和 `linux/arm64` 多架构镜像。发布需要仓库 Secret `DOCKERHUB_TOKEN`。
 
 构建和重新运行不会删除数据库。若省略 `-data` 与 `JOURNEYIN_DATA_DIR`，默认使用用户配置目录中的 `JourneyIn/journeyin.db`；程序也会兼容读取当前目录、可执行文件目录或其上级目录下已有的 `data/journeyin.db`。验收时建议始终使用固定绝对路径。
 
@@ -83,7 +110,7 @@ pwsh -File scripts/verify-local.ps1 -ServerUrl http://127.0.0.1:8080 -WebUrl htt
 3. 输入地点关键词、城市和搜索类型，点击“搜索地点”；系统先查本地 7 天地点目录，再按“地点检索”设置选择高德或百度。高德景点搜索使用 POI 类型码；Provider 不可用时自动尝试另一家。无 POI 结果时会降级到已缓存的地理编码结果。对于甘加、白石崖等景区名称，可以选择“景点”类型。
 4. 从候选结果中明确选择一个地点并点击“添加”；Trip 会保存名称、地址、BD-09LL 坐标、CRS、来源和百度 UID。
 5. 打开规划点详情，可以继续关联多个子规划点；只有进入该主规划点详情时，子点 Marker 才会显示在地图上。
-6. 点击规划点区域右上方的“调整顺序”进入排序模式；拖动每行左侧的 ⋮⋮ 手柄到目标位置，松开后立即保存。可在当前 Day 内调整主规划点顺序；主点顺序变化会清除该日旧路线。子规划点在主点详情中同样支持拖动排序，不改变主点路线。调整完成后点击“完成排序”，再选择路线方式并点击“生成路线”重新按相邻点分段请求，并将 geometry、距离和耗时保存到 Trip 的 `Day.legs[].snapshots[]`；地图标签开启时会在每段路线中点显示例如 `1.2 km · 10 分钟`。
+6. 点击规划点区域右上方的“调整顺序”进入排序模式；拖动每行左侧的 ⋮⋮ 手柄到目标位置，松开后立即保存。可在当前 Day 内调整主规划点顺序；主点顺序变化会清除该日旧路线。子规划点在主点详情中同样支持拖动排序，不改变主点路线。调整完成后点击“完成排序”，再选择路线方式并点击“生成路线”重新按相邻点分段请求。规划点区域会根据当前“全程”或具体 Day 显示路线总距离、预计总时长和路线段数，并将 geometry、距离和耗时保存到 Trip 的 `Day.legs[].snapshots[]`。
 7. 在规划点详情点击“获取天气/刷新天气”；天气快照写入该点，显示查询时间，6 小时内重复刷新优先使用 SQLite cache。
 8. 后续地图重绘直接使用已保存的规划点、子规划点和路线快照，不重复搜索或地理编码。地图 HUD 的“卫星图/标准图”按钮只切换百度 JSAPI 图层，不触发 POI/路线请求。
 9. 地图默认显示地点名和行程日期 Label；HUD 可切换“显示标签/隐藏标签”，设置保存在浏览器 localStorage。
@@ -94,7 +121,7 @@ pwsh -File scripts/verify-local.ps1 -ServerUrl http://127.0.0.1:8080 -WebUrl htt
 ~~~text
 POST /api/v1/maps/pois/search
 POST /api/v1/trips/{trip_id}/days/{day_id}/stops
-POST /api/v1/trips/{trip_id}/days/{day_id}/stops/{stop_id}/move
+POST /api/v1/trips/{trip_id}/days/{day_id}/stops/{stop_id}/move  # body: {"direction":"up"} 或 {"target_sequence":2}
 DELETE /api/v1/trips/{trip_id}/days/{day_id}/stops/{stop_id}
 POST /api/v1/trips/{trip_id}/days/{day_id}/stops/{stop_id}/children
 POST /api/v1/trips/{trip_id}/days/{day_id}/stops/{stop_id}/weather

@@ -49,6 +49,11 @@ ion-button { --border-radius: 999px; }
 ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); }
 .header-actions { display: flex; align-items: center; gap: 2px; }
 .brand-dot { display: inline-block; width: 10px; height: 10px; margin-right: 8px; border-radius: 50%; background: var(--accent); }
+.brand-name { font-weight: 800; }
+.brand-slogan { margin-left: 10px; color: var(--muted); font-size: 12px; font-weight: 500; }
+.brand-github { margin-left: 12px; color: var(--p); font-size: 12px; text-decoration: none; }
+.brand-github:hover { text-decoration: underline; }
+.app-version { margin-left: 8px; color: var(--muted); font-size: 11px; font-weight: 700; }
 .map-shell { position: relative; width: 100%; height: 100%; min-height: 100%; overflow: hidden; }
 .map-canvas { position: absolute; inset: 0; overflow: hidden; background: var(--md-map); }
 #bmap { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 100%; }
@@ -85,6 +90,7 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .panel-close, .panel-back { border: 0; color: var(--muted); background: transparent; }
 .detail-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 16px; }
 .detail-list-back { margin: 0; }
+.panel-detail-back { align-self: flex-start; margin: 12px 16px 0; }
 .danger-button { min-height: 36px; padding: 7px 12px; border: 1px solid color-mix(in srgb, var(--md-error) 70%, var(--line)); border-radius: 999px; color: var(--md-error); background: transparent; font-size: 12px; }
 .danger-button:hover { background: color-mix(in srgb, var(--md-error) 12%, transparent); }
 .detail-delete { margin-left: auto; }
@@ -124,6 +130,12 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .order-button:hover:not(:disabled) { border-color: var(--p); background: color-mix(in srgb, var(--p) 12%, var(--surface)); }
 .order-button:disabled { cursor: not-allowed; opacity: .32; }
 .order-help { margin: 10px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.route-summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; padding: 11px 12px; border: 1px solid color-mix(in srgb, var(--p) 35%, var(--line)); border-radius: 14px; color: var(--ink); background: color-mix(in srgb, var(--p) 9%, var(--surface)); }
+.route-summary > div { display: grid; gap: 3px; min-width: 0; }
+.route-summary-label { color: var(--muted); font-size: 11px; font-weight: 700; }
+.route-summary strong { color: var(--p); font-size: 15px; }
+.route-summary > div > span:not(.route-summary-label) { color: var(--muted); font-size: 13px; }
+.route-summary small { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
 .trip-card:hover, .trip-card.active, .stop-row:hover, .stop-row.selected { border-color: color-mix(in srgb, var(--p) 50%, var(--line)); background: color-mix(in srgb, var(--p) 16%, var(--panel)); }
 .icon-delete { display: grid; flex: 0 0 32px; width: 32px; height: 32px; place-items: center; border: 1px solid transparent; border-radius: 50%; color: var(--muted); background: transparent; font-size: 18px; }
 .icon-delete:hover { border-color: var(--md-error); color: var(--md-error); background: color-mix(in srgb, var(--md-error) 12%, transparent); }
@@ -244,4 +256,8 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
   .plan-controls { align-items: stretch; flex-direction: column; }
   .form-grid { grid-template-columns: 1fr; }
   .details-scroll { padding: 24px 20px; }
+  .brand-slogan { display: none; }
+  .brand-github { margin-left: 8px; font-size: 11px; }
+  .app-version { margin-left: 5px; font-size: 10px; }
+  .panel-detail-back { margin-left: 14px; }
 }
