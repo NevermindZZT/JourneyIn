@@ -112,6 +112,7 @@ let mapScriptPromise: Promise<void> | null = null
 let mediaQuery: MediaQueryList | null = null
 let mapReadyTimer: number | null = null
 let loadedMapKey = ''
+let mapRenderVersion = 0
 
 const key = computed(() => capabilities.value?.map_providers?.baidu?.browser_key || '')
 const keyConfigured = computed(() => Boolean(key.value))
@@ -119,7 +120,19 @@ const visibleDays = computed(() => {
   if (!tripDocument.value) return []
   return selectedDay.value === 'all' ? tripDocument.value.days : tripDocument.value.days.filter((_, index) => index + 1 === selectedDay.value)
 })
-const visibleStops = computed(() => visibleDays.value.flatMap(day => day.stops || []).sort((a, b) => a.sequence - b.sequence))
+function orderedStops(stops: Stop[]) { return [...stops].sort((a, b) => a.sequence - b.sequence) }
+const visibleStops = computed(() => visibleDays.value.flatMap(day => orderedStops(day.stops || [])))
+const carryOverStop = computed<Stop | null>(() => {
+  if (!tripDocument.value || selectedDay.value === 'all' || selectedDay.value <= 1) return null
+  const previousDay = tripDocument.value.days[selectedDay.value - 2]
+  const previousStops = orderedStops(previousDay?.stops || [])
+  return previousStops[previousStops.length - 1] || null
+})
+const mapStops = computed(() => {
+  const carryOver = carryOverStop.value
+  if (!carryOver || !visibleStops.value.length || visibleStops.value.some(stop => stop.id === carryOver.id)) return visibleStops.value
+  return [carryOver, ...visibleStops.value]
+})
 const visibleRouteSummary = computed(() => {
   let distanceM = 0; let durationS = 0; let segments = 0
   for (const day of visibleDays.value) for (const leg of day.legs || []) {
@@ -129,7 +142,18 @@ const visibleRouteSummary = computed(() => {
   }
   return { distanceM, durationS, segments }
 })
-const plannableDays = computed(() => visibleDays.value.filter(day => (day.stops || []).length >= 2))
+const hasCarryOverRoute = computed(() => {
+  const carryOver = carryOverStop.value
+  return Boolean(carryOver && visibleDays.value.some(day => (day.legs || []).some(leg => leg.from_stop_id === carryOver.id)))
+})
+function canPlanDay(day: Day) {
+  const stops = day.stops || []
+  if (stops.length >= 2) return true
+  if (stops.length !== 1 || !tripDocument.value) return false
+  const dayIndex = tripDocument.value.days.indexOf(day)
+  return dayIndex > 0 && orderedStops(tripDocument.value.days[dayIndex - 1].stops || []).length > 0
+}
+const plannableDays = computed(() => visibleDays.value.filter(canPlanDay))
 const selectedStop = computed(() => visibleStops.value.find(stop => stop.id === selectedStopId.value) || null)
 const selectedSubStop = computed(() => selectedStop.value?.children?.find(child => child.id === selectedSubStopId.value) || null)
 const selectedTarget = computed<Stop | SubStop | null>(() => selectedSubStop.value || selectedStop.value || null)
@@ -323,8 +347,10 @@ async function loadBaiduMap() {
 
 async function renderMap() {
   if (!key.value || !mapContainer.value || !tripDocument.value) return
+  const renderVersion = ++mapRenderVersion
   try {
     await loadBaiduMap()
+    if (renderVersion !== mapRenderVersion) return
     if (!mapAPI || typeof mapAPI.Map !== 'function' || !mapContainer.value) throw new Error('百度 JSAPI 未提供可用的 Map 构造器；请检查浏览器端 AK、服务权限、域名白名单和当前浏览器环境')
     if (!mapInstance) {
       mapReady.value = false
@@ -339,15 +365,25 @@ async function renderMap() {
     }
     mapInstance.clearOverlays()
     const points: any[] = []
-    for (const stop of visibleStops.value) {
+    for (const stop of mapStops.value) {
       const point = mapPointFor(stop)
       if (!point || point.crs !== 'bd09ll') continue
       const mapPoint = new mapAPI.Point(point.lng, point.lat)
       points.push(mapPoint)
       const marker = new mapAPI.Marker(mapPoint)
+      const carryOver = carryOverStop.value?.id === stop.id && selectedDay.value !== 'all'
       marker.__journeyinStopId = stop.id
-      marker.addEventListener?.('click', () => { if (mapPickMode.value) { handleMapClick({ point: mapPoint }); return }; selectStop(stop) })
-      attachMapLabel(marker, stop.title, stopDate(stop))
+      marker.__journeyinCarryOver = carryOver
+      marker.addEventListener?.('click', () => {
+        if (mapPickMode.value) { handleMapClick({ point: mapPoint }); return }
+        if (carryOver) {
+          const carryOverDayIndex = tripDocument.value?.days.findIndex(day => day.stops.some(item => item.id === stop.id)) ?? -1
+          if (carryOverDayIndex >= 0) { selectedDay.value = carryOverDayIndex + 1; selectStop(stop) }
+          return
+        }
+        selectStop(stop)
+      })
+      attachMapLabel(marker, carryOver ? '前日终点 · ' + stop.title : stop.title, stopDate(stop))
       mapInstance.addOverlay(marker)
     }
     if (selectedStop.value?.children?.length) for (const child of selectedStop.value.children) {
@@ -453,7 +489,7 @@ async function addPlaceToTrip(candidate: PlaceCandidate) {
 
 async function planRoutes() {
   if (!selected.value || !tripDocument.value) { error.value = '请先选择一条旅行规划'; return }
-  if (!plannableDays.value.length) { error.value = '同一天至少添加两个带坐标的规划点后才能生成路线'; return }
+  if (!plannableDays.value.length) { error.value = '至少有两个相邻的带坐标规划点后才能生成路线'; return }
   planningLoading.value = true; error.value = ''
   try {
     const day = selectedDay.value === 'all' ? undefined : tripDocument.value.days[selectedDay.value - 1]?.id
@@ -804,9 +840,10 @@ onUnmounted(() => mediaQuery?.removeEventListener?.('change', systemThemeChanged
                     <div class="day-tabs"><button :class="{ selected: selectedDay === 'all' }" @click="selectedDay = 'all'">全程</button><button v-for="(_, index) in tripDocument.days" :key="index" :class="{ selected: selectedDay === index + 1 }" @click="selectedDay = index + 1">D{{ index + 1 }} · {{ tripDocument.days[index].date }}</button></div>
                     <div v-if="!shareMode" class="plan-controls"><label>路线方式<select v-model="planningMode"><option value="walking">步行</option><option value="driving">驾车</option><option value="cycling">骑行</option><option value="transit">公交</option></select></label><IonButton size="small" :disabled="planningLoading || !plannableDays.length" @click="planRoutes"><IonIcon slot="start" :icon="navigateOutline" /> {{ planningLoading ? '规划中…' : '生成路线' }}</IonButton></div>
                     <div class="route-summary"><div><span class="route-summary-label">{{ selectedDay === 'all' ? '全程路线' : 'D' + selectedDay + ' 当天路线' }}</span><strong v-if="visibleRouteSummary.segments">{{ formatDistance(visibleRouteSummary.distanceM) || '距离未知' }} · {{ formatDuration(visibleRouteSummary.durationS) || '时间未知' }}</strong><span v-else>尚未生成路线</span></div><small v-if="visibleRouteSummary.segments">{{ visibleRouteSummary.segments }} 段相邻路线</small></div>
+                    <p v-if="hasCarryOverRoute" class="route-ready">路线从前一天的最后一个规划点“{{ carryOverStop?.title }}”开始。</p>
                     <p v-if="!shareMode" class="order-help">{{ reorderMode ? '排序模式已开启：拖动每行左侧的 ⋮⋮ 手柄到目标位置，松开后立即保存。' : '需要调整规划点顺序？点击上方“调整顺序”，然后拖动左侧手柄。' }}</p>
                     <p v-if="reorderMessage" class="inline-message">{{ reorderMessage }}</p>
-                    <p v-if="!plannableDays.length" class="hint">{{ shareMode ? '当前选择范围暂无可生成的路线。' : '同一天添加至少两个地点后，点击“生成路线”。' }}</p>
+                    <p v-if="!plannableDays.length" class="hint">{{ shareMode ? '当前选择范围暂无可生成的路线。' : '添加至少两个相邻的带坐标规划点后，点击“生成路线”。跨天行程会自动从前一天最后一个点接续。' }}</p>
                     <p v-else-if="visibleDays.some(day => day.legs?.some(leg => leg.snapshots?.length))" class="route-ready"><IonIcon :icon="navigateOutline" /> 已有路线快照；重复点击会优先使用缓存。</p>
                     <div v-if="visibleStops.length" class="stop-list"><article v-for="stop in visibleStops" :key="stop.id" class="stop-row" :class="{ selected: selectedStopId === stop.id, 'reorder-dragging': draggedStopID === stop.id, 'reorder-drop-target': dragOverStopID === stop.id }" :draggable="reorderMode" @dragstart="startPlanningPointDrag($event, stop)" @dragover="dragOverPlanningPoint($event, stop)" @dragleave="dragLeavePlanningPoint($event, stop)" @drop="dropPlanningPoint($event, stop)" @dragend="endPlanningPointDrag" @pointerenter="enterPlanningPointPointer($event, stop)" @pointerup="dropPlanningPointPointer($event, stop)"><span v-if="reorderMode" class="drag-handle" aria-hidden="true" @pointerdown.stop="startPlanningPointPointer($event, stop)">⋮⋮</span><button class="stop-row-main" @click="selectStop(stop)"><span class="stop-number">{{ stop.sequence }}</span><span><b>{{ stop.title }}</b><small>{{ stopDate(stop) }} · {{ stop.address || '地址已保存' }}</small></span><span class="stop-arrow">›</span></button><button v-if="!shareMode" class="icon-delete stop-delete" :aria-label="'删除规划点 ' + stop.title" @click.stop="deletePlanningPoint(stop)">×</button></article></div>
                     <p v-else class="empty compact-empty">当前日期还没有规划点。</p>

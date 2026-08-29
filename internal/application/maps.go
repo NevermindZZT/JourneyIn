@@ -15,12 +15,15 @@ import (
 )
 
 type MapService struct {
-	registry   *journeymaps.Registry
-	store      *store.Store
-	semaphore  chan struct{}
-	dailyLimit int
-	mu         sync.Mutex
-	flights    map[string]*mapFlight
+	registry  *journeymaps.Registry
+	store     *store.Store
+	semaphore chan struct{}
+	// Route/direction calls use a conservative single-flight gate; the general semaphore
+	// still limits other provider requests.
+	routeSemaphore chan struct{}
+	dailyLimit     int
+	mu             sync.Mutex
+	flights        map[string]*mapFlight
 }
 
 type mapFlight struct {
@@ -33,7 +36,7 @@ func NewMapService(database *store.Store, registry *journeymaps.Registry, maxCon
 	if maxConcurrency < 1 {
 		maxConcurrency = 2
 	}
-	return &MapService{registry: registry, store: database, semaphore: make(chan struct{}, maxConcurrency), dailyLimit: dailyLimit, flights: make(map[string]*mapFlight)}
+	return &MapService{registry: registry, store: database, semaphore: make(chan struct{}, maxConcurrency), routeSemaphore: make(chan struct{}, 1), dailyLimit: dailyLimit, flights: make(map[string]*mapFlight)}
 }
 
 func (s *MapService) provider(id journeymaps.ProviderID) (journeymaps.MapProvider, error) {
@@ -225,7 +228,13 @@ func (s *MapService) Route(ctx context.Context, providerID journeymaps.ProviderI
 	}
 	cacheKey := mapCacheKey(cacheRequest)
 	data, err := s.cached(ctx, providerID, "route", cacheKey, 30*time.Minute, func() ([]byte, error) {
-		result, err := s.call(ctx, providerID, func() (any, error) { return provider.Route(ctx, request) })
+		if err := s.acquireRoute(ctx); err != nil {
+			return nil, err
+		}
+		defer s.releaseRoute()
+		// Use the same quarter-hour-bucketed departure that forms the cache key.
+		// Otherwise two requests in one bucket could share a snapshot fetched for a different time.
+		result, err := s.call(ctx, providerID, func() (any, error) { return provider.Route(ctx, cacheRequest) })
 		if err != nil {
 			return nil, err
 		}
@@ -262,6 +271,24 @@ func (s *MapService) Weather(ctx context.Context, providerID journeymaps.Provide
 		return result, err
 	}
 	return result, nil
+}
+
+func (s *MapService) acquireRoute(ctx context.Context) error {
+	if s.routeSemaphore == nil {
+		return nil
+	}
+	select {
+	case s.routeSemaphore <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *MapService) releaseRoute() {
+	if s.routeSemaphore != nil {
+		<-s.routeSemaphore
+	}
 }
 
 func (s *MapService) call(ctx context.Context, providerID journeymaps.ProviderID, fn func() (any, error)) (any, error) {

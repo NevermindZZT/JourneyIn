@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -75,7 +76,7 @@ func (s *TripService) AddStop(ctx context.Context, tripID string, expectedRevisi
 		for index := range day.Stops {
 			day.Stops[index].Sequence = index + 1
 		}
-		day.Legs = nil
+		clearRouteLegsAroundDay(&trip, dayIndex)
 		break
 	}
 	if !found {
@@ -117,59 +118,80 @@ func (s *TripService) PlanTrip(ctx context.Context, tripID string, expectedRevis
 	if !validTravelMode(mode) {
 		return store.TripRecord{}, fmt.Errorf("unsupported planning mode %q", mode)
 	}
-	planned := 0
+	type routePlanSegment struct {
+		dayIndex int
+		from     domain.Stop
+		to       domain.Stop
+	}
+	segments := make([]routePlanSegment, 0)
+	foundDay := input.DayID == ""
 	for dayIndex := range trip.Days {
 		day := &trip.Days[dayIndex]
 		if input.DayID != "" && day.ID != input.DayID {
 			continue
 		}
+		foundDay = true
 		day.Legs = nil
-		if len(day.Stops) < 2 {
-			continue
-		}
-		legs := make([]domain.RouteLeg, 0, len(day.Stops)-1)
-		for index := 0; index+1 < len(day.Stops); index++ {
-			origin, err := savedPoint(day.Stops[index].Location)
-			if err != nil {
-				return store.TripRecord{}, fmt.Errorf("day %s stop %s: %w", day.ID, day.Stops[index].ID, err)
-			}
-			destination, err := savedPoint(day.Stops[index+1].Location)
-			if err != nil {
-				return store.TripRecord{}, fmt.Errorf("day %s stop %s: %w", day.ID, day.Stops[index+1].ID, err)
-			}
-			snapshot, err := s.mapService.Route(ctx, providerID, journeymaps.RouteRequest{Origin: origin, Destination: destination, Mode: mode, DepartureAt: input.DepartureAt})
-			if err != nil {
-				return store.TripRecord{}, err
-			}
-			legID, err := domain.NewID("leg")
-			if err != nil {
-				return store.TripRecord{}, err
-			}
-			legs = append(legs, domain.RouteLeg{ID: legID, FromStopID: day.Stops[index].ID, ToStopID: day.Stops[index+1].ID, Mode: string(mode), Snapshots: []domain.RouteSnapshot{routeSnapshot(snapshot)}})
-			planned++
-		}
-		day.Legs = legs
-	}
-	if input.DayID != "" {
-		found := false
-		for _, day := range trip.Days {
-			if day.ID == input.DayID {
-				found = true
-				break
+		stops := orderedRouteStops(day.Stops)
+		// A day's first route point can be the previous day's final point.
+		// Store this boundary leg on the destination day so a single-day view
+		// still shows the route entering that day.
+		if dayIndex > 0 && len(stops) > 0 {
+			previousStops := orderedRouteStops(trip.Days[dayIndex-1].Stops)
+			if len(previousStops) > 0 {
+				segments = append(segments, routePlanSegment{dayIndex: dayIndex, from: previousStops[len(previousStops)-1], to: stops[0]})
 			}
 		}
-		if !found {
-			return store.TripRecord{}, fmt.Errorf("day %s not found", input.DayID)
+		for index := 0; index+1 < len(stops); index++ {
+			segments = append(segments, routePlanSegment{dayIndex: dayIndex, from: stops[index], to: stops[index+1]})
 		}
 	}
-	if planned == 0 {
-		return store.TripRecord{}, errors.New("at least two saved stops are required to plan a route")
+	if input.DayID != "" && !foundDay {
+		return store.TripRecord{}, fmt.Errorf("day %s not found", input.DayID)
+	}
+	if len(segments) == 0 {
+		return store.TripRecord{}, errors.New("at least two adjacent saved stops are required to plan a route")
+	}
+	for _, segment := range segments {
+		origin, err := savedPoint(segment.from.Location)
+		if err != nil {
+			return store.TripRecord{}, fmt.Errorf("day %s stop %s: %w", trip.Days[segment.dayIndex].ID, segment.from.ID, err)
+		}
+		destination, err := savedPoint(segment.to.Location)
+		if err != nil {
+			return store.TripRecord{}, fmt.Errorf("day %s stop %s: %w", trip.Days[segment.dayIndex].ID, segment.to.ID, err)
+		}
+		snapshot, err := s.mapService.Route(ctx, providerID, journeymaps.RouteRequest{Origin: origin, Destination: destination, Mode: mode, DepartureAt: input.DepartureAt})
+		if err != nil {
+			return store.TripRecord{}, fmt.Errorf("route %s -> %s: %w", segment.from.ID, segment.to.ID, err)
+		}
+		legID, err := domain.NewID("leg")
+		if err != nil {
+			return store.TripRecord{}, err
+		}
+		trip.Days[segment.dayIndex].Legs = append(trip.Days[segment.dayIndex].Legs, domain.RouteLeg{ID: legID, FromStopID: segment.from.ID, ToStopID: segment.to.ID, Mode: string(mode), Snapshots: []domain.RouteSnapshot{routeSnapshot(snapshot)}})
 	}
 	normalized, err := json.Marshal(trip)
 	if err != nil {
 		return store.TripRecord{}, err
 	}
 	return s.Replace(ctx, tripID, expectedRevision, normalized, source)
+}
+
+func orderedRouteStops(stops []domain.Stop) []domain.Stop {
+	ordered := append([]domain.Stop(nil), stops...)
+	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Sequence < ordered[j].Sequence })
+	return ordered
+}
+
+func clearRouteLegsAroundDay(trip *domain.Trip, dayIndex int) {
+	if dayIndex < 0 || dayIndex >= len(trip.Days) {
+		return
+	}
+	trip.Days[dayIndex].Legs = nil
+	if dayIndex+1 < len(trip.Days) {
+		trip.Days[dayIndex+1].Legs = nil
+	}
 }
 
 func savedPoint(raw json.RawMessage) (journeymaps.GeoPoint, error) {
@@ -270,7 +292,7 @@ func (s *TripService) AddSubStop(ctx context.Context, tripID string, expectedRev
 }
 
 // MoveStop changes the order of a main stop or one of its child stops.
-// Main-stop moves invalidate the day's adjacent route legs; child-stop moves do not.
+// Main-stop moves invalidate this day's legs and the following day's cross-day leg; child-stop moves do not.
 func (s *TripService) MoveStop(ctx context.Context, tripID string, expectedRevision int, dayID, stopID, direction, source string) (store.TripRecord, error) {
 	direction = strings.ToLower(strings.TrimSpace(direction))
 	if direction != "up" && direction != "down" {
@@ -306,7 +328,7 @@ func (s *TripService) MoveStop(ctx context.Context, tripID string, expectedRevis
 				if newIndex != stopIndex {
 					day.Stops[stopIndex], day.Stops[newIndex] = day.Stops[newIndex], day.Stops[stopIndex]
 					moved = true
-					day.Legs = nil
+					clearRouteLegsAroundDay(&trip, dayIndex)
 				}
 				for index := range day.Stops {
 					day.Stops[index].Sequence = index + 1
@@ -354,7 +376,7 @@ func (s *TripService) MoveStop(ctx context.Context, tripID string, expectedRevis
 }
 
 // ReorderStop moves a main stop or child stop to an exact 1-based sequence.
-// Main-stop reordering invalidates the day's adjacent route legs.
+// Main-stop reordering invalidates this day's legs and the following day's cross-day leg.
 func (s *TripService) ReorderStop(ctx context.Context, tripID string, expectedRevision int, dayID, stopID string, targetSequence int, source string) (store.TripRecord, error) {
 	if targetSequence < 1 {
 		return store.TripRecord{}, errors.New("target sequence must be positive")
@@ -393,7 +415,7 @@ func (s *TripService) ReorderStop(ctx context.Context, tripID string, expectedRe
 					}
 					day.Stops[newIndex] = stop
 					moved = true
-					day.Legs = nil
+					clearRouteLegsAroundDay(&trip, dayIndex)
 				}
 				for index := range day.Stops {
 					day.Stops[index].Sequence = index + 1
@@ -559,7 +581,7 @@ func (s *TripService) DeleteStop(ctx context.Context, tripID string, expectedRev
 				for index := range day.Stops {
 					day.Stops[index].Sequence = index + 1
 				}
-				day.Legs = nil
+				clearRouteLegsAroundDay(&trip, dayIndex)
 				found = true
 				break
 			}
