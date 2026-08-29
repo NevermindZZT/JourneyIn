@@ -30,7 +30,7 @@ go run ./cmd/journeyin -listen 127.0.0.1:8080 -data D:/data/journeyin/journeyin.
 
 ~~~text
 nevermindzzt/journeyin:latest
-nevermindzzt/journeyin:0.2.3
+nevermindzzt/journeyin:0.2.4
 ~~~
 
 使用持久化卷启动：
@@ -51,7 +51,7 @@ docker compose -f docker-compose.hub.yml pull
 docker compose -f docker-compose.hub.yml up --detach
 ~~~
 
-如需固定版本，可设置 `$env:JOURNEYIN_IMAGE = 'nevermindzzt/journeyin:0.2.3'` 后再执行上述命令。
+如需固定版本，可设置 `$env:JOURNEYIN_IMAGE = 'nevermindzzt/journeyin:0.2.4'` 后再执行上述命令。
 
 默认使用 Docker named volume `journeyin-data`，由容器以非 root 用户写入。若改用 `./data:/data` bind mount，必须先创建可写目录；Linux 还需将目录所有者设置为容器用户 UID 65532，否则 SQLite 会报 `unable to open database file (14)`。Windows Docker Desktop 优先建议使用 named volume。
 

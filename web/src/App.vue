@@ -23,7 +23,7 @@ type KeySettings = { map?: { baidu?: { browser_key_configured?: boolean; server_
 type PlaceCandidate = { id?: string; name: string; address?: string; location: Coord & { crs?: string }; provider?: string }
 type TravelMode = 'driving' | 'walking' | 'cycling' | 'transit'
 
-const APP_VERSION = '0.2.3'
+const APP_VERSION = '0.2.4'
 const APP_SLOGAN = '在地图上规划每一段旅程'
 const GITHUB_URL = 'https://github.com/NevermindZZT/JourneyIn'
 const shareMode = window.location.pathname.startsWith('/s/') && !window.location.pathname.endsWith('.json')
@@ -117,6 +117,7 @@ let mediaQuery: MediaQueryList | null = null
 let mapReadyTimer: number | null = null
 let loadedMapKey = ''
 let mapRenderVersion = 0
+let mapFocusVersion = 0
 
 const key = computed(() => capabilities.value?.map_providers?.baidu?.browser_key || '')
 const keyConfigured = computed(() => Boolean(key.value))
@@ -334,9 +335,61 @@ function mapRoutePoint(value: [number, number] | Coord, crs: string): (Coord & {
   if (point.crs === 'gcj02') return gcj02ToBd09(point)
   return point.crs === 'bd09ll' ? point : null
 }
+const SELECTED_STOP_ZOOM = 16
 function chooseSnapshot(leg: Leg) { return (leg.snapshots || []).find(snapshot => (snapshot.coordinate_system === 'bd09ll' || snapshot.coordinate_system === 'gcj02') && snapshot.geometry && snapshot.geometry.length > 1) || null }
-function selectStop(stop: Stop) { selectedStopId.value = stop.id; selectedSubStopId.value = ''; void renderMap(); if (window.matchMedia('(max-width: 900px)').matches) { panelOpen.value = false; localStorage.setItem('journeyin.panelOpen', 'false') }; if (mapInstance && mapAPI) { const point = pointFor(stop); if (point) mapInstance.panTo(new mapAPI.Point(point.lng, point.lat)) } }
-function selectSubStop(child: SubStop, parent: Stop) { selectedStopId.value = parent.id; selectedSubStopId.value = child.id; void renderMap(); if (window.matchMedia('(max-width: 900px)').matches) { panelOpen.value = false; localStorage.setItem('journeyin.panelOpen', 'false') }; if (mapInstance && mapAPI) { const point = pointFor(child); if (point) mapInstance.panTo(new mapAPI.Point(point.lng, point.lat)) } }
+function mapFocusViewport(): { width: number; height: number; x: number; y: number } | null {
+  const container = mapContainer.value
+  if (!container) return null
+  const containerRect = container.getBoundingClientRect()
+  const size = mapInstance?.getContainerSize?.()
+  const width = Number(size?.width) || container.clientWidth || containerRect.width
+  const height = Number(size?.height) || container.clientHeight || containerRect.height
+  if (!(width > 0) || !(height > 0)) return null
+  let left = 0; let top = 0; let right = width; let bottom = height
+  document.querySelectorAll<HTMLElement>('.floating-panel, .details-drawer').forEach(overlay => {
+    const rect = overlay.getBoundingClientRect()
+    const overlapWidth = Math.min(containerRect.right, rect.right) - Math.max(containerRect.left, rect.left)
+    const overlapHeight = Math.min(containerRect.bottom, rect.bottom) - Math.max(containerRect.top, rect.top)
+    if (overlapWidth <= 0 || overlapHeight <= 0) return
+    const touchesLeft = rect.left <= containerRect.left + 16
+    const touchesRight = rect.right >= containerRect.right - 16
+    const touchesTop = rect.top <= containerRect.top + 16
+    const touchesBottom = rect.bottom >= containerRect.bottom - 16
+    if (overlapWidth / width >= .75) {
+      if (touchesBottom) bottom = Math.min(bottom, rect.top - containerRect.top)
+      else if (touchesTop) top = Math.max(top, rect.bottom - containerRect.top)
+    } else if (overlapHeight / height >= .75) {
+      if (touchesLeft) left = Math.max(left, rect.right - containerRect.left)
+      if (touchesRight) right = Math.min(right, rect.left - containerRect.left)
+    }
+  })
+  if (right <= left || bottom <= top) return { width, height, x: width / 2, y: height / 2 }
+  return { width, height, x: (left + right) / 2, y: (top + bottom) / 2 }
+}
+function focusMapOnPoint(stop: Stop | SubStop) {
+  if (!mapInstance || !mapAPI || typeof mapAPI.Point !== 'function') return
+  const point = mapPointFor(stop)
+  if (!point || point.crs !== 'bd09ll') return
+  const mapPoint = new mapAPI.Point(point.lng, point.lat)
+  const focusVersion = ++mapFocusVersion
+  mapInstance.resize?.()
+  if (typeof mapInstance.centerAndZoom === 'function') mapInstance.centerAndZoom(mapPoint, SELECTED_STOP_ZOOM, { noAnimation: true })
+  else { mapInstance.setCenter?.(mapPoint); mapInstance.setZoom?.(SELECTED_STOP_ZOOM, { zoomCenter: mapPoint }) }
+  const alignVisibleCenter = () => {
+    if (focusVersion !== mapFocusVersion || typeof mapAPI.Pixel !== 'function' || typeof mapInstance.pixelToPoint !== 'function' || typeof mapInstance.setCenter !== 'function') return
+    const viewport = mapFocusViewport()
+    if (!viewport) return
+    const offsetX = viewport.x - viewport.width / 2
+    const offsetY = viewport.y - viewport.height / 2
+    if (Math.abs(offsetX) < 1 && Math.abs(offsetY) < 1) return
+    const shiftedPixel = new mapAPI.Pixel(viewport.width / 2 - offsetX, viewport.height / 2 - offsetY)
+    const adjustedCenter = mapInstance.pixelToPoint(shiftedPixel)
+    if (adjustedCenter) mapInstance.setCenter(adjustedCenter, { noAnimation: true })
+  }
+  window.requestAnimationFrame(alignVisibleCenter)
+}
+function selectStop(stop: Stop) { selectedStopId.value = stop.id; selectedSubStopId.value = ''; if (window.matchMedia('(max-width: 900px)').matches) { panelOpen.value = false; localStorage.setItem('journeyin.panelOpen', 'false') }; void renderMap() }
+function selectSubStop(child: SubStop, parent: Stop) { selectedStopId.value = parent.id; selectedSubStopId.value = child.id; if (window.matchMedia('(max-width: 900px)').matches) { panelOpen.value = false; localStorage.setItem('journeyin.panelOpen', 'false') }; void renderMap() }
 function openChildSearch(parent: Stop) { selectedStopId.value = parent.id; selectedSubStopId.value = ''; searchParentStopId.value = parent.id; panelOpen.value = true; panelCollapsed.value = false; mobileMapToolsOpen.value = false; panelMode.value = 'search'; searchMessage.value = '为“' + parent.title + '”添加子规划点' }
 function beginEditDescription() { descriptionDraft.value = selectedTarget.value?.description_markdown || ''; descriptionEditing.value = true }
 function cancelEditDescription() { descriptionEditing.value = false; descriptionDraft.value = ''; descriptionFullscreen.value = false }
@@ -395,6 +448,7 @@ async function loadBaiduMap() {
 async function renderMap() {
   if (!key.value || !mapContainer.value || !tripDocument.value) return
   const renderVersion = ++mapRenderVersion
+  ++mapFocusVersion
   try {
     await loadBaiduMap()
     if (renderVersion !== mapRenderVersion) return
@@ -452,7 +506,12 @@ async function renderMap() {
         attachRouteLabel(snapshot)
       }
     }
-    if (points.length) mapInstance.setViewport(points)
+    const focusTarget = selectedTarget.value
+    if (focusTarget) {
+      await nextTick()
+      if (renderVersion !== mapRenderVersion) return
+      focusMapOnPoint(focusTarget)
+    } else if (points.length) mapInstance.setViewport(points)
     else mapInstance.centerAndZoom('中国', 5)
     applyMapType()
     mapError.value = ''
