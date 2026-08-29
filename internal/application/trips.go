@@ -59,6 +59,24 @@ func (s *TripService) Validate(document []byte) ([]byte, domain.Trip, []domain.V
 func (s *TripService) Create(ctx context.Context, document []byte, source string) (store.TripRecord, error) {
 	return s.store.CreateTrip(ctx, document, source)
 }
+
+// Import creates a new Trip copy and intentionally drops the exported root ID.
+// This makes export -> import round-trips safe even when the original Trip remains stored.
+func (s *TripService) Import(ctx context.Context, document []byte, source string) (store.TripRecord, error) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(document, &raw); err != nil {
+		return store.TripRecord{}, err
+	}
+	if raw == nil {
+		return store.TripRecord{}, errors.New("trip JSON must be an object")
+	}
+	delete(raw, "id")
+	withoutID, err := json.Marshal(raw)
+	if err != nil {
+		return store.TripRecord{}, err
+	}
+	return s.store.CreateTrip(ctx, withoutID, source)
+}
 func (s *TripService) Get(ctx context.Context, id string) (store.TripRecord, error) {
 	return s.store.GetTrip(ctx, id)
 }

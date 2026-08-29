@@ -1,11 +1,13 @@
 package httpapi
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"html"
+	"io/fs"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -13,9 +15,21 @@ import (
 	"journeyin/internal/store"
 )
 
+const sharePageContentSecurityPolicy = "default-src 'self'; " +
+	"script-src 'self' 'unsafe-inline' 'unsafe-eval' https://api.map.baidu.com http://api.map.baidu.com https://*.baidu.com http://*.baidu.com https://*.bdimg.com http://*.bdimg.com https://*.bdstatic.com http://*.bdstatic.com; " +
+	"style-src 'self' 'unsafe-inline' data: blob: https://*.baidu.com http://*.baidu.com https://*.bdimg.com http://*.bdimg.com https://*.bdstatic.com http://*.bdstatic.com; " +
+	"img-src 'self' data: blob: https://*.baidu.com http://*.baidu.com https://*.bdimg.com http://*.bdimg.com https://*.bdstatic.com http://*.bdstatic.com; " +
+	"connect-src 'self' https://*.baidu.com http://*.baidu.com https://*.bdimg.com http://*.bdimg.com https://*.bdstatic.com http://*.bdstatic.com; " +
+	"font-src 'self' data: https://*.baidu.com http://*.baidu.com https://*.bdimg.com http://*.bdimg.com https://*.bdstatic.com http://*.bdstatic.com; " +
+	"worker-src 'self' blob: https://*.baidu.com http://*.baidu.com https://*.bdimg.com http://*.bdimg.com https://*.bdstatic.com http://*.bdstatic.com; " +
+	"child-src 'self' blob: https://*.baidu.com http://*.baidu.com https://*.bdimg.com http://*.bdimg.com https://*.bdstatic.com http://*.bdstatic.com; " +
+	"frame-src 'self' https://*.baidu.com http://*.baidu.com https://*.bdimg.com http://*.bdimg.com https://*.bdstatic.com http://*.bdstatic.com; " +
+	"base-uri 'self'; object-src 'none'; form-action 'none'; frame-ancestors 'none'"
+
 type createShareBody struct {
-	TripID     string `json:"trip_id"`
-	TTLSeconds int    `json:"ttl_seconds,omitempty"`
+	TripID        string `json:"trip_id"`
+	TTLSeconds    int    `json:"ttl_seconds,omitempty"`
+	ExistingToken string `json:"existing_token,omitempty"`
 }
 
 func (s *Server) createShare(w http.ResponseWriter, r *http.Request) {
@@ -45,16 +59,39 @@ func (s *Server) createShare(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "ttl_too_large", "share TTL cannot exceed 365 days", nil)
 		return
 	}
+	if existingToken := strings.TrimSpace(body.ExistingToken); existingToken != "" {
+		if existing, resolveErr := s.shareService.Resolve(existingToken); resolveErr == nil && existing.TripID == record.ID {
+			shareURL := "/s/" + existingToken
+			if baseURL := s.shareBaseURL(r); baseURL != "" {
+				shareURL = baseURL + shareURL
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"id": existing.ID, "trip_id": record.ID, "revision": record.Revision, "expires_at": existing.ExpiresAt, "url": shareURL, "reused": true})
+			return
+		}
+	}
 	token, shareRecord, err := s.shareService.Create(record.ID, record.Revision, record.ContentHash, record.Document, ttl)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "share_error", err.Error(), nil)
 		return
 	}
 	shareURL := "/s/" + token
-	if s.publicURL != "" {
-		shareURL = s.publicURL + shareURL
+	if baseURL := s.shareBaseURL(r); baseURL != "" {
+		shareURL = baseURL + shareURL
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"id": shareRecord.ID, "trip_id": record.ID, "revision": record.Revision, "expires_at": shareRecord.ExpiresAt, "url": shareURL})
+}
+
+func (s *Server) shareBaseURL(r *http.Request) string {
+	base := strings.TrimRight(strings.TrimSpace(s.publicURL), "/")
+	parsed, err := url.Parse(base)
+	if base == "" || err != nil || parsed.Hostname() == "0.0.0.0" || (parsed.Hostname() == "localhost" && (parsed.Port() == "" || parsed.Port() == "8080")) {
+		scheme := "http"
+		if r.TLS != nil {
+			scheme = "https"
+		}
+		return scheme + "://" + r.Host
+	}
+	return base
 }
 
 func (s *Server) revokeShare(w http.ResponseWriter, r *http.Request) {
@@ -76,32 +113,35 @@ func (s *Server) revokeShare(w http.ResponseWriter, r *http.Request) {
 func (s *Server) publicShare(w http.ResponseWriter, r *http.Request) {
 	token := r.PathValue("token")
 	if strings.HasSuffix(token, ".json") {
-		s.publicShareJSONToken(w, strings.TrimSuffix(token, ".json"))
+		s.publicShareJSONToken(r.Context(), w, strings.TrimSuffix(token, ".json"))
 		return
 	}
-	record, ok := s.resolveShare(w, token)
+	record, ok := s.resolveShare(r.Context(), w, token)
 	if !ok {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	setShareHeaders(w)
-	var document map[string]any
-	_ = json.Unmarshal(record.Content, &document)
-	title, _ := document["title"].(string)
-	if title == "" {
-		title = "JourneyIn 旅行规划"
+	setSharePageHeaders(w)
+	_, _ = w.Write(s.renderShareShell(record, s.browserMapKey))
+}
+
+func (s *Server) renderShareShell(record journeyshare.Record, browserKey string) []byte {
+	index, err := fs.ReadFile(s.web, "index.html")
+	if err != nil {
+		return []byte("<!doctype html><html><body>分享页面资源不可用</body></html>")
 	}
-	escaped := html.EscapeString(string(record.Content))
-	page := fmt.Sprintf("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>%s</title><style>body{margin:0;background:#f5f7f4;color:#152b2d;font-family:system-ui,sans-serif}main{max-width:1000px;margin:0 auto;padding:32px 20px}pre{overflow:auto;padding:20px;border-radius:16px;background:#fff;border:1px solid #d5e1df;white-space:pre-wrap}</style></head><body><main><p>JOURNEYIN · 只读分享</p><h1>%s</h1><p>此页面是不可编辑的行程快照，revision %d。</p><pre>%s</pre></main></body></html>", html.EscapeString(title), html.EscapeString(title), record.Revision, escaped)
-	_, _ = w.Write([]byte(page))
+	data, _ := json.Marshal(map[string]any{"trip": json.RawMessage(record.Content), "browser_key": browserKey, "revision": record.Revision})
+	bootstrap := append([]byte("<script>window.__JOURNEYIN_SHARE__="), data...)
+	bootstrap = append(bootstrap, []byte(";</script>")...)
+	return bytes.Replace(index, []byte("</head>"), append(bootstrap, []byte("</head>")...), 1)
 }
 
 func (s *Server) publicShareJSON(w http.ResponseWriter, r *http.Request) {
-	s.publicShareJSONToken(w, strings.TrimSuffix(r.PathValue("token"), ".json"))
+	s.publicShareJSONToken(r.Context(), w, strings.TrimSuffix(r.PathValue("token"), ".json"))
 }
 
-func (s *Server) publicShareJSONToken(w http.ResponseWriter, token string) {
-	record, ok := s.resolveShare(w, token)
+func (s *Server) publicShareJSONToken(ctx context.Context, w http.ResponseWriter, token string) {
+	record, ok := s.resolveShare(ctx, w, token)
 	if !ok {
 		return
 	}
@@ -111,7 +151,7 @@ func (s *Server) publicShareJSONToken(w http.ResponseWriter, token string) {
 	_, _ = w.Write(record.Content)
 }
 
-func (s *Server) resolveShare(w http.ResponseWriter, token string) (journeyshare.Record, bool) {
+func (s *Server) resolveShare(ctx context.Context, w http.ResponseWriter, token string) (journeyshare.Record, bool) {
 	if s.shareService == nil {
 		writeError(w, http.StatusNotFound, "not_found", "share not found", nil)
 		return journeyshare.Record{}, false
@@ -120,6 +160,13 @@ func (s *Server) resolveShare(w http.ResponseWriter, token string) (journeyshare
 	if err != nil {
 		writeError(w, http.StatusNotFound, "not_found", "share not found", nil)
 		return journeyshare.Record{}, false
+	}
+	if s.trips != nil {
+		if latest, tripErr := s.trips.Get(ctx, record.TripID); tripErr == nil {
+			record.Revision = latest.Revision
+			record.ContentHash = latest.ContentHash
+			record.Content = append([]byte(nil), latest.Document...)
+		}
 	}
 	return record, true
 }
@@ -130,4 +177,13 @@ func setShareHeaders(w http.ResponseWriter) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'")
+}
+
+func setSharePageHeaders(w http.ResponseWriter) {
+	setShareHeaders(w)
+	// Baidu browser AK domain validation needs an origin/referrer on cross-origin JSAPI and tile requests.
+	w.Header().Set("Referrer-Policy", "origin")
+	// The HTML shell needs a map-compatible CSP. In particular, BMap may create a base URL,
+	// a worker, or a nested browsing context while it resolves tile resources.
+	w.Header().Set("Content-Security-Policy", sharePageContentSecurityPolicy)
 }

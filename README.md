@@ -5,7 +5,7 @@
 [![Docker Pulls](https://img.shields.io/docker/pulls/nevermindzzt/journeyin)](https://hub.docker.com/r/nevermindzzt/journeyin)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.1 · 在地图上规划每一段旅程**
+> **在地图上规划每一段旅程**
 >
 > JourneyIn 是地图优先的旅行规划工具：把地点、顺序、路线、天气和备注放在同一张可保存的行程地图上。
 
@@ -30,7 +30,7 @@ go run ./cmd/journeyin -listen 127.0.0.1:8080 -data D:/data/journeyin/journeyin.
 
 ~~~text
 nevermindzzt/journeyin:latest
-nevermindzzt/journeyin:0.2.1
+nevermindzzt/journeyin:0.2.2
 ~~~
 
 使用持久化卷启动：
@@ -51,7 +51,9 @@ docker compose -f docker-compose.hub.yml pull
 docker compose -f docker-compose.hub.yml up --detach
 ~~~
 
-如需固定版本，可设置 `$env:JOURNEYIN_IMAGE = 'nevermindzzt/journeyin:0.2.1'` 后再执行上述命令。
+如需固定版本，可设置 `$env:JOURNEYIN_IMAGE = 'nevermindzzt/journeyin:0.2.2'` 后再执行上述命令。
+
+默认使用 Docker named volume `journeyin-data`，由容器以非 root 用户写入。若改用 `./data:/data` bind mount，必须先创建可写目录；Linux 还需将目录所有者设置为容器用户 UID 65532，否则 SQLite 会报 `unable to open database file (14)`。Windows Docker Desktop 优先建议使用 named volume。
 
 构建和重新运行不会删除数据库。若省略 `-data` 与 `JOURNEYIN_DATA_DIR`，默认使用用户配置目录中的 `JourneyIn/journeyin.db`；程序也会兼容读取当前目录、可执行文件目录或其上级目录下已有的 `data/journeyin.db`。验收时建议始终使用固定绝对路径。
 
@@ -127,13 +129,18 @@ pwsh -File scripts/verify-local.ps1 -ServerUrl http://127.0.0.1:8080 -WebUrl htt
 7. 在规划点详情点击“获取天气/刷新天气”；天气快照写入该点，显示查询时间，6 小时内重复刷新优先使用 SQLite cache。
 8. 后续地图重绘直接使用已保存的规划点、子规划点和路线快照，不重复搜索或地理编码。地图 HUD 的“卫星图/标准图”按钮只切换百度 JSAPI 图层，不触发 POI/路线请求。
 9. 地图默认显示地点名和行程日期 Label；HUD 可切换“显示标签/隐藏标签”，设置保存在浏览器 localStorage。
-10. 行程面板先展示行程列表；点击某条行程后进入独立的选中行程详情，使用“‹ 行程列表”返回，不会把其他行程卡片插入当前行程信息中。行程总体说明和规划点说明都可以二次编辑；规划点说明编辑时可进入全屏输入模式。
+10. 行程面板先展示行程列表；点击某条行程后进入独立的选中行程详情，使用“‹ 行程列表”返回，不会把其他行程卡片插入当前行程信息中。行程总体说明和规划点说明都可以二次编辑；规划点说明编辑时可进入全屏输入模式。面板提供“导入 Trip”“导出 JSON”和“在线分享”入口；导入会先调用只读校验接口，在线分享生成可撤销的只读链接，访问时读取该行程最新数据，不需要为每次更新生成新链接。
 
 规划 API：
 
 ~~~text
 POST /api/v1/auth/login
 POST /api/v1/auth/logout
+POST /api/v1/validate
+POST /api/v1/import
+GET  /api/v1/trips/{trip_id}/export.json
+POST /api/v1/shares
+POST /api/v1/shares/{share_id}/revoke
 POST /api/v1/maps/pois/search
 POST /api/v1/trips/{trip_id}/days/{day_id}/stops
 POST /api/v1/trips/{trip_id}/days/{day_id}/stops/{stop_id}/move  # body: {"direction":"up"} 或 {"target_sequence":2}
@@ -178,6 +185,7 @@ journeyin.get_capabilities
 journeyin.validate_trip
 journeyin.preview_save_trip
 journeyin.commit_save_trip
+journeyin.plan_trip
 journeyin.get_trip
 journeyin.list_trips
 ~~~

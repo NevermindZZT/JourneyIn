@@ -81,7 +81,11 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .global-error, .share-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 8px 24px #0002; backdrop-filter: blur(14px); }
 .global-error { color: var(--md-error); background: color-mix(in srgb, var(--md-error) 11%, var(--panel)); }
 .share-banner { color: var(--p); background: color-mix(in srgb, var(--p) 12%, var(--panel)); }
+.share-banner > span { min-width: 0; display: grid; gap: 3px; }
+.share-banner small { color: var(--muted); font-size: 11px; }
+.share-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 5px; }
 .global-error button, .share-banner button { border: 0; color: inherit; background: transparent; font-size: 20px; }
+.share-actions button { padding: 6px 8px; border: 1px solid color-mix(in srgb, var(--p) 50%, var(--line)); border-radius: 8px; font-size: 11px; }
 .share-banner a { overflow-wrap: anywhere; color: var(--p); }
 .floating-panel { position: absolute; z-index: 20; top: 18px; bottom: 18px; left: 18px; display: flex; width: min(390px, calc(100vw - 36px)); flex-direction: column; overflow: hidden; border: 1px solid color-mix(in srgb, var(--line) 80%, transparent); border-radius: 24px; color: var(--ink); background: color-mix(in srgb, var(--panel) 94%, transparent); box-shadow: 0 18px 60px #0004; backdrop-filter: blur(22px); }
 .panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 22px 20px 14px; border-bottom: 1px solid var(--line); }
@@ -101,6 +105,11 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .panel-tabs button, .panel-back { display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 8px 13px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: transparent; }
 .panel-tabs button.selected, .panel-tabs button:hover:not(:disabled) { border-color: var(--p); color: var(--md-on-primary); background: var(--p); }
 .panel-tabs button:disabled { cursor: not-allowed; opacity: .45; }
+.data-actions { display: flex; gap: 7px; flex-wrap: wrap; padding: 10px 16px 0; }
+.data-actions button { min-height: 36px; padding: 7px 12px; border: 1px solid var(--line); border-radius: 999px; color: var(--p); background: transparent; font-size: 12px; font-weight: 700; }
+.data-actions button:hover:not(:disabled) { border-color: var(--p); background: color-mix(in srgb, var(--p) 12%, var(--surface)); }
+.data-actions button:disabled { cursor: wait; opacity: .5; }
+.visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
 .panel-scroll { flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden; padding: 16px; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
 .panel-scroll::-webkit-scrollbar { width: 9px; }
 .panel-scroll::-webkit-scrollbar-track { background: transparent; }

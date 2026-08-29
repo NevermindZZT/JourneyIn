@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"journeyin/internal/application"
+	"journeyin/internal/domain"
 	journeymaps "journeyin/internal/maps"
 	journeyshare "journeyin/internal/share"
 	"journeyin/internal/store"
@@ -62,9 +63,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/auth/logout", s.logout)
 	mux.HandleFunc("GET /api/v1/capabilities", s.capabilities)
 	mux.HandleFunc("GET /api/v1/schema/trip/v1.json", s.schemaTrip)
+	mux.HandleFunc("POST /api/v1/validate", s.validateTrip)
 	mux.HandleFunc("GET /api/v1/trips", s.listTrips)
 	mux.HandleFunc("POST /api/v1/trips", s.createTrip)
-	mux.HandleFunc("POST /api/v1/import", s.createTrip)
+	mux.HandleFunc("POST /api/v1/import", s.importTrip)
 	mux.HandleFunc("GET /api/v1/trips/{id}", s.getTrip)
 	mux.HandleFunc("PUT /api/v1/trips/{id}", s.replaceTrip)
 	mux.HandleFunc("POST /api/v1/trips/{id}/days/{dayID}/stops", s.addStop)
@@ -158,6 +160,43 @@ func (s *Server) schemaTrip(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(data)
 }
 
+func (s *Server) validateTrip(w http.ResponseWriter, r *http.Request) {
+	document, err := readBody(r, 4<<20)
+	if err != nil {
+		writeError(w, http.StatusRequestEntityTooLarge, "payload_too_large", err.Error(), nil)
+		return
+	}
+	normalized, trip, issues, err := s.trips.Validate(document)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
+		return
+	}
+	if hasValidationErrors(issues) {
+		writeError(w, http.StatusBadRequest, "validation_error", "trip validation failed", map[string]any{"issues": issues})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"document": json.RawMessage(normalized), "summary": trip.Summary(), "warnings": validationWarnings(issues)})
+}
+
+func hasValidationErrors(issues []domain.ValidationIssue) bool {
+	for _, issue := range issues {
+		if issue.Level == "error" {
+			return true
+		}
+	}
+	return false
+}
+
+func validationWarnings(issues []domain.ValidationIssue) []domain.ValidationIssue {
+	result := make([]domain.ValidationIssue, 0)
+	for _, issue := range issues {
+		if issue.Level == "warning" {
+			result = append(result, issue)
+		}
+	}
+	return result
+}
+
 func (s *Server) listTrips(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	records, err := s.trips.List(r.Context(), limit)
@@ -170,6 +209,21 @@ func (s *Server) listTrips(w http.ResponseWriter, r *http.Request) {
 		result = append(result, tripSummary(record))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": result, "next_cursor": nil})
+}
+
+func (s *Server) importTrip(w http.ResponseWriter, r *http.Request) {
+	document, err := readBody(r, 4<<20)
+	if err != nil {
+		writeError(w, http.StatusRequestEntityTooLarge, "payload_too_large", err.Error(), nil)
+		return
+	}
+	record, err := s.trips.Import(r.Context(), document, "rest:import")
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	w.Header().Set("Location", "/api/v1/trips/"+record.ID)
+	writeJSON(w, http.StatusCreated, tripResponse(record))
 }
 
 func (s *Server) createTrip(w http.ResponseWriter, r *http.Request) {

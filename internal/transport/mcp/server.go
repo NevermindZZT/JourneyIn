@@ -11,6 +11,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"journeyin/internal/application"
 	"journeyin/internal/domain"
+	journeymaps "journeyin/internal/maps"
 	"journeyin/internal/store"
 )
 
@@ -39,6 +40,13 @@ type CommitArgs struct {
 type GetArgs struct {
 	TripID string `json:"trip_id"`
 }
+type PlanArgs struct {
+	TripID           string                 `json:"trip_id"`
+	ExpectedRevision int                    `json:"expected_revision"`
+	Provider         journeymaps.ProviderID `json:"provider,omitempty"`
+	Mode             journeymaps.TravelMode `json:"mode,omitempty"`
+	DayID            string                 `json:"day_id,omitempty"`
+}
 type ListArgs struct {
 	Limit int `json:"limit,omitempty"`
 }
@@ -59,6 +67,11 @@ type GetOutput struct {
 	Revision int             `json:"revision"`
 	Document json.RawMessage `json:"document"`
 }
+type PlanOutput struct {
+	TripID          string `json:"trip_id"`
+	Revision        int    `json:"revision"`
+	PlannedSegments int    `json:"planned_segments"`
+}
 
 func NewServer(app *application.TripService, version string, schema fs.FS) *Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "journeyin", Version: version}, nil)
@@ -67,6 +80,7 @@ func NewServer(app *application.TripService, version string, schema fs.FS) *Serv
 	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.validate_trip", Description: "Validate a JourneyIn Trip JSON document without writing it."}, result.validateTrip)
 	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.preview_save_trip", Description: "Create a short-lived preview for creating or replacing a trip; does not commit a revision."}, result.previewSaveTrip)
 	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.commit_save_trip", Description: "Commit a user-confirmed JourneyIn trip preview with idempotency protection."}, result.commitSaveTrip)
+	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.plan_trip", Description: "Generate saved routes for adjacent planning points and persist route snapshots."}, result.planTrip)
 	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.get_trip", Description: "Read one JourneyIn trip by ID."}, result.getTrip)
 	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.list_trips", Description: "List JourneyIn trips visible to the current connection."}, result.listTrips)
 	result.registerResources()
@@ -79,7 +93,7 @@ func (s *Server) HTTPHandler() http.Handler {
 func (s *Server) RunStdio(ctx context.Context) error { return s.mcp.Run(ctx, &mcp.StdioTransport{}) }
 
 func (s *Server) getCapabilities(ctx context.Context, req *mcp.CallToolRequest, input struct{}) (*mcp.CallToolResult, map[string]any, error) {
-	return nil, map[string]any{"version": s.version, "schema_versions": []int{1}, "tools": []string{"journeyin.get_capabilities", "journeyin.validate_trip", "journeyin.preview_save_trip", "journeyin.commit_save_trip", "journeyin.get_trip", "journeyin.list_trips"}, "resources": []string{"journeyin://schema/trip/v1", "journeyin://trips/{trip_id}"}, "map_providers": []string{"baidu", "amap"}}, nil
+	return nil, map[string]any{"version": s.version, "schema_versions": []int{1}, "tools": []string{"journeyin.get_capabilities", "journeyin.validate_trip", "journeyin.preview_save_trip", "journeyin.commit_save_trip", "journeyin.plan_trip", "journeyin.get_trip", "journeyin.list_trips"}, "resources": []string{"journeyin://schema/trip/v1", "journeyin://trips/{trip_id}"}, "map_providers": []string{"baidu", "amap"}}, nil
 }
 
 func (s *Server) validateTrip(ctx context.Context, req *mcp.CallToolRequest, input ValidateArgs) (*mcp.CallToolResult, ValidateOutput, error) {
@@ -99,6 +113,22 @@ func (s *Server) previewSaveTrip(ctx context.Context, req *mcp.CallToolRequest, 
 func (s *Server) commitSaveTrip(ctx context.Context, req *mcp.CallToolRequest, input CommitArgs) (*mcp.CallToolResult, application.CommitResult, error) {
 	result, err := s.app.CommitSave(ctx, input.PreviewID, input.ConfirmationToken, input.IdempotencyKey, input.ExpectedRevision, "mcp")
 	return nil, result, err
+}
+
+func (s *Server) planTrip(ctx context.Context, req *mcp.CallToolRequest, input PlanArgs) (*mcp.CallToolResult, PlanOutput, error) {
+	record, err := s.app.PlanTrip(ctx, input.TripID, input.ExpectedRevision, application.PlanInput{Provider: input.Provider, Mode: input.Mode, DayID: input.DayID}, "mcp:plan_trip")
+	if err != nil {
+		return nil, PlanOutput{}, err
+	}
+	var trip domain.Trip
+	if err := json.Unmarshal(record.Document, &trip); err != nil {
+		return nil, PlanOutput{}, err
+	}
+	segments := 0
+	for _, day := range trip.Days {
+		segments += len(day.Legs)
+	}
+	return nil, PlanOutput{TripID: record.ID, Revision: record.Revision, PlannedSegments: segments}, nil
 }
 
 func (s *Server) getTrip(ctx context.Context, req *mcp.CallToolRequest, input GetArgs) (*mcp.CallToolResult, GetOutput, error) {

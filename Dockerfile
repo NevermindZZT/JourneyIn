@@ -6,7 +6,7 @@ COPY web ./
 RUN pnpm build
 
 FROM golang:1.26-alpine AS go-build
-ARG VERSION=0.2.1
+ARG VERSION=0.2.2
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 WORKDIR /src
@@ -16,8 +16,11 @@ COPY . ./
 COPY --from=web-build /src/web/dist ./web/dist
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/journeyin ./cmd/journeyin
 
+FROM alpine:3.22 AS runtime-data
+RUN install -d -o 65532 -g 65532 /data
+
 FROM gcr.io/distroless/static-debian12:nonroot
-ARG VERSION=0.2.1
+ARG VERSION=0.2.2
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 LABEL org.opencontainers.image.title=JourneyIn \
@@ -27,6 +30,7 @@ LABEL org.opencontainers.image.title=JourneyIn \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.source="https://github.com/NevermindZZT/JourneyIn"
 COPY --from=go-build /out/journeyin /journeyin
+COPY --from=runtime-data --chown=65532:65532 /data /data
 VOLUME ["/data"]
 EXPOSE 8080
 ENTRYPOINT ["/journeyin"]

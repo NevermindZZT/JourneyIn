@@ -16,15 +16,17 @@ type SubStop = { id: string; sequence: number; kind?: string; title: string; add
 type Leg = { id: string; from_stop_id: string; to_stop_id: string; mode?: string; snapshots?: Array<{ provider?: string; coordinate_system?: string; geometry?: Array<[number, number]> | Array<Coord>; distance_m?: number; duration_s?: number; fetched_at?: string }> }
 type Day = { id: string; date: string; title?: string; notes_markdown?: string; stops: Stop[]; legs?: Leg[] }
 type TripDocument = { title: string; timezone: string; description_markdown?: string; links?: LinkData[]; days: Day[] }
+type SharedBootstrap = { trip: TripDocument & { id?: string; status?: string }; browser_key?: string; revision?: number }
 type TripSummary = { id: string; title: string; status: string; start_date: string; end_date: string; timezone: string; revision: number; days?: number; stops?: number }
 type Capabilities = { version?: string; map_providers?: { baidu?: { browser_key_configured?: boolean; browser_key?: string }; amap?: { browser_key_configured?: boolean } }; mcp?: { http_endpoint?: string } }
 type KeySettings = { map?: { baidu?: { browser_key_configured?: boolean; server_key_configured?: boolean }; amap?: { js_key_configured?: boolean; server_key_configured?: boolean } }; poi?: { provider_priority?: 'amap' | 'baidu'; local_directory_count?: number } }
 type PlaceCandidate = { id?: string; name: string; address?: string; location: Coord & { crs?: string }; provider?: string }
 type TravelMode = 'driving' | 'walking' | 'cycling' | 'transit'
 
-const APP_VERSION = '0.2.1'
+const APP_VERSION = '0.2.2'
 const APP_SLOGAN = '在地图上规划每一段旅程'
 const GITHUB_URL = 'https://github.com/NevermindZZT/JourneyIn'
+const shareMode = window.location.pathname.startsWith('/s/') && !window.location.pathname.endsWith('.json')
 
 declare global { interface Window { BMap?: any; BMapGL?: any; BMAP_NORMAL_MAP?: any; BMAP_SATELLITE_MAP?: any } }
 
@@ -54,6 +56,8 @@ const mapReady = ref(false)
 const mapContainer = ref<HTMLElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const shareURL = ref('')
+const shareID = ref('')
+const shareExpiresAt = ref('')
 const actionLoading = ref(false)
 const settingsOpen = ref(false)
 const newTripOpen = ref(false)
@@ -164,6 +168,17 @@ async function loadTrips() {
   }
 }
 
+async function loadSharedTrip() {
+  const bootstrap = (window as any).__JOURNEYIN_SHARE__ as SharedBootstrap | undefined
+  if (!bootstrap?.trip) { error.value = '分享数据不可用或已过期'; return }
+  const document = bootstrap.trip
+  const stops = document.days.reduce((total, day) => total + (day.stops || []).length, 0)
+  tripDocument.value = document
+  selected.value = { id: document.id || 'shared', title: document.title, status: document.status || 'shared', start_date: document.days[0]?.date || '', end_date: document.days[document.days.length - 1]?.date || '', timezone: document.timezone, revision: bootstrap.revision || 1, days: document.days.length, stops }
+  capabilities.value = { version: APP_VERSION, map_providers: { baidu: { browser_key_configured: Boolean(bootstrap.browser_key), browser_key: bootstrap.browser_key || '' } } }
+  selectedDay.value = 'all'; tripView.value = 'detail'; panelMode.value = 'journey'; panelOpen.value = true; selectedStopId.value = ''; selectedSubStopId.value = ''; reorderMode.value = false; descriptionEditing.value = false; tripDescriptionEditing.value = false
+  await nextTick(); await renderMap()
+}
 function selectTrip(trip: TripSummary) { tripView.value = 'detail'; void loadDetail(trip) }
 async function deleteTrip(trip: TripSummary) {
   if (!window.confirm('确认删除“' + trip.title + '”吗？该行程及其规划点、路线和天气快照都会删除。')) return
@@ -174,6 +189,7 @@ function deleteSelectedTrip() { if (selected.value) void deleteTrip(selected.val
 
 async function loadDetail(trip: TripSummary) {
   selected.value = trip
+  restoreShareState(trip.id)
   selectedStopId.value = ''
   detailLoading.value = true
   try {
@@ -233,11 +249,21 @@ function pointFor(stop: Stop | SubStop): (Coord & { crs: string }) | null {
   if (!point || !Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return null
   return { ...point, crs: preferred }
 }
+function mapPointFor(stop: Stop | SubStop): (Coord & { crs: string }) | null {
+  const point = pointFor(stop)
+  if (!point) return null
+  return point.crs === 'gcj02' ? gcj02ToBd09(point) : point
+}
 function routePoint(value: [number, number] | Coord, crs: string) {
   if (Array.isArray(value)) return { lng: value[0], lat: value[1], crs }
   return { lng: value.lng, lat: value.lat, crs: (value as Coord & { crs?: string }).crs || crs }
 }
-function chooseSnapshot(leg: Leg) { return (leg.snapshots || []).find(snapshot => snapshot.provider === 'baidu' && snapshot.coordinate_system === 'bd09ll' && snapshot.geometry && snapshot.geometry.length > 1) || null }
+function mapRoutePoint(value: [number, number] | Coord, crs: string): (Coord & { crs: string }) | null {
+  const point = routePoint(value, crs)
+  if (point.crs === 'gcj02') return gcj02ToBd09(point)
+  return point.crs === 'bd09ll' ? point : null
+}
+function chooseSnapshot(leg: Leg) { return (leg.snapshots || []).find(snapshot => (snapshot.coordinate_system === 'bd09ll' || snapshot.coordinate_system === 'gcj02') && snapshot.geometry && snapshot.geometry.length > 1) || null }
 function selectStop(stop: Stop) { selectedStopId.value = stop.id; selectedSubStopId.value = ''; void renderMap(); if (window.matchMedia('(max-width: 900px)').matches) { panelOpen.value = false; localStorage.setItem('journeyin.panelOpen', 'false') }; if (mapInstance && mapAPI) { const point = pointFor(stop); if (point) mapInstance.panTo(new mapAPI.Point(point.lng, point.lat)) } }
 function selectSubStop(child: SubStop, parent: Stop) { selectedStopId.value = parent.id; selectedSubStopId.value = child.id; void renderMap(); if (window.matchMedia('(max-width: 900px)').matches) { panelOpen.value = false; localStorage.setItem('journeyin.panelOpen', 'false') }; if (mapInstance && mapAPI) { const point = pointFor(child); if (point) mapInstance.panTo(new mapAPI.Point(point.lng, point.lat)) } }
 function openChildSearch(parent: Stop) { selectedStopId.value = parent.id; selectedSubStopId.value = ''; searchParentStopId.value = parent.id; panelOpen.value = true; panelMode.value = 'search'; searchMessage.value = '为“' + parent.title + '”添加子规划点' }
@@ -308,13 +334,13 @@ async function renderMap() {
       mapInstance.addEventListener?.('tilesloaded', () => { mapReady.value = true; mapError.value = ''; mapWarning.value = '' })
       if (mapReadyTimer !== null) window.clearTimeout(mapReadyTimer)
       mapReadyTimer = window.setTimeout(() => {
-        if (!mapReady.value) mapWarning.value = '百度地图底图加载较慢；请检查浏览器端 AK、127.0.0.1 域名白名单和网络连接。地图仍可继续尝试加载。'
+        if (!mapReady.value) mapWarning.value = '百度地图底图加载较慢；请检查浏览器端 AK、' + window.location.hostname + ' 域名白名单和网络连接。地图仍可继续尝试加载。'
       }, 8000)
     }
     mapInstance.clearOverlays()
     const points: any[] = []
     for (const stop of visibleStops.value) {
-      const point = pointFor(stop)
+      const point = mapPointFor(stop)
       if (!point || point.crs !== 'bd09ll') continue
       const mapPoint = new mapAPI.Point(point.lng, point.lat)
       points.push(mapPoint)
@@ -325,7 +351,7 @@ async function renderMap() {
       mapInstance.addOverlay(marker)
     }
     if (selectedStop.value?.children?.length) for (const child of selectedStop.value.children) {
-      const point = pointFor(child)
+      const point = mapPointFor(child)
       if (!point || point.crs !== 'bd09ll') continue
       const mapPoint = new mapAPI.Point(point.lng, point.lat)
       const marker = new mapAPI.Marker(mapPoint)
@@ -336,8 +362,8 @@ async function renderMap() {
     }
     for (const day of visibleDays.value) for (const leg of day.legs || []) {
       const snapshot = chooseSnapshot(leg)
-      if (!snapshot?.geometry) continue
-      const line = snapshot.geometry.map(value => { const point = routePoint(value, snapshot.coordinate_system || 'bd09ll'); return new mapAPI.Point(point.lng, point.lat) })
+      if (!snapshot || !snapshot.geometry) continue
+      const line = snapshot.geometry.map(value => mapRoutePoint(value, snapshot.coordinate_system || 'bd09ll')).filter((point): point is Coord & { crs: string } => Boolean(point)).map(point => new mapAPI.Point(point.lng, point.lat))
       if (line.length > 1) {
         mapInstance.addOverlay(new mapAPI.Polyline(line, { strokeColor: '#006874', strokeWeight: 5, strokeOpacity: .82 }))
         attachRouteLabel(snapshot)
@@ -354,7 +380,7 @@ function retryMap() { mapError.value = ''; mapWarning.value = ''; resetBaiduMapS
 function togglePanel() { panelOpen.value = !panelOpen.value; localStorage.setItem('journeyin.panelOpen', String(panelOpen.value)) }
 function applyMapType() {
   if (!mapInstance || !mapAPI || typeof mapInstance.setMapType !== 'function') return
-  const type = mapType.value === 'satellite' ? (window as any).BMAP_SATELLITE_MAP : (window as any).BMAP_NORMAL_MAP
+  const type = mapType.value === 'satellite' ? mapAPI.BMAP_SATELLITE_MAP || (window as any).BMAP_SATELLITE_MAP : mapAPI.BMAP_NORMAL_MAP || (window as any).BMAP_NORMAL_MAP
   if (type) mapInstance.setMapType(type)
 }
 function toggleMapType() { mapType.value = mapType.value === 'normal' ? 'satellite' : 'normal'; localStorage.setItem('journeyin.mapType', mapType.value); applyMapType() }
@@ -381,7 +407,7 @@ function formatDuration(seconds?: number) { if (!seconds || seconds < 0) return 
 function attachRouteLabel(snapshot: { geometry?: Array<[number, number]> | Array<Coord>; distance_m?: number; duration_s?: number; coordinate_system?: string }) {
   if (!showMapLabels.value || !mapAPI?.Label || !mapAPI?.Size || !snapshot.geometry?.length) return
   const text = [formatDistance(snapshot.distance_m), formatDuration(snapshot.duration_s)].filter(Boolean).join(' · '); if (!text) return
-  const middle = routePoint(snapshot.geometry[Math.floor(snapshot.geometry.length / 2)], snapshot.coordinate_system || 'bd09ll')
+  const middle = mapRoutePoint(snapshot.geometry[Math.floor(snapshot.geometry.length / 2)], snapshot.coordinate_system || 'bd09ll'); if (!middle) return
   const label = new mapAPI.Label(text, { offset: new mapAPI.Size(-24, -10) })
   label.setStyle?.({ color: '#ffffff', backgroundColor: '#006874dd', border: '0', borderRadius: '999px', padding: '4px 8px', fontSize: '12px', lineHeight: '16px', whiteSpace: 'nowrap', boxShadow: '0 3px 10px #0003' })
   label.setPosition?.(new mapAPI.Point(middle.lng, middle.lat)); mapInstance.addOverlay(label)
@@ -438,27 +464,71 @@ async function planRoutes() {
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '路线生成失败' } finally { planningLoading.value = false }
 }
 
+function openImportPicker() { fileInput.value?.click() }
+function importErrorMessage(payload: { error?: { message?: string; details?: { issues?: Array<{ path?: string; message?: string }> } } }, fallback: string) {
+  const issues = payload.error?.details?.issues || []
+  const detail = issues.map(issue => [issue.path, issue.message].filter(Boolean).join(': ')).filter(Boolean).join('；')
+  return detail ? fallback + '：' + detail : payload.error?.message || fallback
+}
 async function importTrip(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
   if (!file) return
-  actionLoading.value = true
+  actionLoading.value = true; error.value = ''
   try {
-    const response = await apiFetch('/api/v1/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: await file.text() })
-    if (!response.ok) { const payload = await response.json() as { error?: { message?: string } }; throw new Error(payload.error?.message || '导入失败') }
+    const document = await file.text()
+    try { JSON.parse(document) } catch { throw new Error('导入文件不是有效的 JSON') }
+    const validation = await apiFetch('/api/v1/validate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: document })
+    const validationPayload = await validation.json() as { error?: { message?: string; details?: { issues?: Array<{ path?: string; message?: string }> } } }
+    if (!validation.ok) throw new Error(importErrorMessage(validationPayload, 'Trip 校验失败'))
+    const response = await apiFetch('/api/v1/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: document })
+    if (!response.ok) { const payload = await response.json() as { error?: { message?: string; details?: { issues?: Array<{ path?: string; message?: string }> } } }; throw new Error(importErrorMessage(payload, '导入失败')) }
     await loadTrips()
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '导入失败' } finally { actionLoading.value = false; input.value = '' }
 }
-function downloadTrip() { if (selected.value) window.open('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/export.json', '_blank', 'noopener,noreferrer') }
+async function downloadTrip() {
+  if (!selected.value) return
+  actionLoading.value = true; error.value = ''
+  try {
+    const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/export.json')
+    if (!response.ok) { const payload = await response.json() as { error?: { message?: string } }; throw new Error(payload.error?.message || '导出失败') }
+    const blob = await response.blob(); const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = (selected.value.title || 'journeyin-trip').replace(/[\\/:*?"<>|]/g, '_') + '.json'; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url)
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '导出失败' } finally { actionLoading.value = false }
+}
+function shareStorageKey(tripID: string) { return 'journeyin.share.' + tripID }
+function shareTokenFromURL(url: string) { try { const parsed = new URL(url, window.location.origin); const match = parsed.pathname.match(/^\/s\/([^/]+)$/); return match?.[1] || '' } catch { return '' } }
+function saveShareState(tripID: string) { if (shareURL.value) localStorage.setItem(shareStorageKey(tripID), JSON.stringify({ id: shareID.value, url: shareURL.value, expires_at: shareExpiresAt.value })) }
+function restoreShareState(tripID: string) {
+  shareURL.value = ''; shareID.value = ''; shareExpiresAt.value = ''
+  try {
+    const saved = JSON.parse(localStorage.getItem(shareStorageKey(tripID)) || 'null') as { id?: string; url?: string; expires_at?: string } | null
+    if (!saved?.url || (saved.expires_at && Date.parse(saved.expires_at) <= Date.now())) { localStorage.removeItem(shareStorageKey(tripID)); return }
+    shareID.value = saved.id || ''; shareURL.value = saved.url; shareExpiresAt.value = saved.expires_at || ''
+  } catch { localStorage.removeItem(shareStorageKey(tripID)) }
+}
 async function createShare() {
   if (!selected.value) return
-  actionLoading.value = true; shareURL.value = ''
+  const tripID = selected.value.id; const existingToken = shareTokenFromURL(shareURL.value) || (() => { try { const saved = JSON.parse(localStorage.getItem(shareStorageKey(tripID)) || 'null') as { url?: string } | null; return saved?.url ? shareTokenFromURL(saved.url) : '' } catch { return '' } })()
+  actionLoading.value = true; error.value = ''
   try {
-    const response = await apiFetch('/api/v1/shares', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trip_id: selected.value.id }) })
-    const payload = await response.json() as { url?: string; error?: { message?: string } }
+    const response = await apiFetch('/api/v1/shares', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trip_id: tripID, existing_token: existingToken || undefined }) })
+    const payload = await response.json() as { id?: string; url?: string; expires_at?: string; error?: { message?: string } }
     if (!response.ok || !payload.url) throw new Error(payload.error?.message || '分享链接创建失败')
-    shareURL.value = payload.url
+    shareID.value = payload.id || ''; shareURL.value = payload.url; shareExpiresAt.value = payload.expires_at || ''; saveShareState(tripID)
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '分享链接创建失败' } finally { actionLoading.value = false }
+}
+async function copyShareURL() {
+  if (!shareURL.value) return
+  try { await navigator.clipboard.writeText(shareURL.value); settingsMessage.value = '分享链接已复制' } catch { error.value = '复制失败，请手动复制分享链接' }
+}
+async function revokeShare() {
+  if (!shareID.value || !window.confirm('确认撤销当前在线分享吗？撤销后链接将无法访问。')) return
+  actionLoading.value = true
+  try {
+    const response = await apiFetch('/api/v1/shares/' + encodeURIComponent(shareID.value) + '/revoke', { method: 'POST' })
+    if (!response.ok) { const payload = await response.json() as { error?: { message?: string } }; throw new Error(payload.error?.message || '撤销分享失败') }
+    shareURL.value = ''; shareID.value = ''; shareExpiresAt.value = ''; if (selected.value) localStorage.removeItem(shareStorageKey(selected.value.id)); settingsMessage.value = '在线分享已撤销'
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '撤销分享失败' } finally { actionLoading.value = false }
 }
 function safeURL(raw: string) { try { const parsed = new URL(raw); return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.toString() : '#' } catch { return '#' } }
 function escapeHTML(value: string) { return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('\\\"', '&quot;') }
@@ -660,7 +730,7 @@ function applyTheme() { const actual = theme.value === 'system' ? (window.matchM
 function setTheme(value: Theme) { theme.value = value; applyTheme() }
 function systemThemeChanged() { if (theme.value === 'system') applyTheme() }
 watch([selectedDay, tripDocument], () => { renderMap() }, { deep: true })
-onMounted(() => { applyTheme(); mediaQuery = window.matchMedia('(prefers-color-scheme: dark)'); mediaQuery.addEventListener?.('change', systemThemeChanged); loadTrips() })
+onMounted(() => { applyTheme(); mediaQuery = window.matchMedia('(prefers-color-scheme: dark)'); mediaQuery.addEventListener?.('change', systemThemeChanged); if (shareMode) void loadSharedTrip(); else loadTrips() })
 onUnmounted(() => mediaQuery?.removeEventListener?.('change', systemThemeChanged))
 </script>
 
@@ -670,7 +740,7 @@ onUnmounted(() => mediaQuery?.removeEventListener?.('change', systemThemeChanged
       <IonHeader translucent>
         <IonToolbar>
           <IonTitle><span class="brand-dot"></span><span class="brand-name">JourneyIn</span><span class="brand-slogan">{{ APP_SLOGAN }}</span><a class="brand-github" :href="GITHUB_URL" target="_blank" rel="noopener noreferrer">GitHub</a><span class="app-version">v{{ capabilities?.version || APP_VERSION }}</span></IonTitle>
-          <div slot="end" class="header-actions">
+          <div v-if="!shareMode" slot="end" class="header-actions">
             <IonButton fill="clear" aria-label="显示或隐藏行程面板" @click="togglePanel"><IonIcon :icon="menuOutline" /></IonButton>
             <IonButton fill="clear" aria-label="打开设置" @click="openSettings()"><IonIcon :icon="settingsOutline" /></IonButton>
             <IonButton fill="clear" aria-label="新建旅行规划" @click="newTripOpen = true"><IonIcon :icon="addOutline" /></IonButton>
@@ -695,23 +765,24 @@ onUnmounted(() => mediaQuery?.removeEventListener?.('change', systemThemeChanged
             <button v-if="!panelOpen" class="panel-open-button" aria-label="显示行程面板" @click="togglePanel"><IonIcon :icon="menuOutline" /> 行程面板</button>
             <button class="map-type-button" :class="{ active: mapType === 'satellite' }" @click="toggleMapType">{{ mapType === 'satellite' ? '标准图' : '卫星图' }}</button>
             <button class="map-label-button" :class="{ active: showMapLabels }" @click="toggleMapLabels">{{ showMapLabels ? '隐藏标签' : '显示标签' }}</button>
-            <button class="map-pick-button" :class="{ active: mapPickMode }" :disabled="!mapReady || !tripDocument" @click="toggleMapPick">{{ mapPickMode ? '取消选点' : '地图选点' }}</button>
+            <button v-if="!shareMode" class="map-pick-button" :class="{ active: mapPickMode }" :disabled="!mapReady || !tripDocument" @click="toggleMapPick">{{ mapPickMode ? '取消选点' : '地图选点' }}</button>
             <div class="map-status-pill"><IonIcon :icon="keyConfigured && mapReady && !mapError ? sunnyOutline : cloudOfflineOutline" /> {{ !tripDocument ? '等待行程' : !keyConfigured ? '离线数据可用' : mapError ? '百度地图不可用' : mapWarning ? '百度地图底图加载中' : mapReady ? '百度地图已连接' : '百度地图加载中' }} · {{ visibleStops.length }} 个规划点</div>
           </div>
           <section v-if="error || shareURL" class="map-notices">
             <div v-if="error" class="global-error">{{ error }}<button aria-label="关闭错误" @click="error = ''">×</button></div>
-            <div v-if="shareURL" class="share-banner"><span>只读分享：<a :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a></span><button aria-label="关闭分享提示" @click="shareURL = ''">×</button></div>
+            <div v-if="shareURL" class="share-banner"><span>只读分享：<a :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><small v-if="shareExpiresAt">有效期至 {{ new Date(shareExpiresAt).toLocaleString() }}</small></span><div class="share-actions"><button type="button" @click="copyShareURL">复制链接</button><button v-if="shareID" type="button" @click="revokeShare">撤销分享</button><button aria-label="关闭分享提示" @click="shareURL = ''">×</button></div></div>
           </section>
           <aside v-if="panelOpen" class="floating-panel plan-panel" aria-label="行程规划面板">
             <div class="panel-head">
               <div><p class="eyebrow">JOURNEYIN</p><h2>{{ tripView === 'detail' && selected ? selected.title : '旅行规划' }}</h2><p class="panel-subtitle">{{ tripView === 'detail' && selected ? selected.start_date + ' — ' + selected.end_date : '选择一条行程查看详情' }}</p></div>
               <button class="panel-close" aria-label="隐藏行程面板" @click="togglePanel">×</button>
             </div>
-            <button v-if="tripView === 'detail' && selected" class="panel-back panel-detail-back" @click="tripView = 'list'">‹ 行程列表</button>
+            <button v-if="!shareMode && tripView === 'detail' && selected" class="panel-back panel-detail-back" @click="tripView = 'list'">‹ 行程列表</button>
             <div class="panel-tabs">
               <button :class="{ selected: panelMode === 'journey' }" @click="panelMode = 'journey'">行程</button>
-              <button :class="{ selected: panelMode === 'search' }" :disabled="!selected" @click="searchParentStopId = ''; panelMode = 'search'"><IonIcon :icon="searchOutline" /> 添加地点</button>
+              <button v-if="!shareMode" :class="{ selected: panelMode === 'search' }" :disabled="!selected" @click="searchParentStopId = ''; panelMode = 'search'"><IonIcon :icon="searchOutline" /> 添加地点</button>
             </div>
+            <div v-if="!shareMode" class="data-actions"><button type="button" @click="openImportPicker">导入 Trip</button><button v-if="tripView === 'detail' && selected" type="button" :disabled="actionLoading" @click="downloadTrip">导出 JSON</button><button v-if="tripView === 'detail' && selected" type="button" :disabled="actionLoading" @click="createShare">在线分享</button><input ref="fileInput" class="visually-hidden" type="file" accept="application/json,.json" aria-hidden="true" tabindex="-1" @change="importTrip" /></div>
             <div class="panel-scroll">
               <template v-if="panelMode === 'journey'">
                 <template v-if="tripView === 'list'">
@@ -727,19 +798,19 @@ onUnmounted(() => mediaQuery?.removeEventListener?.('change', systemThemeChanged
                 </template>
                 <template v-else-if="tripView === 'detail' && selected && tripDocument">
                   <div class="trip-detail-kicker"><span class="eyebrow">SELECTED JOURNEY</span><span>{{ selected.start_date }} — {{ selected.end_date }}</span></div>
-                  <div class="trip-overview"><div class="description-header"><h3>行程总体说明</h3><span class="description-header-actions"><button v-if="!tripDescriptionEditing" class="text-button" @click="beginEditTripDescription">编辑行程说明</button><button v-if="tripDescriptionEditing" class="text-button" @click="openTripDescriptionFullscreen">全屏编辑</button></span></div><template v-if="tripDescriptionEditing"><textarea v-model="tripDescriptionDraft" class="description-editor" rows="5" placeholder="补充整个行程的背景、节奏和注意事项"></textarea><div class="description-actions"><button class="text-button" @click="cancelEditTripDescription">取消</button><button class="primary-text-button" :disabled="tripDescriptionSaving" @click="saveTripDescription">{{ tripDescriptionSaving ? '保存中…' : '保存说明' }}</button></div></template><div v-else-if="tripDocument.description_markdown" class="markdown" v-html="renderMarkdown(tripDocument.description_markdown)"></div><p v-else class="muted">暂无行程总体说明，点击“编辑行程说明”添加。</p></div>
+                  <div class="trip-overview"><div class="description-header"><h3>行程总体说明</h3><span v-if="!shareMode" class="description-header-actions"><button v-if="!tripDescriptionEditing" class="text-button" @click="beginEditTripDescription">编辑行程说明</button><button v-if="tripDescriptionEditing" class="text-button" @click="openTripDescriptionFullscreen">全屏编辑</button></span></div><template v-if="tripDescriptionEditing"><textarea v-model="tripDescriptionDraft" class="description-editor" rows="5" placeholder="补充整个行程的背景、节奏和注意事项"></textarea><div class="description-actions"><button class="text-button" @click="cancelEditTripDescription">取消</button><button class="primary-text-button" :disabled="tripDescriptionSaving" @click="saveTripDescription">{{ tripDescriptionSaving ? '保存中…' : '保存说明' }}</button></div></template><div v-else-if="tripDocument.description_markdown" class="markdown" v-html="renderMarkdown(tripDocument.description_markdown)"></div><p v-else class="muted">{{ shareMode ? '暂无行程总体说明。' : '暂无行程总体说明，点击“编辑行程说明”添加。' }}</p></div>
                   <div class="panel-section">
-                    <div class="section-heading compact"><div><p class="eyebrow">ITINERARY</p><h3>规划点</h3></div><div class="itinerary-actions"><span class="count-label">{{ visibleStops.length }} 个</span><button class="text-button reorder-toggle" :class="{ selected: reorderMode }" :aria-pressed="reorderMode" @click="toggleReorderMode">{{ reorderMode ? '完成排序' : '调整顺序' }}</button></div></div>
+                    <div class="section-heading compact"><div><p class="eyebrow">ITINERARY</p><h3>规划点</h3></div><div class="itinerary-actions"><span class="count-label">{{ visibleStops.length }} 个</span><button v-if="!shareMode" class="text-button reorder-toggle" :class="{ selected: reorderMode }" :aria-pressed="reorderMode" @click="toggleReorderMode">{{ reorderMode ? '完成排序' : '调整顺序' }}</button></div></div>
                     <div class="day-tabs"><button :class="{ selected: selectedDay === 'all' }" @click="selectedDay = 'all'">全程</button><button v-for="(_, index) in tripDocument.days" :key="index" :class="{ selected: selectedDay === index + 1 }" @click="selectedDay = index + 1">D{{ index + 1 }} · {{ tripDocument.days[index].date }}</button></div>
-                    <div class="plan-controls"><label>路线方式<select v-model="planningMode"><option value="walking">步行</option><option value="driving">驾车</option><option value="cycling">骑行</option><option value="transit">公交</option></select></label><IonButton size="small" :disabled="planningLoading || !plannableDays.length" @click="planRoutes"><IonIcon slot="start" :icon="navigateOutline" /> {{ planningLoading ? '规划中…' : '生成路线' }}</IonButton></div>
+                    <div v-if="!shareMode" class="plan-controls"><label>路线方式<select v-model="planningMode"><option value="walking">步行</option><option value="driving">驾车</option><option value="cycling">骑行</option><option value="transit">公交</option></select></label><IonButton size="small" :disabled="planningLoading || !plannableDays.length" @click="planRoutes"><IonIcon slot="start" :icon="navigateOutline" /> {{ planningLoading ? '规划中…' : '生成路线' }}</IonButton></div>
                     <div class="route-summary"><div><span class="route-summary-label">{{ selectedDay === 'all' ? '全程路线' : 'D' + selectedDay + ' 当天路线' }}</span><strong v-if="visibleRouteSummary.segments">{{ formatDistance(visibleRouteSummary.distanceM) || '距离未知' }} · {{ formatDuration(visibleRouteSummary.durationS) || '时间未知' }}</strong><span v-else>尚未生成路线</span></div><small v-if="visibleRouteSummary.segments">{{ visibleRouteSummary.segments }} 段相邻路线</small></div>
-                    <p class="order-help">{{ reorderMode ? '排序模式已开启：拖动每行左侧的 ⋮⋮ 手柄到目标位置，松开后立即保存。' : '需要调整规划点顺序？点击上方“调整顺序”，然后拖动左侧手柄。' }}</p>
+                    <p v-if="!shareMode" class="order-help">{{ reorderMode ? '排序模式已开启：拖动每行左侧的 ⋮⋮ 手柄到目标位置，松开后立即保存。' : '需要调整规划点顺序？点击上方“调整顺序”，然后拖动左侧手柄。' }}</p>
                     <p v-if="reorderMessage" class="inline-message">{{ reorderMessage }}</p>
-                    <p v-if="!plannableDays.length" class="hint">同一天添加至少两个地点后，点击“生成路线”。</p>
+                    <p v-if="!plannableDays.length" class="hint">{{ shareMode ? '当前选择范围暂无可生成的路线。' : '同一天添加至少两个地点后，点击“生成路线”。' }}</p>
                     <p v-else-if="visibleDays.some(day => day.legs?.some(leg => leg.snapshots?.length))" class="route-ready"><IonIcon :icon="navigateOutline" /> 已有路线快照；重复点击会优先使用缓存。</p>
-                    <div v-if="visibleStops.length" class="stop-list"><article v-for="stop in visibleStops" :key="stop.id" class="stop-row" :class="{ selected: selectedStopId === stop.id, 'reorder-dragging': draggedStopID === stop.id, 'reorder-drop-target': dragOverStopID === stop.id }" :draggable="reorderMode" @dragstart="startPlanningPointDrag($event, stop)" @dragover="dragOverPlanningPoint($event, stop)" @dragleave="dragLeavePlanningPoint($event, stop)" @drop="dropPlanningPoint($event, stop)" @dragend="endPlanningPointDrag" @pointerenter="enterPlanningPointPointer($event, stop)" @pointerup="dropPlanningPointPointer($event, stop)"><span v-if="reorderMode" class="drag-handle" aria-hidden="true" @pointerdown.stop="startPlanningPointPointer($event, stop)">⋮⋮</span><button class="stop-row-main" @click="selectStop(stop)"><span class="stop-number">{{ stop.sequence }}</span><span><b>{{ stop.title }}</b><small>{{ stopDate(stop) }} · {{ stop.address || '地址已保存' }}</small></span><span class="stop-arrow">›</span></button><button class="icon-delete stop-delete" :aria-label="'删除规划点 ' + stop.title" @click.stop="deletePlanningPoint(stop)">×</button></article></div>
+                    <div v-if="visibleStops.length" class="stop-list"><article v-for="stop in visibleStops" :key="stop.id" class="stop-row" :class="{ selected: selectedStopId === stop.id, 'reorder-dragging': draggedStopID === stop.id, 'reorder-drop-target': dragOverStopID === stop.id }" :draggable="reorderMode" @dragstart="startPlanningPointDrag($event, stop)" @dragover="dragOverPlanningPoint($event, stop)" @dragleave="dragLeavePlanningPoint($event, stop)" @drop="dropPlanningPoint($event, stop)" @dragend="endPlanningPointDrag" @pointerenter="enterPlanningPointPointer($event, stop)" @pointerup="dropPlanningPointPointer($event, stop)"><span v-if="reorderMode" class="drag-handle" aria-hidden="true" @pointerdown.stop="startPlanningPointPointer($event, stop)">⋮⋮</span><button class="stop-row-main" @click="selectStop(stop)"><span class="stop-number">{{ stop.sequence }}</span><span><b>{{ stop.title }}</b><small>{{ stopDate(stop) }} · {{ stop.address || '地址已保存' }}</small></span><span class="stop-arrow">›</span></button><button v-if="!shareMode" class="icon-delete stop-delete" :aria-label="'删除规划点 ' + stop.title" @click.stop="deletePlanningPoint(stop)">×</button></article></div>
                     <p v-else class="empty compact-empty">当前日期还没有规划点。</p>
-                    <button class="add-place-cta" @click="searchParentStopId = ''; panelMode = 'search'"><IonIcon :icon="searchOutline" /> 搜索并添加规划点</button>
+                    <button v-if="!shareMode" class="add-place-cta" @click="searchParentStopId = ''; panelMode = 'search'"><IonIcon :icon="searchOutline" /> 搜索并添加规划点</button>
                   </div>
                 </template>
               </template>
@@ -767,11 +838,11 @@ onUnmounted(() => mediaQuery?.removeEventListener?.('change', systemThemeChanged
             <p class="stop-date">行程日期：{{ stopDate(selectedTarget || selectedStop) }}</p>
             <div class="saved-location"><span>坐标已保存</span><small>{{ pointFor(selectedTarget || selectedStop)?.crs || '未知 CRS' }} · {{ pointFor(selectedTarget || selectedStop)?.lat.toFixed(6) }}, {{ pointFor(selectedTarget || selectedStop)?.lng.toFixed(6) }}</small></div>
             <div class="weather"><IonIcon :icon="sunnyOutline" /><span>{{ weatherText(selectedTarget || selectedStop) }}<small v-if="weatherUpdatedAt(selectedTarget || selectedStop)">更新于 {{ weatherUpdatedAt(selectedTarget || selectedStop) }}</small></span></div>
-            <IonButton size="small" fill="outline" :disabled="weatherLoading" @click="refreshWeather">{{ weatherLoading ? '天气查询中…' : selectedTarget?.weather ? '刷新天气' : '获取天气' }}</IonButton>
-            <div v-if="!selectedSubStop" class="children-panel"><div class="section-heading compact"><div><p class="eyebrow">CHILD POINTS</p><h3>子规划点</h3></div><div class="itinerary-actions"><span class="count-label">{{ selectedStop.children?.length || 0 }} 个</span><span v-if="reorderMode" class="sort-badge">可拖动</span></div></div><p class="children-help">{{ reorderMode ? '拖动子规划点左侧的 ⋮⋮ 手柄调整顺序。' : '进入主规划点详情后，子规划点才会显示在地图上。' }}</p><div v-if="selectedStop.children?.length" class="child-list"><div v-for="child in selectedStop.children" :key="child.id" class="child-row-wrap" :class="{ 'reorder-dragging': draggedStopID === child.id, 'reorder-drop-target': dragOverStopID === child.id }" :draggable="reorderMode" @dragstart="startPlanningPointDrag($event, child)" @dragover="dragOverPlanningPoint($event, child)" @dragleave="dragLeavePlanningPoint($event, child)" @drop="dropPlanningPoint($event, child)" @dragend="endPlanningPointDrag" @pointerenter="enterPlanningPointPointer($event, child)" @pointerup="dropPlanningPointPointer($event, child)"><span v-if="reorderMode" class="drag-handle" aria-hidden="true" @pointerdown.stop="startPlanningPointPointer($event, child)">⋮⋮</span><button class="child-row" :class="{ selected: selectedSubStopId === child.id }" @click="selectSubStop(child, selectedStop)"><span class="child-number">{{ child.sequence }}</span><span><b>{{ child.title }}</b><small>{{ stopDate(child) }} · {{ child.address || '地址已保存' }}</small></span><span>›</span></button><button class="icon-delete child-delete" :aria-label="'删除子规划点 ' + child.title" @click.stop="deletePlanningPoint(child)">×</button></div></div><button class="add-place-cta" @click="openChildSearch(selectedStop)"><IonIcon :icon="searchOutline" /> 添加子规划点</button></div>
-            <div class="description-section"><div class="description-header"><h3>地点说明</h3><span class="description-header-actions"><button v-if="descriptionEditing" class="text-button" @click="openDescriptionFullscreen">全屏编辑</button><button v-if="!descriptionEditing" class="text-button" @click="beginEditDescription">编辑地点说明</button></span></div><template v-if="descriptionEditing"><textarea v-model="descriptionDraft" class="description-editor" rows="7" placeholder="补充这个地点的门票、开放时间、行程备注等信息"></textarea><div class="description-actions"><button class="text-button" @click="cancelEditDescription">取消</button><button class="primary-text-button" :disabled="descriptionSaving" @click="saveDescription">{{ descriptionSaving ? '保存中…' : '保存说明' }}</button></div></template><template v-else><div v-if="selectedTarget?.description_markdown" class="markdown" v-html="renderMarkdown(selectedTarget.description_markdown)"></div><p v-else class="muted">暂无地点说明，点击“编辑地点说明”添加。</p></template></div>
+            <IonButton v-if="!shareMode" size="small" fill="outline" :disabled="weatherLoading" @click="refreshWeather">{{ weatherLoading ? '天气查询中…' : selectedTarget?.weather ? '刷新天气' : '获取天气' }}</IonButton>
+            <div v-if="!selectedSubStop" class="children-panel"><div class="section-heading compact"><div><p class="eyebrow">CHILD POINTS</p><h3>子规划点</h3></div><div class="itinerary-actions"><span class="count-label">{{ selectedStop.children?.length || 0 }} 个</span><span v-if="reorderMode" class="sort-badge">可拖动</span></div></div><p class="children-help">{{ reorderMode ? '拖动子规划点左侧的 ⋮⋮ 手柄调整顺序。' : '进入主规划点详情后，子规划点才会显示在地图上。' }}</p><div v-if="selectedStop.children?.length" class="child-list"><div v-for="child in selectedStop.children" :key="child.id" class="child-row-wrap" :class="{ 'reorder-dragging': draggedStopID === child.id, 'reorder-drop-target': dragOverStopID === child.id }" :draggable="reorderMode" @dragstart="startPlanningPointDrag($event, child)" @dragover="dragOverPlanningPoint($event, child)" @dragleave="dragLeavePlanningPoint($event, child)" @drop="dropPlanningPoint($event, child)" @dragend="endPlanningPointDrag" @pointerenter="enterPlanningPointPointer($event, child)" @pointerup="dropPlanningPointPointer($event, child)"><span v-if="reorderMode" class="drag-handle" aria-hidden="true" @pointerdown.stop="startPlanningPointPointer($event, child)">⋮⋮</span><button class="child-row" :class="{ selected: selectedSubStopId === child.id }" @click="selectSubStop(child, selectedStop)"><span class="child-number">{{ child.sequence }}</span><span><b>{{ child.title }}</b><small>{{ stopDate(child) }} · {{ child.address || '地址已保存' }}</small></span><span>›</span></button><button v-if="!shareMode" class="icon-delete child-delete" :aria-label="'删除子规划点 ' + child.title" @click.stop="deletePlanningPoint(child)">×</button></div></div><button v-if="!shareMode" class="add-place-cta" @click="openChildSearch(selectedStop)"><IonIcon :icon="searchOutline" /> 添加子规划点</button></div>
+            <div class="description-section"><div class="description-header"><h3>地点说明</h3><span v-if="!shareMode" class="description-header-actions"><button v-if="descriptionEditing" class="text-button" @click="openDescriptionFullscreen">全屏编辑</button><button v-if="!descriptionEditing" class="text-button" @click="beginEditDescription">编辑地点说明</button></span></div><template v-if="descriptionEditing"><textarea v-model="descriptionDraft" class="description-editor" rows="7" placeholder="补充这个地点的门票、开放时间、行程备注等信息"></textarea><div class="description-actions"><button class="text-button" @click="cancelEditDescription">取消</button><button class="primary-text-button" :disabled="descriptionSaving" @click="saveDescription">{{ descriptionSaving ? '保存中…' : '保存说明' }}</button></div></template><template v-else><div v-if="selectedTarget?.description_markdown" class="markdown" v-html="renderMarkdown(selectedTarget.description_markdown)"></div><p v-else class="muted">{{ shareMode ? '暂无地点说明。' : '暂无地点说明，点击“编辑地点说明”添加。' }}</p></template></div>
             <div class="links" v-if="selectedTarget?.links?.length"><a v-for="link in selectedTarget.links" :key="link.id || link.url" :href="safeURL(link.url)" target="_blank" rel="noopener noreferrer"><IonIcon :icon="linkOutline" /> {{ link.title }}</a></div>
-            <div class="nav-actions"><IonButton size="small" @click="openNavigation('baidu')"><IonIcon slot="start" :icon="navigateOutline" /> 百度导航</IonButton><IonButton size="small" fill="outline" @click="openNavigation('amap')"><IonIcon slot="start" :icon="navigateOutline" /> 高德导航</IonButton><button class="danger-button detail-delete" @click="deletePlanningPoint(selectedTarget || selectedStop)">{{ selectedSubStop ? '删除子规划点' : '删除规划点' }}</button></div>
+            <div class="nav-actions"><IonButton size="small" @click="openNavigation('baidu')"><IonIcon slot="start" :icon="navigateOutline" /> 百度导航</IonButton><IonButton size="small" fill="outline" @click="openNavigation('amap')"><IonIcon slot="start" :icon="navigateOutline" /> 高德导航</IonButton><button v-if="!shareMode" class="danger-button detail-delete" @click="deletePlanningPoint(selectedTarget || selectedStop)">{{ selectedSubStop ? '删除子规划点' : '删除规划点' }}</button></div>
             </div>
           </aside>
         </main>
