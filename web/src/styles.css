@@ -275,3 +275,82 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
   .app-version { margin-left: 5px; font-size: 10px; }
   .panel-detail-back { margin-left: 14px; }
 }
+
+/* Mobile map controls stay in one compact row, with status below it. */
+@media (max-width: 900px) {
+  .map-hud { inset: 10px 10px auto; gap: 6px; }
+  .map-type-button, .map-label-button, .map-pick-button, .map-status-pill, .panel-open-button { min-height: 36px; padding: 6px 10px; font-size: 12px; line-height: 1.15; }
+  .map-type-button, .map-label-button, .map-pick-button { white-space: nowrap; }
+  .map-status-pill { white-space: nowrap; }
+}
+
+.mobile-map-tools-toggle, .mobile-map-tools-close { display: none; }
+.panel-head-actions { display: flex; align-items: center; gap: 2px; }
+.panel-collapse, .detail-collapse { display: none; border: 0; color: var(--muted); background: transparent; }
+
+@media (max-width: 560px) {
+  .map-shell.mobile-panel-open:not(.mobile-map-tools-open) .map-hud { display: none; }
+  .map-shell:not(.mobile-panel-open):not(.mobile-map-tools-open) .map-hud .map-type-button, .map-shell:not(.mobile-panel-open):not(.mobile-map-tools-open) .map-hud .map-label-button, .map-shell:not(.mobile-panel-open):not(.mobile-map-tools-open) .map-hud .map-pick-button, .map-shell:not(.mobile-panel-open):not(.mobile-map-tools-open) .map-hud .map-status-pill { display: none; }
+  .mobile-map-tools-toggle { position: absolute; z-index: 31; top: 10px; right: 10px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 36px; padding: 6px 11px; border: 1px solid color-mix(in srgb, var(--line) 78%, transparent); border-radius: 999px; color: var(--p); background: color-mix(in srgb, var(--panel) 92%, transparent); box-shadow: 0 8px 24px #0002; backdrop-filter: blur(14px); font-size: 12px; line-height: 1.15; white-space: nowrap; }
+  .mobile-map-tools-toggle.active { color: var(--md-on-primary); background: var(--p); }
+  .map-shell:not(.mobile-panel-open) .mobile-map-tools-toggle { top: 54px; }
+  .map-hud { left: 8px; right: 8px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; gap: 6px; }
+  .map-hud .panel-open-button { grid-column: 1 / -1; margin-right: 0; width: 100%; justify-content: center; }
+  .map-hud .map-type-button, .map-hud .map-label-button, .map-hud .map-pick-button { width: 100%; min-width: 0; padding: 5px 4px; overflow: hidden; text-overflow: ellipsis; }
+  .map-hud .map-status-pill { position: relative; grid-column: 1 / -1; width: 100%; min-width: 0; justify-content: center; padding: 5px 66px 5px 8px; overflow: hidden; text-overflow: ellipsis; }
+  .mobile-map-tools-close { position: absolute; top: 50%; right: 7px; display: inline-flex; align-items: center; gap: 3px; min-height: 26px; padding: 3px 7px; border: 1px solid color-mix(in srgb, var(--p) 50%, var(--line)); border-radius: 999px; color: var(--p); background: color-mix(in srgb, var(--panel) 92%, transparent); transform: translateY(-50%); font-size: 11px; white-space: nowrap; }
+  .mobile-map-tools-close ion-icon { font-size: 15px; }
+  .map-notices { top: 92px; right: 8px; left: 8px; width: auto; }
+  .share-banner { align-items: stretch; gap: 8px; padding: 10px 12px; }
+  .share-actions { justify-content: flex-end; }
+  .share-copy-feedback { color: var(--p) !important; font-weight: 700; }
+
+  .floating-panel { top: 64px; right: 8px; bottom: max(8px, env(safe-area-inset-bottom)); left: 8px; width: auto; height: auto; max-height: none; min-height: 0; border-radius: 18px; }
+  .floating-panel.panel-detail-mode { height: auto; max-height: none; }
+  .floating-panel.panel-collapsed { top: auto; bottom: max(8px, env(safe-area-inset-bottom)); height: 50%; max-height: 50%; }
+  .floating-panel.mobile-map-tools-open:not(.panel-collapsed) { top: 96px; }
+  .panel-list-mode .panel-subtitle { display: none; }
+  .panel-head { min-height: 0; padding: 10px 14px 8px; gap: 8px; }
+  .panel-head h2 { max-width: calc(100vw - 88px); margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 18px; }
+  .panel-subtitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+  .panel-close { font-size: 24px; }
+  .panel-collapse { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border-radius: 50%; font-size: 20px; line-height: 1; }
+  .panel-detail-back { margin: 5px 14px 0; padding: 6px 10px; font-size: 12px; }
+  .panel-tabs { padding: 6px 14px 0; gap: 5px; }
+  .panel-tabs button, .panel-back { min-height: 32px; padding: 6px 10px; font-size: 12px; }
+  .data-actions { padding: 6px 14px 0; gap: 5px; }
+  .data-actions button { min-height: 32px; padding: 5px 9px; font-size: 11px; }
+  .panel-scroll { min-height: 0; padding: 10px 14px 14px; }
+  .panel-list-heading { margin-bottom: 5px; }
+  .panel-list-heading .eyebrow, .panel-list-heading h3 { display: none; }
+  .panel-detail-mode .trip-detail-kicker { display: none; }
+  .panel-detail-mode .panel-tabs { display: none; }
+  .panel-detail-mode .trip-overview { margin-top: 8px; padding: 11px; }
+  .panel-detail-mode .trip-overview .description-header { margin-bottom: 5px; }
+  .panel-detail-mode .trip-overview .description-header h3 { font-size: 15px; }
+  .panel-detail-mode .trip-overview p { margin: 0; line-height: 1.4; }
+  .panel-section { margin-top: 12px; padding-top: 12px; }
+  .section-heading { margin-bottom: 7px; }
+  .section-heading h3 { font-size: 17px; }
+  .day-tabs { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+  .day-tabs::-webkit-scrollbar { display: none; }
+  .day-tabs button { flex: 0 0 auto; padding: 6px 9px; font-size: 11px; white-space: nowrap; }
+  .panel-detail-mode .plan-controls { align-items: end; flex-direction: row; gap: 6px; margin-top: 8px; }
+  .panel-detail-mode .plan-controls label { min-width: 0; }
+  .panel-detail-mode .plan-controls select { min-height: 36px; padding: 6px 8px; }
+  .panel-detail-mode .plan-controls ion-button { flex: 0 0 auto; --min-height: 36px; --padding-start: 11px; --padding-end: 11px; font-size: 12px; }
+  .route-summary { margin-top: 8px; padding: 8px 10px; }
+  .route-summary strong { font-size: 14px; }
+  .route-summary small { font-size: 10px; }
+  .order-help, .hint, .route-ready { margin-top: 7px; font-size: 11px; }
+  .stop-row-main { padding: 8px 6px; }
+  .stop-number { flex-basis: 28px; width: 28px; height: 28px; font-size: 13px; }
+  .icon-delete { flex-basis: 28px; width: 28px; height: 28px; }
+
+  .details-drawer { right: 8px; bottom: max(8px, env(safe-area-inset-bottom)); left: 8px; height: calc(100% - 48px); max-height: 90vh; border-radius: 18px; }
+  .details-drawer.details-collapsed { top: auto; bottom: max(8px, env(safe-area-inset-bottom)); height: 50%; max-height: 50%; }
+  .detail-collapse { position: absolute; z-index: 2; top: 14px; right: 58px; display: grid; width: 36px; height: 36px; place-items: center; padding: 0; border: 0; border-radius: 50%; color: var(--muted); background: var(--md-surface-container-high); }
+  .detail-collapse ion-icon { font-size: 18px; }
+  .details-scroll { padding: 18px 16px; }
+  .details-drawer h2 { font-size: 24px; }
+}

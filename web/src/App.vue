@@ -5,7 +5,7 @@ import {
   IonPage, IonTitle, IonToolbar,
 } from '@ionic/vue'
 import BMapLoader from '@baidumap/jsapi-loader'
-import { addOutline, closeOutline, cloudOfflineOutline, linkOutline, logInOutline, mapOutline, menuOutline, navigateOutline, searchOutline, settingsOutline, sunnyOutline } from 'ionicons/icons'
+import { addOutline, chevronDownOutline, chevronUpOutline, closeOutline, cloudOfflineOutline, linkOutline, logInOutline, mapOutline, menuOutline, navigateOutline, searchOutline, settingsOutline, sunnyOutline } from 'ionicons/icons'
 
 type Theme = 'system' | 'light' | 'dark'
 type Coord = { lat: number; lng: number }
@@ -58,6 +58,7 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const shareURL = ref('')
 const shareID = ref('')
 const shareExpiresAt = ref('')
+const shareCopyMessage = ref('')
 const actionLoading = ref(false)
 const settingsOpen = ref(false)
 const newTripOpen = ref(false)
@@ -84,6 +85,9 @@ const poiProviderPriority = ref<'amap' | 'baidu'>('amap')
 const localDirectoryCount = ref(0)
 const settingsSaving = ref(false)
 const panelOpen = ref(localStorage.getItem('journeyin.panelOpen') !== 'false')
+const panelCollapsed = ref(localStorage.getItem('journeyin.panelCollapsed') === 'true')
+const mobileMapToolsOpen = ref(false)
+const detailCollapsed = ref(localStorage.getItem('journeyin.detailCollapsed') === 'true')
 const tripView = ref<'list' | 'detail'>('list')
 const mapType = ref<'normal' | 'satellite'>((localStorage.getItem('journeyin.mapType') as 'normal' | 'satellite') || 'normal')
 const showMapLabels = ref(localStorage.getItem('journeyin.mapLabels') !== 'false')
@@ -200,10 +204,10 @@ async function loadSharedTrip() {
   tripDocument.value = document
   selected.value = { id: document.id || 'shared', title: document.title, status: document.status || 'shared', start_date: document.days[0]?.date || '', end_date: document.days[document.days.length - 1]?.date || '', timezone: document.timezone, revision: bootstrap.revision || 1, days: document.days.length, stops }
   capabilities.value = { version: APP_VERSION, map_providers: { baidu: { browser_key_configured: Boolean(bootstrap.browser_key), browser_key: bootstrap.browser_key || '' } } }
-  selectedDay.value = 'all'; tripView.value = 'detail'; panelMode.value = 'journey'; panelOpen.value = true; selectedStopId.value = ''; selectedSubStopId.value = ''; reorderMode.value = false; descriptionEditing.value = false; tripDescriptionEditing.value = false
+  selectedDay.value = 'all'; tripView.value = 'detail'; panelMode.value = 'journey'; panelOpen.value = true; panelCollapsed.value = false; mobileMapToolsOpen.value = false; selectedStopId.value = ''; selectedSubStopId.value = ''; reorderMode.value = false; descriptionEditing.value = false; tripDescriptionEditing.value = false
   await nextTick(); await renderMap()
 }
-function selectTrip(trip: TripSummary) { tripView.value = 'detail'; void loadDetail(trip) }
+function selectTrip(trip: TripSummary) { panelCollapsed.value = false; mobileMapToolsOpen.value = false; tripView.value = 'detail'; void loadDetail(trip) }
 async function deleteTrip(trip: TripSummary) {
   if (!window.confirm('确认删除“' + trip.title + '”吗？该行程及其规划点、路线和天气快照都会删除。')) return
   actionLoading.value = true; error.value = ''
@@ -333,7 +337,7 @@ function mapRoutePoint(value: [number, number] | Coord, crs: string): (Coord & {
 function chooseSnapshot(leg: Leg) { return (leg.snapshots || []).find(snapshot => (snapshot.coordinate_system === 'bd09ll' || snapshot.coordinate_system === 'gcj02') && snapshot.geometry && snapshot.geometry.length > 1) || null }
 function selectStop(stop: Stop) { selectedStopId.value = stop.id; selectedSubStopId.value = ''; void renderMap(); if (window.matchMedia('(max-width: 900px)').matches) { panelOpen.value = false; localStorage.setItem('journeyin.panelOpen', 'false') }; if (mapInstance && mapAPI) { const point = pointFor(stop); if (point) mapInstance.panTo(new mapAPI.Point(point.lng, point.lat)) } }
 function selectSubStop(child: SubStop, parent: Stop) { selectedStopId.value = parent.id; selectedSubStopId.value = child.id; void renderMap(); if (window.matchMedia('(max-width: 900px)').matches) { panelOpen.value = false; localStorage.setItem('journeyin.panelOpen', 'false') }; if (mapInstance && mapAPI) { const point = pointFor(child); if (point) mapInstance.panTo(new mapAPI.Point(point.lng, point.lat)) } }
-function openChildSearch(parent: Stop) { selectedStopId.value = parent.id; selectedSubStopId.value = ''; searchParentStopId.value = parent.id; panelOpen.value = true; panelMode.value = 'search'; searchMessage.value = '为“' + parent.title + '”添加子规划点' }
+function openChildSearch(parent: Stop) { selectedStopId.value = parent.id; selectedSubStopId.value = ''; searchParentStopId.value = parent.id; panelOpen.value = true; panelCollapsed.value = false; mobileMapToolsOpen.value = false; panelMode.value = 'search'; searchMessage.value = '为“' + parent.title + '”添加子规划点' }
 function beginEditDescription() { descriptionDraft.value = selectedTarget.value?.description_markdown || ''; descriptionEditing.value = true }
 function cancelEditDescription() { descriptionEditing.value = false; descriptionDraft.value = ''; descriptionFullscreen.value = false }
 function openDescriptionFullscreen() { descriptionFullscreen.value = true }
@@ -456,7 +460,20 @@ async function renderMap() {
 }
 function retryMap() { mapError.value = ''; mapWarning.value = ''; resetBaiduMapSDK(); void renderMap() }
 
-function togglePanel() { panelOpen.value = !panelOpen.value; localStorage.setItem('journeyin.panelOpen', String(panelOpen.value)) }
+function togglePanel() {
+  panelOpen.value = !panelOpen.value
+  mobileMapToolsOpen.value = false
+  localStorage.setItem('journeyin.panelOpen', String(panelOpen.value))
+}
+function togglePanelCollapsed() {
+  panelCollapsed.value = !panelCollapsed.value
+  localStorage.setItem('journeyin.panelCollapsed', String(panelCollapsed.value))
+}
+function toggleMobileMapTools() { mobileMapToolsOpen.value = !mobileMapToolsOpen.value }
+function toggleDetailCollapsed() {
+  detailCollapsed.value = !detailCollapsed.value
+  localStorage.setItem('journeyin.detailCollapsed', String(detailCollapsed.value))
+}
 function applyMapType() {
   if (!mapInstance || !mapAPI || typeof mapInstance.setMapType !== 'function') return
   const type = mapType.value === 'satellite' ? mapAPI.BMAP_SATELLITE_MAP || (window as any).BMAP_SATELLITE_MAP : mapAPI.BMAP_NORMAL_MAP || (window as any).BMAP_NORMAL_MAP
@@ -578,7 +595,7 @@ function shareStorageKey(tripID: string) { return 'journeyin.share.' + tripID }
 function shareTokenFromURL(url: string) { try { const parsed = new URL(url, window.location.origin); const match = parsed.pathname.match(/^\/s\/([^/]+)$/); return match?.[1] || '' } catch { return '' } }
 function saveShareState(tripID: string) { if (shareURL.value) localStorage.setItem(shareStorageKey(tripID), JSON.stringify({ id: shareID.value, url: shareURL.value, expires_at: shareExpiresAt.value })) }
 function restoreShareState(tripID: string) {
-  shareURL.value = ''; shareID.value = ''; shareExpiresAt.value = ''
+  shareURL.value = ''; shareID.value = ''; shareExpiresAt.value = ''; shareCopyMessage.value = ''
   try {
     const saved = JSON.parse(localStorage.getItem(shareStorageKey(tripID)) || 'null') as { id?: string; url?: string; expires_at?: string } | null
     if (!saved?.url || (saved.expires_at && Date.parse(saved.expires_at) <= Date.now())) { localStorage.removeItem(shareStorageKey(tripID)); return }
@@ -588,7 +605,7 @@ function restoreShareState(tripID: string) {
 async function createShare() {
   if (!selected.value) return
   const tripID = selected.value.id; const existingToken = shareTokenFromURL(shareURL.value) || (() => { try { const saved = JSON.parse(localStorage.getItem(shareStorageKey(tripID)) || 'null') as { url?: string } | null; return saved?.url ? shareTokenFromURL(saved.url) : '' } catch { return '' } })()
-  actionLoading.value = true; error.value = ''
+  actionLoading.value = true; error.value = ''; shareCopyMessage.value = ''
   try {
     const response = await apiFetch('/api/v1/shares', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trip_id: tripID, existing_token: existingToken || undefined }) })
     const payload = await response.json() as { id?: string; url?: string; expires_at?: string; error?: { message?: string } }
@@ -596,9 +613,33 @@ async function createShare() {
     shareID.value = payload.id || ''; shareURL.value = payload.url; shareExpiresAt.value = payload.expires_at || ''; saveShareState(tripID)
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '分享链接创建失败' } finally { actionLoading.value = false }
 }
+async function copyText(value: string) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value)
+      return
+    }
+  } catch { /* HTTP pages may expose clipboard but reject it as insecure. */ }
+  const textarea = document.createElement('textarea')
+  textarea.value = value
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.top = '0'
+  textarea.style.left = '-9999px'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.focus()
+  textarea.select()
+  textarea.setSelectionRange(0, textarea.value.length)
+  let copied = false
+  try { copied = document.execCommand('copy') } finally { textarea.remove() }
+  if (!copied) throw new Error('clipboard_unavailable')
+}
 async function copyShareURL() {
   if (!shareURL.value) return
-  try { await navigator.clipboard.writeText(shareURL.value); settingsMessage.value = '分享链接已复制' } catch { error.value = '复制失败，请手动复制分享链接' }
+  shareCopyMessage.value = ''
+  error.value = ''
+  try { await copyText(shareURL.value); shareCopyMessage.value = '分享链接已复制' } catch { error.value = '当前浏览器禁止自动复制，请长按或手动复制分享链接' }
 }
 async function revokeShare() {
   if (!shareID.value || !window.confirm('确认撤销当前在线分享吗？撤销后链接将无法访问。')) return
@@ -606,7 +647,7 @@ async function revokeShare() {
   try {
     const response = await apiFetch('/api/v1/shares/' + encodeURIComponent(shareID.value) + '/revoke', { method: 'POST' })
     if (!response.ok) { const payload = await response.json() as { error?: { message?: string } }; throw new Error(payload.error?.message || '撤销分享失败') }
-    shareURL.value = ''; shareID.value = ''; shareExpiresAt.value = ''; if (selected.value) localStorage.removeItem(shareStorageKey(selected.value.id)); settingsMessage.value = '在线分享已撤销'
+    shareURL.value = ''; shareID.value = ''; shareExpiresAt.value = ''; shareCopyMessage.value = ''; if (selected.value) localStorage.removeItem(shareStorageKey(selected.value.id)); settingsMessage.value = '在线分享已撤销'
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '撤销分享失败' } finally { actionLoading.value = false }
 }
 function safeURL(raw: string) { try { const parsed = new URL(raw); return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.toString() : '#' } catch { return '#' } }
@@ -839,7 +880,7 @@ onUnmounted(() => mediaQuery?.removeEventListener?.('change', systemThemeChanged
       </IonHeader>
       <IonContent :fullscreen="true">
 
-        <main class="map-shell">
+        <main class="map-shell" :class="{ 'mobile-panel-open': panelOpen, 'mobile-map-tools-open': mobileMapToolsOpen }">
           <div class="map-canvas" :class="{ 'map-pick-active': mapPickMode }">
             <div v-if="keyConfigured && tripDocument && !mapError" ref="mapContainer" id="bmap"></div>
             <div v-if="!tripDocument || !keyConfigured || mapError" class="map-fallback">
@@ -851,21 +892,22 @@ onUnmounted(() => mediaQuery?.removeEventListener?.('change', systemThemeChanged
             <div v-if="keyConfigured && tripDocument && !mapError && !mapReady && !mapWarning" class="map-loading"><IonIcon :icon="mapOutline" /><span>正在加载百度地图…</span></div>
             <div v-if="mapWarning" class="map-warning"><span>{{ mapWarning }}</span><button type="button" @click="retryMap">重新加载</button></div>
           </div>
+          <button v-if="!selectedStop && !mobileMapToolsOpen" class="mobile-map-tools-toggle" :class="{ active: mobileMapToolsOpen }" :aria-expanded="mobileMapToolsOpen" :aria-label="mobileMapToolsOpen ? '收起地图工具' : '展开地图工具'" @click="toggleMobileMapTools"><IonIcon :icon="mapOutline" /><span>{{ mobileMapToolsOpen ? '收起工具' : '地图工具' }}</span></button>
           <div v-if="!selectedStop" class="map-hud">
             <button v-if="!panelOpen" class="panel-open-button" aria-label="显示行程面板" @click="togglePanel"><IonIcon :icon="menuOutline" /> 行程面板</button>
             <button class="map-type-button" :class="{ active: mapType === 'satellite' }" @click="toggleMapType">{{ mapType === 'satellite' ? '标准图' : '卫星图' }}</button>
             <button class="map-label-button" :class="{ active: showMapLabels }" @click="toggleMapLabels">{{ showMapLabels ? '隐藏标签' : '显示标签' }}</button>
             <button v-if="!shareMode" class="map-pick-button" :class="{ active: mapPickMode }" :disabled="!mapReady || !tripDocument" @click="toggleMapPick">{{ mapPickMode ? '取消选点' : '地图选点' }}</button>
-            <div class="map-status-pill"><IonIcon :icon="keyConfigured && mapReady && !mapError ? sunnyOutline : cloudOfflineOutline" /> {{ !tripDocument ? '等待行程' : !keyConfigured ? '离线数据可用' : mapError ? '百度地图不可用' : mapWarning ? '百度地图底图加载中' : mapReady ? '百度地图已连接' : '百度地图加载中' }} · {{ visibleStops.length }} 个规划点</div>
+            <div class="map-status-pill"><IonIcon :icon="keyConfigured && mapReady && !mapError ? sunnyOutline : cloudOfflineOutline" /> <span>{{ !tripDocument ? '等待行程' : !keyConfigured ? '离线数据可用' : mapError ? '百度地图不可用' : mapWarning ? '百度地图底图加载中' : mapReady ? '百度地图已连接' : '百度地图加载中' }} · {{ visibleStops.length }} 个规划点</span><button v-if="mobileMapToolsOpen" class="mobile-map-tools-close" type="button" aria-label="收起地图工具" @click="toggleMobileMapTools"><IonIcon :icon="chevronUpOutline" /><span>收起</span></button></div>
           </div>
           <section v-if="error || shareURL" class="map-notices">
             <div v-if="error" class="global-error">{{ error }}<button aria-label="关闭错误" @click="error = ''">×</button></div>
-            <div v-if="shareURL" class="share-banner"><span>只读分享：<a :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><small v-if="shareExpiresAt">有效期至 {{ new Date(shareExpiresAt).toLocaleString() }}</small></span><div class="share-actions"><button type="button" @click="copyShareURL">复制链接</button><button v-if="shareID" type="button" @click="revokeShare">撤销分享</button><button aria-label="关闭分享提示" @click="shareURL = ''">×</button></div></div>
+            <div v-if="shareURL" class="share-banner"><span>只读分享：<a :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><small v-if="shareExpiresAt">有效期至 {{ new Date(shareExpiresAt).toLocaleString() }}</small><small v-if="shareCopyMessage" class="share-copy-feedback">{{ shareCopyMessage }}</small></span><div class="share-actions"><button type="button" @click="copyShareURL">复制链接</button><button v-if="shareID" type="button" @click="revokeShare">撤销分享</button><button aria-label="关闭分享提示" @click="shareURL = ''">×</button></div></div>
           </section>
-          <aside v-if="panelOpen" class="floating-panel plan-panel" aria-label="行程规划面板">
+          <aside v-if="panelOpen" class="floating-panel plan-panel" :class="{ 'panel-list-mode': tripView === 'list', 'panel-detail-mode': tripView === 'detail', 'panel-collapsed': panelCollapsed, 'mobile-map-tools-open': mobileMapToolsOpen }" aria-label="行程规划面板">
             <div class="panel-head">
               <div><p class="eyebrow">JOURNEYIN</p><h2>{{ tripView === 'detail' && selected ? selected.title : '旅行规划' }}</h2><p class="panel-subtitle">{{ tripView === 'detail' && selected ? selected.start_date + ' — ' + selected.end_date : '选择一条行程查看详情' }}</p></div>
-              <button class="panel-close" aria-label="隐藏行程面板" @click="togglePanel">×</button>
+              <div class="panel-head-actions"><button class="panel-collapse" type="button" :aria-expanded="!panelCollapsed" :aria-label="panelCollapsed ? '展开行程卡片' : '收起到半屏'" @click="togglePanelCollapsed"><IonIcon :icon="panelCollapsed ? chevronUpOutline : chevronDownOutline" /></button><button class="panel-close" aria-label="隐藏行程面板" @click="togglePanel">×</button></div>
             </div>
             <button v-if="!shareMode && tripView === 'detail' && selected" class="panel-back panel-detail-back" @click="tripView = 'list'">‹ 行程列表</button>
             <div class="panel-tabs">
@@ -876,7 +918,7 @@ onUnmounted(() => mediaQuery?.removeEventListener?.('change', systemThemeChanged
             <div class="panel-scroll">
               <template v-if="panelMode === 'journey'">
                 <template v-if="tripView === 'list'">
-                  <div class="section-heading"><div><p class="eyebrow">YOUR JOURNEYS</p><h3>旅行规划</h3></div><IonBadge color="primary">{{ trips.length }}</IonBadge></div>
+                  <div class="section-heading panel-list-heading"><div><p class="eyebrow">YOUR JOURNEYS</p><h3>旅行规划</h3></div><IonBadge color="primary">{{ trips.length }}</IonBadge></div>
                   <p v-if="loading" class="muted">正在加载…</p>
                   <div v-else-if="!trips.length" class="empty"><p>还没有旅行规划。</p><IonButton size="small" @click="newTripOpen = true"><IonIcon slot="start" :icon="addOutline" /> 新建规划</IonButton><p class="empty-hint">也可以导入已有 Trip JSON。</p></div>
                   <div v-else class="trip-cards">
@@ -919,9 +961,9 @@ onUnmounted(() => mediaQuery?.removeEventListener?.('change', systemThemeChanged
               </template>
             </div>
           </aside>
-          <aside v-if="selectedStop" class="details-drawer">
+          <aside v-if="selectedStop" class="details-drawer" :class="{ 'details-collapsed': detailCollapsed }">
             <div class="details-scroll">
-            <button class="close-button" aria-label="关闭详情" @click="closeDetail"><IonIcon :icon="closeOutline" /></button>
+            <button class="detail-collapse" type="button" :aria-expanded="!detailCollapsed" :aria-label="detailCollapsed ? '展开规划点详情' : '收起到半屏'" @click="toggleDetailCollapsed"><IonIcon :icon="detailCollapsed ? chevronUpOutline : chevronDownOutline" /></button><button class="close-button" aria-label="关闭详情" @click="closeDetail"><IonIcon :icon="closeOutline" /></button>
             <p class="eyebrow">{{ selectedSubStop ? 'SUB-STOP ' + selectedSubStop.sequence : 'STOP ' + selectedStop.sequence }}</p>
             <button v-if="selectedSubStop" class="detail-parent" @click="selectedSubStopId = ''">返回主规划点：{{ selectedStop.title }}</button>
             <h2>{{ selectedTarget?.title }}</h2>
