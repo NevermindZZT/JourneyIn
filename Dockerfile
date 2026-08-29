@@ -6,7 +6,7 @@ COPY web ./
 RUN pnpm build
 
 FROM golang:1.26-alpine AS go-build
-ARG VERSION=0.2.0
+ARG VERSION=0.2.1
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 WORKDIR /src
@@ -17,7 +17,7 @@ COPY --from=web-build /src/web/dist ./web/dist
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/journeyin ./cmd/journeyin
 
 FROM gcr.io/distroless/static-debian12:nonroot
-ARG VERSION=0.2.0
+ARG VERSION=0.2.1
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 LABEL org.opencontainers.image.title=JourneyIn \

@@ -23,7 +23,7 @@ import (
 	mcptransport "journeyin/internal/transport/mcp"
 )
 
-var version = "0.2.0"
+var version = "0.2.1"
 
 func main() {
 	if len(os.Args) >= 3 && os.Args[1] == "mcp" && os.Args[2] == "stdio" {
@@ -62,6 +62,8 @@ func main() {
 		log.Fatal(err)
 	}
 	api := httpapi.NewServer(app, webFS, schemaFS, version, logger)
+	authenticator := httpapi.NewAuthenticator(os.Getenv("JOURNEYIN_AUTH_USERNAME"), os.Getenv("JOURNEYIN_AUTH_PASSWORD"), os.Getenv("JOURNEYIN_API_TOKEN"))
+	api.SetAuthenticator(authenticator)
 	baiduServerAK := os.Getenv("JOURNEYIN_BAIDU_SERVER_AK")
 	if strings.TrimSpace(baiduServerAK) == "" {
 		baiduServerAK = settingValue(ctx, database, "map.baidu.server_key", os.Getenv("BMAP_WEBAPI_AK"))
@@ -93,7 +95,7 @@ func main() {
 	mcpServer := mcptransport.NewServer(app, version, schemaFS)
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", mcptransport.RequireBearer(mcpServer.HTTPHandler(), mcpToken))
-	apiHandler := httpapi.RequireAPIAuth(api.Handler(), os.Getenv("JOURNEYIN_API_TOKEN"))
+	apiHandler := httpapi.RequireAPIAuthWithAuthenticator(api.Handler(), authenticator)
 	mux.Handle("/", apiHandler)
 	server := &http.Server{Addr: listen, Handler: mux, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
 	logger.Info("JourneyIn listening", "addr", listen, "data", dataPath, "version", version)

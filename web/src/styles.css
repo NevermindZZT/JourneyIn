@@ -242,6 +242,11 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .settings-message { margin-bottom: 0; }
 .auth-panel { text-align: center; }
 .auth-icon { margin-bottom: 8px; color: var(--p); font-size: 44px; }
+.auth-form { display: grid; gap: 12px; text-align: left; }
+.auth-form label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 700; }
+.auth-form input { width: 100%; min-height: 44px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 12px; outline: none; color: var(--ink); background: var(--surface); }
+.auth-form input:focus { border-color: var(--p); box-shadow: 0 0 0 3px color-mix(in srgb, var(--p) 20%, transparent); }
+.auth-error { margin: 0; color: var(--md-error); font-size: 12px; }
 .auth-panel .modal-actions { justify-content: center; }
 @media (max-width: 900px) {
   .map-hud { inset: 12px 12px auto; }

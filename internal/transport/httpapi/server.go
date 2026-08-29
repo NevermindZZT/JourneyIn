@@ -30,6 +30,7 @@ type Server struct {
 	publicURL     string
 	syncStore     *store.Store
 	settingsStore *store.Store
+	auth          *Authenticator
 }
 
 func NewServer(trips *application.TripService, web, schema fs.FS, version string, logger *slog.Logger) *Server {
@@ -52,10 +53,13 @@ func (s *Server) SetShareService(service *journeyshare.Service, publicURL string
 
 func (s *Server) SetSyncStore(syncStore *store.Store)         { s.syncStore = syncStore }
 func (s *Server) SetSettingsStore(settingsStore *store.Store) { s.settingsStore = settingsStore }
+func (s *Server) SetAuthenticator(auth *Authenticator)        { s.auth = auth }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", s.health)
+	mux.HandleFunc("POST /api/v1/auth/login", s.login)
+	mux.HandleFunc("POST /api/v1/auth/logout", s.logout)
 	mux.HandleFunc("GET /api/v1/capabilities", s.capabilities)
 	mux.HandleFunc("GET /api/v1/schema/trip/v1.json", s.schemaTrip)
 	mux.HandleFunc("GET /api/v1/trips", s.listTrips)
@@ -88,6 +92,41 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/settings/place-directory", s.clearPlaceDirectory)
 	mux.Handle("/", s.staticHandler())
 	return requestLogger(mux, s.logger)
+}
+
+type loginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+	if s.auth == nil || !s.auth.UsernamePasswordEnabled() {
+		writeError(w, http.StatusServiceUnavailable, "auth_not_configured", "username/password authentication is not configured", nil)
+		return
+	}
+	var body loginRequest
+	if err := decodeBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
+		return
+	}
+	session, err := s.auth.Login(body.Username, body.Password)
+	if errors.Is(err, ErrInvalidCredentials) {
+		writeError(w, http.StatusUnauthorized, "invalid_credentials", "账号或密码错误", nil)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "auth_error", err.Error(), nil)
+		return
+	}
+	s.auth.SetSessionCookie(w, session, r.TLS != nil)
+	writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "username": strings.TrimSpace(body.Username), "expires_in": int(authSessionTTL.Seconds())})
+}
+
+func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
+	if s.auth != nil {
+		s.auth.ClearSession(w, r)
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {

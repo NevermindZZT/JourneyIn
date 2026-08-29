@@ -3,14 +3,15 @@
 [![CI](https://github.com/NevermindZZT/JourneyIn/actions/workflows/ci.yml/badge.svg)](https://github.com/NevermindZZT/JourneyIn/actions/workflows/ci.yml)
 [![Docker Image Version](https://img.shields.io/docker/v/nevermindzzt/journeyin?sort=semver)](https://hub.docker.com/r/nevermindzzt/journeyin)
 [![Docker Pulls](https://img.shields.io/docker/pulls/nevermindzzt/journeyin)](https://hub.docker.com/r/nevermindzzt/journeyin)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **v0.2.0 · 在地图上规划每一段旅程**
+> **v0.2.1 · 在地图上规划每一段旅程**
 >
 > JourneyIn 是地图优先的旅行规划工具：把地点、顺序、路线、天气和备注放在同一张可保存的行程地图上。
 
 项目主页：[github.com/NevermindZZT/JourneyIn](https://github.com/NevermindZZT/JourneyIn)。
 
-JourneyIn 当前提供 Go + SQLite 服务端、Vue/Ionic Web 客户端、Trip JSON、地图 Provider、只读分享、同步接口、MCP 和 Docker 配置。
+JourneyIn 当前提供 Go + SQLite 服务端、Vue/Ionic Web 客户端、Trip JSON、地图 Provider、只读分享、同步接口、MCP 和 Docker 配置。项目采用 [MIT License](LICENSE)，允许在保留版权和许可声明的前提下使用、修改和分发。
 
 ## 本地运行
 
@@ -29,22 +30,34 @@ go run ./cmd/journeyin -listen 127.0.0.1:8080 -data D:/data/journeyin/journeyin.
 
 ~~~text
 nevermindzzt/journeyin:latest
-nevermindzzt/journeyin:0.2.0
+nevermindzzt/journeyin:0.2.1
 ~~~
 
 使用持久化卷启动：
 
 ~~~powershell
-docker run --detach --name journeyin --publish 8080:8080 --volume journeyin-data:/data --env JOURNEYIN_MCP_TOKEN=<strong-random-token> nevermindzzt/journeyin:latest
+docker run --detach --name journeyin --publish 8080:8080 --volume journeyin-data:/data --env JOURNEYIN_AUTH_USERNAME=admin --env JOURNEYIN_AUTH_PASSWORD=<strong-login-password> --env JOURNEYIN_MCP_TOKEN=<strong-random-token> nevermindzzt/journeyin:latest
 ~~~
 
 镜像由 GitHub Actions 在推送 `v*.*.*` tag 时构建并发布，同时生成 `linux/amd64` 和 `linux/arm64` 多架构镜像。发布需要仓库 Secret `DOCKERHUB_TOKEN`。
+
+从 Docker Hub 拉取镜像部署可直接使用 `docker-compose.hub.yml`；该文件不执行本地构建，并且每次启动都会检查远端镜像：
+
+~~~powershell
+$env:JOURNEYIN_AUTH_USERNAME = 'admin'
+$env:JOURNEYIN_AUTH_PASSWORD = '<strong-login-password>'
+$env:JOURNEYIN_MCP_TOKEN = '<strong-random-token>'
+docker compose -f docker-compose.hub.yml pull
+docker compose -f docker-compose.hub.yml up --detach
+~~~
+
+如需固定版本，可设置 `$env:JOURNEYIN_IMAGE = 'nevermindzzt/journeyin:0.2.1'` 后再执行上述命令。
 
 构建和重新运行不会删除数据库。若省略 `-data` 与 `JOURNEYIN_DATA_DIR`，默认使用用户配置目录中的 `JourneyIn/journeyin.db`；程序也会兼容读取当前目录、可执行文件目录或其上级目录下已有的 `data/journeyin.db`。验收时建议始终使用固定绝对路径。
 
 如果省略 `-data` 和 `JOURNEYIN_DATA_DIR`，Windows 默认保存到 `%AppData%/JourneyIn/journeyin.db`；Linux/macOS 使用用户配置目录。构建 Go 二进制不会清理数据库。建议验收时固定使用绝对数据路径。
 
-默认 localhost 运行时 MCP 不强制 Token；监听非 localhost 地址时必须设置 JOURNEYIN_MCP_TOKEN。配置 JOURNEYIN_API_TOKEN 后，除 health 外的 REST API 需要 Bearer Token。
+Docker 部署必须设置 `JOURNEYIN_AUTH_USERNAME` 和 `JOURNEYIN_AUTH_PASSWORD`；浏览器访问 REST API 时会显示账号密码登录面板，登录成功后使用 24 小时 HttpOnly 会话 Cookie。监听非 localhost 地址时还必须设置 `JOURNEYIN_MCP_TOKEN` 保护 `/mcp`。`JOURNEYIN_API_TOKEN` 仍作为兼容旧客户端的可选 Bearer Token。
 
 ## 本地开发：前后端分离
 
@@ -119,6 +132,8 @@ pwsh -File scripts/verify-local.ps1 -ServerUrl http://127.0.0.1:8080 -WebUrl htt
 规划 API：
 
 ~~~text
+POST /api/v1/auth/login
+POST /api/v1/auth/logout
 POST /api/v1/maps/pois/search
 POST /api/v1/trips/{trip_id}/days/{day_id}/stops
 POST /api/v1/trips/{trip_id}/days/{day_id}/stops/{stop_id}/move  # body: {"direction":"up"} 或 {"target_sequence":2}
@@ -207,11 +222,17 @@ PUT  /api/v1/settings/map-keys
 ## Docker
 
 ~~~powershell
+$env:JOURNEYIN_AUTH_USERNAME = 'admin'
+$env:JOURNEYIN_AUTH_PASSWORD = '<strong-login-password>'
 $env:JOURNEYIN_MCP_TOKEN = '<strong-random-token>'
 docker compose up --build -d
 ~~~
 
 数据保存于 Docker volume journeyin-data。生产环境请将服务放在 HTTPS 反向代理后，并注入地图服务商的 Key。
+
+## 开源协议
+
+JourneyIn 采用 [MIT License](LICENSE) 开源协议。完整许可文本见仓库根目录的 [`LICENSE`](LICENSE) 文件。
 
 ## 当前阶段
 

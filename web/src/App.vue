@@ -22,7 +22,7 @@ type KeySettings = { map?: { baidu?: { browser_key_configured?: boolean; server_
 type PlaceCandidate = { id?: string; name: string; address?: string; location: Coord & { crs?: string }; provider?: string }
 type TravelMode = 'driving' | 'walking' | 'cycling' | 'transit'
 
-const APP_VERSION = '0.2.0'
+const APP_VERSION = '0.2.1'
 const APP_SLOGAN = '在地图上规划每一段旅程'
 const GITHUB_URL = 'https://github.com/NevermindZZT/JourneyIn'
 
@@ -49,6 +49,7 @@ const loading = ref(false)
 const detailLoading = ref(false)
 const error = ref('')
 const mapError = ref('')
+const mapWarning = ref('')
 const mapReady = ref(false)
 const mapContainer = ref<HTMLElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -57,6 +58,10 @@ const actionLoading = ref(false)
 const settingsOpen = ref(false)
 const newTripOpen = ref(false)
 const authOpen = ref(false)
+const loginUsername = ref('')
+const loginPassword = ref('')
+const loginMessage = ref('')
+const loginLoading = ref(false)
 const authTokenInput = ref(localStorage.getItem('journeyin.apiToken') || '')
 const serverURL = ref(window.location.origin)
 const theme = ref<Theme>((localStorage.getItem('journeyin.theme') as Theme) || 'system')
@@ -132,7 +137,7 @@ function apiFetch(input: RequestInfo | URL, init: RequestInit = {}) {
   const headers = new Headers(init.headers)
   const token = authTokenInput.value.trim()
   if (token) headers.set('Authorization', 'Bearer ' + token)
-  return fetch(input, { ...init, headers }).then(response => {
+  return fetch(input, { ...init, headers, credentials: 'same-origin' }).then(response => {
     if (response.status === 401) { authOpen.value = true; settingsMessage.value = '当前服务需要登录令牌' }
     return response
   })
@@ -271,6 +276,7 @@ function resetBaiduMapSDK() {
   mapInstance = null
   mapAPI = null
   mapReady.value = false
+  mapWarning.value = ''
   try { BMapLoader.reset() } catch { /* loader reset is best effort */ }
   mapScriptPromise = null
   loadedMapKey = ''
@@ -299,10 +305,10 @@ async function renderMap() {
       mapInstance = new mapAPI.Map(mapContainer.value, { enableIconClick: false, fixCenterWhenResize: true })
       mapInstance.enableScrollWheelZoom()
       mapInstance.addEventListener?.('click', handleMapClick)
-      mapInstance.addEventListener?.('tilesloaded', () => { mapReady.value = true; mapError.value = '' })
+      mapInstance.addEventListener?.('tilesloaded', () => { mapReady.value = true; mapError.value = ''; mapWarning.value = '' })
       if (mapReadyTimer !== null) window.clearTimeout(mapReadyTimer)
       mapReadyTimer = window.setTimeout(() => {
-        if (!mapReady.value) mapError.value = '百度 JSAPI 已初始化，但底图未加载；请检查浏览器端 AK、JSAPI 服务、域名白名单和网络连接'
+        if (!mapReady.value) mapWarning.value = '百度地图底图加载较慢；请检查浏览器端 AK、127.0.0.1 域名白名单和网络连接。地图仍可继续尝试加载。'
       }, 8000)
     }
     mapInstance.clearOverlays()
@@ -341,8 +347,9 @@ async function renderMap() {
     else mapInstance.centerAndZoom('中国', 5)
     applyMapType()
     mapError.value = ''
-  } catch (cause) { mapReady.value = false; mapError.value = cause instanceof Error ? cause.message : '地图初始化失败' }
+  } catch (cause) { mapReady.value = false; mapWarning.value = ''; mapError.value = cause instanceof Error ? cause.message : '地图初始化失败' }
 }
+function retryMap() { mapError.value = ''; mapWarning.value = ''; resetBaiduMapSDK(); void renderMap() }
 
 function togglePanel() { panelOpen.value = !panelOpen.value; localStorage.setItem('journeyin.panelOpen', String(panelOpen.value)) }
 function applyMapType() {
@@ -637,8 +644,18 @@ async function saveMapKeys() {
     await loadTrips(); await openSettings()
   } catch (cause) { settingsMessage.value = cause instanceof Error ? cause.message : '保存地图 Key 失败' } finally { settingsSaving.value = false }
 }
-function saveAuth() { authTokenInput.value = authTokenInput.value.trim(); if (authTokenInput.value) localStorage.setItem('journeyin.apiToken', authTokenInput.value); else localStorage.removeItem('journeyin.apiToken'); authOpen.value = false; settingsMessage.value = '访问令牌已保存'; loadTrips() }
-function logout() { authTokenInput.value = ''; localStorage.removeItem('journeyin.apiToken'); authOpen.value = false; settingsMessage.value = '已清除访问令牌'; loadTrips() }
+async function login() {
+  if (!loginUsername.value.trim() || !loginPassword.value) { loginMessage.value = '请输入账号和密码'; return }
+  loginLoading.value = true; loginMessage.value = ''
+  try {
+    const response = await fetch('/api/v1/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ username: loginUsername.value, password: loginPassword.value }) })
+    const payload = await response.json() as { error?: { message?: string } }
+    if (!response.ok) throw new Error(payload.error?.message || '登录失败')
+    authOpen.value = false; loginPassword.value = ''; loginMessage.value = ''; settingsMessage.value = '登录成功'; await loadTrips()
+  } catch (cause) { loginMessage.value = cause instanceof Error ? cause.message : '登录失败' } finally { loginLoading.value = false }
+}
+function saveAuth() { authTokenInput.value = authTokenInput.value.trim(); if (authTokenInput.value) localStorage.setItem('journeyin.apiToken', authTokenInput.value); else localStorage.removeItem('journeyin.apiToken'); authOpen.value = false; settingsMessage.value = '兼容 API Token 已保存'; loadTrips() }
+async function logout() { authTokenInput.value = ''; localStorage.removeItem('journeyin.apiToken'); await fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => undefined); authOpen.value = false; settingsMessage.value = '已退出登录'; await loadTrips() }
 function applyTheme() { const actual = theme.value === 'system' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : theme.value; document.documentElement.dataset.theme = actual; localStorage.setItem('journeyin.theme', theme.value) }
 function setTheme(value: Theme) { theme.value = value; applyTheme() }
 function systemThemeChanged() { if (theme.value === 'system') applyTheme() }
@@ -671,14 +688,15 @@ onUnmounted(() => mediaQuery?.removeEventListener?.('change', systemThemeChanged
               <span>{{ !tripDocument ? '创建或导入 Trip 后显示地图。' : mapError ? '请确认浏览器端 AK、JSAPI 服务、域名白名单和网络连接。当前页面：' + serverURL : '配置浏览器端 Key 后显示真实地图。当前不会伪造道路或路线。' }}</span>
               <IonChip color="warning"><IonIcon :icon="cloudOfflineOutline" /> {{ !tripDocument ? '等待行程' : '降级模式' }}</IonChip>
             </div>
-            <div v-if="keyConfigured && tripDocument && !mapError && !mapReady" class="map-loading"><IonIcon :icon="mapOutline" /><span>正在加载百度地图…</span></div>
+            <div v-if="keyConfigured && tripDocument && !mapError && !mapReady && !mapWarning" class="map-loading"><IonIcon :icon="mapOutline" /><span>正在加载百度地图…</span></div>
+            <div v-if="mapWarning" class="map-warning"><span>{{ mapWarning }}</span><button type="button" @click="retryMap">重新加载</button></div>
           </div>
           <div v-if="!selectedStop" class="map-hud">
             <button v-if="!panelOpen" class="panel-open-button" aria-label="显示行程面板" @click="togglePanel"><IonIcon :icon="menuOutline" /> 行程面板</button>
             <button class="map-type-button" :class="{ active: mapType === 'satellite' }" @click="toggleMapType">{{ mapType === 'satellite' ? '标准图' : '卫星图' }}</button>
             <button class="map-label-button" :class="{ active: showMapLabels }" @click="toggleMapLabels">{{ showMapLabels ? '隐藏标签' : '显示标签' }}</button>
             <button class="map-pick-button" :class="{ active: mapPickMode }" :disabled="!mapReady || !tripDocument" @click="toggleMapPick">{{ mapPickMode ? '取消选点' : '地图选点' }}</button>
-            <div class="map-status-pill"><IonIcon :icon="keyConfigured && mapReady && !mapError ? sunnyOutline : cloudOfflineOutline" /> {{ !tripDocument ? '等待行程' : !keyConfigured ? '离线数据可用' : mapError ? '百度地图不可用' : mapReady ? '百度地图已连接' : '百度地图加载中' }} · {{ visibleStops.length }} 个规划点</div>
+            <div class="map-status-pill"><IonIcon :icon="keyConfigured && mapReady && !mapError ? sunnyOutline : cloudOfflineOutline" /> {{ !tripDocument ? '等待行程' : !keyConfigured ? '离线数据可用' : mapError ? '百度地图不可用' : mapWarning ? '百度地图底图加载中' : mapReady ? '百度地图已连接' : '百度地图加载中' }} · {{ visibleStops.length }} 个规划点</div>
           </div>
           <section v-if="error || shareURL" class="map-notices">
             <div v-if="error" class="global-error">{{ error }}<button aria-label="关闭错误" @click="error = ''">×</button></div>
@@ -762,8 +780,8 @@ onUnmounted(() => mediaQuery?.removeEventListener?.('change', systemThemeChanged
       <div v-if="tripDescriptionFullscreen && tripDescriptionEditing" class="fullscreen-editor-backdrop"><section class="fullscreen-editor" role="dialog" aria-modal="true" aria-labelledby="fullscreen-trip-description-title"><header><h2 id="fullscreen-trip-description-title">编辑行程总体说明</h2><button class="modal-close" aria-label="退出全屏编辑" @click="closeTripDescriptionFullscreen">×</button></header><textarea v-model="tripDescriptionDraft" class="fullscreen-description-editor" autofocus placeholder="补充整个行程的背景、节奏和注意事项"></textarea><div class="description-actions"><button class="text-button" @click="cancelEditTripDescription">取消</button><button class="primary-text-button" :disabled="tripDescriptionSaving" @click="saveTripDescription">{{ tripDescriptionSaving ? '保存中…' : '保存说明' }}</button></div></section></div>
       <div v-if="mapPickOpen" class="modal-backdrop" @click.self="cancelMapPick"><section class="modal-panel map-pick-panel" role="dialog" aria-modal="true" aria-labelledby="map-pick-title"><button class="modal-close" aria-label="取消地图选点" @click="cancelMapPick">×</button><p class="eyebrow">MAP PICK</p><h2 id="map-pick-title">保存地图选点</h2><p class="map-pick-coordinate">{{ mapPickLocation?.crs }} · {{ mapPickLocation?.lat.toFixed(6) }}, {{ mapPickLocation?.lng.toFixed(6) }}</p><label>地点名称<input v-model="mapPickTitle" required autofocus placeholder="例如：临时观景点" /></label><label>地址或备注（可选）<input v-model="mapPickAddress" placeholder="补充位置说明" /></label><label>加入日期<select v-model="mapPickDayID"><option v-for="day in tripDocument?.days || []" :key="day.id" :value="day.id">{{ day.date }}{{ day.title ? ' · ' + day.title : '' }}</option></select></label><div class="modal-actions"><button type="button" @click="cancelMapPick">取消</button><button type="button" class="primary" :disabled="actionLoading || !mapPickTitle.trim()" @click="saveMapPick">{{ actionLoading ? '保存中…' : '保存规划点' }}</button></div></section></div>
       <div v-if="newTripOpen" class="modal-backdrop" @click.self="newTripOpen = false"><section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="new-trip-title"><button class="modal-close" aria-label="关闭" @click="newTripOpen = false">×</button><p class="eyebrow">NEW JOURNEY</p><h2 id="new-trip-title">新建旅行规划</h2><form @submit.prevent="createTrip"><label>规划名称<input v-model="newTitle" maxlength="120" required /></label><div class="form-grid"><label>开始日期<input v-model="newStartDate" type="date" required /></label><label>结束日期<input v-model="newEndDate" type="date" required /></label></div><label>时区<input v-model="newTimezone" placeholder="Asia/Shanghai" required /></label><label>总体说明（Markdown）<textarea v-model="newDescription" rows="5" placeholder="写下这次旅行的总体说明"></textarea></label><div class="modal-actions"><button type="button" @click="newTripOpen = false">取消</button><button class="primary" type="submit" :disabled="actionLoading">创建草稿</button></div></form></section></div>
-      <div v-if="settingsOpen" class="modal-backdrop" @click.self="settingsOpen = false"><section class="modal-panel settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title"><button class="modal-close" aria-label="关闭" @click="settingsOpen = false">×</button><p class="eyebrow">JOURNEYIN SETTINGS</p><h2 id="settings-title">设置</h2><p class="settings-intro">当前主题：{{ themeLabel }}。Key 配置保存到 SQLite，服务端 Key 不会回显。</p><section class="settings-section"><h3>外观</h3><p class="settings-label">主题：{{ themeLabel }}</p><div class="theme-options"><button type="button" :class="{ selected: theme === 'system' }" @click="setTheme('system')">跟随系统</button><button type="button" :class="{ selected: theme === 'light' }" @click="setTheme('light')">浅色</button><button type="button" :class="{ selected: theme === 'dark' }" @click="setTheme('dark')">深色</button></div></section><section class="settings-section"><h3>服务端连接</h3><label>当前服务地址<input v-model="serverURL" readonly /></label><label>REST/MCP 访问令牌<input v-model="authTokenInput" type="password" placeholder="Docker 开启认证时填写" autocomplete="off" /></label><div class="modal-actions"><button type="button" @click="logout">清除令牌</button><button type="button" class="primary" @click="saveAuth">保存令牌</button></div><p v-if="settingsMessage" class="settings-message">{{ settingsMessage }}</p></section><section class="settings-section"><h3>百度地图</h3><p class="key-status">浏览器端 Key：<strong>{{ keyConfigured ? '已配置' : '未配置' }}</strong> · 服务端 Key：<strong>{{ settingsData?.map?.baidu?.server_key_configured ? '已配置' : '未配置' }}</strong></p><label>百度浏览器端 Key<input v-model="baiduBrowserKeyInput" type="password" :placeholder="settingsData?.map?.baidu?.browser_key_configured ? '已配置，输入新 Key 可替换' : '用于 JSAPI 4.0/BMap 网页地图'" autocomplete="off" /></label><label>百度服务端 Key<input v-model="baiduServerKeyInput" type="password" placeholder="已配置时输入新 Key 可替换；留空保持当前值" autocomplete="off" /></label><p class="key-help">浏览器端 Key 用于地图底图；服务端 Key 用于 POI 搜索、地理编码、路线和天气。请确认当前访问 host 在百度控制台白名单内。</p><a href="https://lbsyun.baidu.com/apiconsole/key" target="_blank" rel="noopener noreferrer">申请/管理百度地图 Key ↗</a></section><section class="settings-section"><h3>高德地图</h3><p class="key-status">JS Key：<strong>{{ settingsData?.map?.amap?.js_key_configured ? '已配置' : '未配置' }}</strong> · 服务端 Key：<strong>{{ settingsData?.map?.amap?.server_key_configured ? '已配置' : '未配置' }}</strong></p><label>高德 JS Key<input v-model="amapJSKeyInput" type="password" placeholder="用于高德 Web 地图" autocomplete="off" /></label><label>高德服务端 Key<input v-model="amapServerKeyInput" type="password" placeholder="已配置时输入新 Key 可替换；留空保持当前值" autocomplete="off" /></label><a href="https://console.amap.com/dev/key/app" target="_blank" rel="noopener noreferrer">申请/管理高德 Key ↗</a><p class="key-help">保存后，规划点会优先使用已经保存的坐标，不会因为重新绘制地图重复查询。</p><div class="modal-actions"><button type="button" class="primary" :disabled="settingsSaving" @click="saveMapKeys">{{ settingsSaving ? '保存中…' : '保存地图 Key 到数据库' }}</button></div></section><section class="settings-section"><h3>地点检索</h3><label>优先 Provider<select v-model="poiProviderPriority"><option value="amap">高德优先</option><option value="baidu">百度优先</option></select></label><p class="key-help">当前策略会先查询本地地点目录；未命中后使用所选 Provider，Provider 不可用时自动尝试另一家。新搜索结果只保留 7 天。</p><p class="key-status">本地地点记录：<strong>{{ localDirectoryCount }}</strong> 条</p><div class="modal-actions"><button type="button" @click="savePOIPreferences">保存检索优先级</button><button type="button" @click="clearLocalDirectory">清除本地记录</button></div></section><section class="settings-section"><h3>MCP</h3><p>MCP 地址：{{ capabilities?.mcp?.http_endpoint || '/mcp' }}</p><p class="key-help">Docker 远程部署时设置 JOURNEYIN_MCP_TOKEN；本地 localhost 调试可不设置。</p></section></section></div>
-      <div v-if="authOpen" class="modal-backdrop" @click.self="authOpen = false"><section class="modal-panel auth-panel" role="dialog" aria-modal="true" aria-labelledby="auth-title"><IonIcon class="auth-icon" :icon="logInOutline" /><h2 id="auth-title">连接到 JourneyIn</h2><p>当前服务启用了访问认证，请输入服务端访问令牌。令牌只保存在本机浏览器，不会写入旅行规划 JSON。</p><label>访问令牌<input v-model="authTokenInput" type="password" autofocus autocomplete="off" /></label><div class="modal-actions"><button type="button" @click="authOpen = false">稍后</button><button type="button" class="primary" @click="saveAuth">登录并重试</button></div></section></div>
+      <div v-if="settingsOpen" class="modal-backdrop" @click.self="settingsOpen = false"><section class="modal-panel settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title"><button class="modal-close" aria-label="关闭" @click="settingsOpen = false">×</button><p class="eyebrow">JOURNEYIN SETTINGS</p><h2 id="settings-title">设置</h2><p class="settings-intro">当前主题：{{ themeLabel }}。Key 配置保存到 SQLite，服务端 Key 不会回显。</p><section class="settings-section"><h3>外观</h3><p class="settings-label">主题：{{ themeLabel }}</p><div class="theme-options"><button type="button" :class="{ selected: theme === 'system' }" @click="setTheme('system')">跟随系统</button><button type="button" :class="{ selected: theme === 'light' }" @click="setTheme('light')">浅色</button><button type="button" :class="{ selected: theme === 'dark' }" @click="setTheme('dark')">深色</button></div></section><section class="settings-section"><h3>服务端连接</h3><label>当前服务地址<input v-model="serverURL" readonly /></label><label>兼容 REST API Token<input v-model="authTokenInput" type="password" placeholder="仅用于兼容旧客户端，可留空" autocomplete="off" /></label><div class="modal-actions"><button type="button" @click="logout">清除令牌</button><button type="button" class="primary" @click="saveAuth">保存令牌</button></div><p v-if="settingsMessage" class="settings-message">{{ settingsMessage }}</p></section><section class="settings-section"><h3>百度地图</h3><p class="key-status">浏览器端 Key：<strong>{{ keyConfigured ? '已配置' : '未配置' }}</strong> · 服务端 Key：<strong>{{ settingsData?.map?.baidu?.server_key_configured ? '已配置' : '未配置' }}</strong></p><label>百度浏览器端 Key<input v-model="baiduBrowserKeyInput" type="password" :placeholder="settingsData?.map?.baidu?.browser_key_configured ? '已配置，输入新 Key 可替换' : '用于 JSAPI 4.0/BMap 网页地图'" autocomplete="off" /></label><label>百度服务端 Key<input v-model="baiduServerKeyInput" type="password" placeholder="已配置时输入新 Key 可替换；留空保持当前值" autocomplete="off" /></label><p class="key-help">浏览器端 Key 用于地图底图；服务端 Key 用于 POI 搜索、地理编码、路线和天气。请确认当前访问 host 在百度控制台白名单内。</p><a href="https://lbsyun.baidu.com/apiconsole/key" target="_blank" rel="noopener noreferrer">申请/管理百度地图 Key ↗</a></section><section class="settings-section"><h3>高德地图</h3><p class="key-status">JS Key：<strong>{{ settingsData?.map?.amap?.js_key_configured ? '已配置' : '未配置' }}</strong> · 服务端 Key：<strong>{{ settingsData?.map?.amap?.server_key_configured ? '已配置' : '未配置' }}</strong></p><label>高德 JS Key<input v-model="amapJSKeyInput" type="password" placeholder="用于高德 Web 地图" autocomplete="off" /></label><label>高德服务端 Key<input v-model="amapServerKeyInput" type="password" placeholder="已配置时输入新 Key 可替换；留空保持当前值" autocomplete="off" /></label><a href="https://console.amap.com/dev/key/app" target="_blank" rel="noopener noreferrer">申请/管理高德 Key ↗</a><p class="key-help">保存后，规划点会优先使用已经保存的坐标，不会因为重新绘制地图重复查询。</p><div class="modal-actions"><button type="button" class="primary" :disabled="settingsSaving" @click="saveMapKeys">{{ settingsSaving ? '保存中…' : '保存地图 Key 到数据库' }}</button></div></section><section class="settings-section"><h3>地点检索</h3><label>优先 Provider<select v-model="poiProviderPriority"><option value="amap">高德优先</option><option value="baidu">百度优先</option></select></label><p class="key-help">当前策略会先查询本地地点目录；未命中后使用所选 Provider，Provider 不可用时自动尝试另一家。新搜索结果只保留 7 天。</p><p class="key-status">本地地点记录：<strong>{{ localDirectoryCount }}</strong> 条</p><div class="modal-actions"><button type="button" @click="savePOIPreferences">保存检索优先级</button><button type="button" @click="clearLocalDirectory">清除本地记录</button></div></section><section class="settings-section"><h3>MCP</h3><p>MCP 地址：{{ capabilities?.mcp?.http_endpoint || '/mcp' }}</p><p class="key-help">Docker 远程部署时设置 JOURNEYIN_MCP_TOKEN；本地 localhost 调试可不设置。</p></section></section></div>
+      <div v-if="authOpen" class="modal-backdrop" @click.self="authOpen = false"><section class="modal-panel auth-panel" role="dialog" aria-modal="true" aria-labelledby="auth-title"><IonIcon class="auth-icon" :icon="logInOutline" /><h2 id="auth-title">登录 JourneyIn</h2><p>请输入 Docker 服务配置的账号和密码。登录成功后会在当前浏览器保存一个 HttpOnly 会话。</p><form class="auth-form" @submit.prevent="login"><label>账号<input v-model="loginUsername" type="text" autofocus autocomplete="username" /></label><label>密码<input v-model="loginPassword" type="password" autocomplete="current-password" /></label><p v-if="loginMessage" class="auth-error">{{ loginMessage }}</p><div class="modal-actions"><button type="button" @click="authOpen = false">稍后</button><button type="submit" class="primary" :disabled="loginLoading">{{ loginLoading ? '登录中…' : '登录' }}</button></div></form></section></div>
     </IonPage>
   </IonApp>
 </template>

@@ -1,7 +1,8 @@
 services:
   journeyin:
-    build: .
-    image: journeyin:dev
+    image: ${JOURNEYIN_IMAGE:-nevermindzzt/journeyin:latest}
+    pull_policy: always
+    container_name: journeyin
     restart: unless-stopped
     ports:
       - "8080:8080"
