@@ -138,7 +138,7 @@ func (s *TripService) PlanTrip(ctx context.Context, tripID string, expectedRevis
 		providerID = journeymaps.ProviderID(trip.Map.PreferredProvider)
 	}
 	if providerID == "" {
-		providerID = journeymaps.ProviderBaidu
+		providerID = s.DefaultMapProvider()
 	}
 	if len(trip.Map.EnabledProviders) > 0 {
 		enabled := false
@@ -703,7 +703,7 @@ func (s *TripService) RefreshWeather(ctx context.Context, tripID string, expecte
 	}
 	provider := input.Provider
 	if provider == "" {
-		provider = journeymaps.ProviderBaidu
+		provider = s.DefaultMapProvider()
 	}
 	var targetLocation json.RawMessage
 	var dayDate string

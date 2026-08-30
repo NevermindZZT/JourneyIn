@@ -32,7 +32,7 @@ go run ./cmd/journeyin -listen 127.0.0.1:8080 -data D:/data/journeyin/journeyin.
 
 ~~~text
 nevermindzzt/journeyin:latest
-nevermindzzt/journeyin:0.2.3
+nevermindzzt/journeyin:0.2.5
 ~~~
 
 使用持久化卷启动：
@@ -53,7 +53,7 @@ docker compose -f docker-compose.hub.yml pull
 docker compose -f docker-compose.hub.yml up --detach
 ~~~
 
-如需固定版本，可设置 `$env:JOURNEYIN_IMAGE = 'nevermindzzt/journeyin:0.2.3'` 后再执行上述命令。
+如需固定版本，可设置 `$env:JOURNEYIN_IMAGE = 'nevermindzzt/journeyin:0.2.5'` 后再执行上述命令。
 
 默认使用 Docker named volume `journeyin-data`，由容器以非 root 用户写入，不需要创建或修改宿主机目录权限。若希望把数据直接放在宿主机目录，可设置 `JOURNEYIN_DATA_PATH` 切换为 bind mount；Compose 会自动创建目录，镜像启动时会检查固定的 `/data`，按需修复数据库目录及 SQLite sidecar 文件的所有者，然后同一个 Go 进程在打开 SQLite 前永久降权为 UID/GID 65532，不需要 `chmod 777` 或手动 `chown`：
 
@@ -129,16 +129,17 @@ pwsh -File scripts/verify-local.ps1 -ServerUrl http://127.0.0.1:8080 -WebUrl htt
 
 ## 地图规划流程
 
-1. 点击右上角 `+` 新建一个 draft Trip。
-2. 打开行程面板的“添加地点”。
-3. 输入地点关键词、城市和搜索类型，点击“搜索地点”；系统先查本地 7 天地点目录，再按“地点检索”设置选择高德或百度。高德景点搜索使用 POI 类型码；Provider 不可用时自动尝试另一家。无 POI 结果时会降级到已缓存的地理编码结果。对于甘加、白石崖等景区名称，可以选择“景点”类型。
-4. 从候选结果中明确选择一个地点并点击“添加”；Trip 会保存名称、地址、原始 Provider 坐标、CRS、来源、Provider UID，以及高德返回的 citycode/adcode（如有）。
-5. 打开规划点详情，可以继续关联多个子规划点；只有进入该主规划点详情时，子点 Marker 才会显示在地图上。
-6. 点击规划点区域右上方的“调整顺序”进入排序模式；拖动每行左侧的 ⋮⋮ 手柄到目标位置，松开后立即保存。可在当前 Day 内调整主规划点顺序；主点顺序变化会清除该日及下一日受影响的旧路线。子规划点在主点详情中同样支持拖动排序，不改变主点路线。调整完成后选择路线 Provider、路线方式并点击“生成路线”重新按相邻点分段请求；跨天行程会自动把前一天最后一个规划点接到后一天第一个规划点。规划点区域根据当前地图 Provider 显示对应路线总距离、预计总时长和路线段数，并将 geometry、距离、耗时、Provider、mode 和 CRS 保存到 Trip 的 `Day.legs[].snapshots[]`。同一逻辑路线段可以并存百度和高德快照；切换 Provider 不会复用另一家的 geometry。服务端会按 Provider 串行化上游地图请求，高德/百度临时错误和限流状态会在单次请求内有限重试。
-7. 在规划点详情点击“获取天气/刷新天气”；天气快照写入该点，显示查询时间，6 小时内重复刷新优先使用 SQLite cache。
-8. 后续地图重绘直接使用已保存的规划点、子规划点和当前 Provider 路线快照，不重复搜索或地理编码。地图 HUD 可切换百度地图/高德地图；“卫星图/标准图”只切换当前 Provider 图层，不触发 POI/路线请求。
-9. 地图默认显示地点名和行程日期 Label；HUD 可切换“显示标签/隐藏标签”，设置保存在浏览器 localStorage。
-10. 行程面板先展示行程列表；点击某条行程后进入独立的选中行程详情，使用“‹ 行程列表”返回，不会把其他行程卡片插入当前行程信息中。行程总体说明和规划点说明都可以二次编辑；规划点说明编辑时可进入全屏输入模式。面板提供“导入 Trip”“导出 JSON”和“在线分享”入口；导入会先调用只读校验接口，在线分享生成可撤销的只读链接，访问时读取该行程最新数据，不需要为每次更新生成新链接。
+1. 在“设置”的“默认地图”中选择百度地图或高德地图并保存；该选择会用于没有单独地图偏好的新行程和查看页面，已有 Trip 的 Provider 偏好不会被覆盖。
+2. 点击右上角 `+` 新建一个 draft Trip。
+3. 打开行程面板的“添加地点”。
+4. 输入地点关键词、城市和搜索类型，点击“搜索地点”；系统先查本地 7 天地点目录，再按“地点检索”设置选择高德或百度。高德景点搜索使用 POI 类型码；Provider 不可用时自动尝试另一家。无 POI 结果时会降级到已缓存的地理编码结果。对于甘加、白石崖等景区名称，可以选择“景点”类型。
+5. 从候选结果中明确选择一个地点并点击“添加”；Trip 会保存名称、地址、原始 Provider 坐标、CRS、来源、Provider UID，以及高德返回的 citycode/adcode（如有）。
+6. 打开规划点详情，可以继续关联多个子规划点；只有进入该主规划点详情时，子点 Marker 才会显示在地图上。
+7. 点击规划点区域右上方的“调整顺序”进入排序模式；拖动每行左侧的 ⋮⋮ 手柄到目标位置，松开后立即保存。可在当前 Day 内调整主规划点顺序；主点顺序变化会清除该日及下一日受影响的旧路线。子规划点在主点详情中同样支持拖动排序，不改变主点路线。调整完成后选择路线 Provider、路线方式并点击“生成路线”重新按相邻点分段请求；跨天行程会自动把前一天最后一个规划点接到后一天第一个规划点。规划点区域根据当前地图 Provider 显示对应路线总距离、预计总时长和路线段数，并将 geometry、距离、耗时、Provider、mode 和 CRS 保存到 Trip 的 `Day.legs[].snapshots[]`。同一逻辑路线段可以并存百度和高德快照；切换 Provider 不会复用另一家的 geometry。服务端会按 Provider 串行化上游地图请求，高德/百度临时错误和限流状态会在单次请求内有限重试。
+8. 在规划点详情点击“获取天气/刷新天气”；天气快照写入该点，显示查询时间，6 小时内重复刷新优先使用 SQLite cache。
+9. 后续地图重绘直接使用已保存的规划点、子规划点和当前 Provider 路线快照，不重复搜索或地理编码。地图 HUD 可切换百度地图/高德地图；“卫星图/标准图”只切换当前 Provider 图层，不触发 POI/路线请求。
+10. 地图默认显示地点名和行程日期 Label；HUD 可切换“显示标签/隐藏标签”，设置保存在浏览器 localStorage。
+11. 行程面板先展示行程列表；点击某条行程后进入独立的选中行程详情，使用“‹ 行程列表”返回，不会把其他行程卡片插入当前行程信息中。行程总体说明和规划点说明都可以二次编辑；规划点说明编辑时可进入全屏输入模式。面板提供“导入 Trip”“导出 JSON”和“在线分享”入口；导入会先调用只读校验接口，在线分享生成可撤销的只读链接，访问时读取该行程最新数据，不需要为每次更新生成新链接。
 
 规划 API：
 
@@ -158,6 +159,7 @@ POST /api/v1/trips/{trip_id}/days/{day_id}/stops/{stop_id}/children
 POST /api/v1/trips/{trip_id}/days/{day_id}/stops/{stop_id}/weather
 POST /api/v1/trips/{trip_id}/plan
 POST /api/v1/trips/{trip_id}/routes/refresh
+PUT  /api/v1/settings/map
 PUT  /api/v1/settings/poi
 DELETE /api/v1/settings/place-directory
 ~~~
@@ -167,7 +169,7 @@ DELETE /api/v1/settings/place-directory
 默认只在显式规划操作时调用地图服务；POI/geocode/route/weather 由 SQLite cache、同请求 singleflight、全局并发信号量、每个 Provider 的独立串行闸门和可选每日上限控制。百度/高德临时 DNS、内部错误和限流状态会在单次请求内有限重试；多天路线会在后一天保存从前一天最后一个规划点到当天第一个规划点的边界路线。配置：
 
 ~~~powershell
-$env:JOURNEYIN_MAP_PROVIDER = 'baidu' # 或 amap，作为新 Trip 和无偏好页面的默认 Provider
+$env:JOURNEYIN_MAP_PROVIDER = 'baidu' # 或 amap；仅在 SQLite 设置未保存默认 Provider 时作为 fallback
 $env:JOURNEYIN_MAP_MAX_CONCURRENCY = '2'
 $env:JOURNEYIN_MAP_DAILY_LIMIT = '0' # 0 表示不在 JourneyIn 内设置上限
 $env:JOURNEYIN_AMAP_SERVER_KEY = '<amap-webservice-key>'

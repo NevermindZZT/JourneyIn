@@ -55,9 +55,12 @@ func (s *Server) geocode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
 		return
 	}
-	if body.Provider == "" {
-		body.Provider = journeymaps.ProviderBaidu
+	providerID, err := s.resolveMapProvider(r.Context(), body.Provider)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
+		return
 	}
+	body.Provider = providerID
 	provider, err := s.provider(body.Provider)
 	if err != nil {
 		writeMapError(w, err)
@@ -116,9 +119,12 @@ func (s *Server) reverseGeocode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
 		return
 	}
-	if body.Provider == "" {
-		body.Provider = journeymaps.ProviderBaidu
+	providerID, err := s.resolveMapProvider(r.Context(), body.Provider)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
+		return
 	}
+	body.Provider = providerID
 	provider, err := s.provider(body.Provider)
 	if err != nil {
 		writeMapError(w, err)
@@ -143,9 +149,12 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
 		return
 	}
-	if body.Provider == "" {
-		body.Provider = journeymaps.ProviderBaidu
+	providerID, err := s.resolveMapProvider(r.Context(), body.Provider)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
+		return
 	}
+	body.Provider = providerID
 	provider, err := s.provider(body.Provider)
 	if err != nil {
 		writeMapError(w, err)
@@ -170,9 +179,12 @@ func (s *Server) weather(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
 		return
 	}
-	if body.Provider == "" {
-		body.Provider = journeymaps.ProviderBaidu
+	providerID, err := s.resolveMapProvider(r.Context(), body.Provider)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
+		return
 	}
+	body.Provider = providerID
 	provider, err := s.provider(body.Provider)
 	if err != nil {
 		writeMapError(w, err)
@@ -197,9 +209,12 @@ func (s *Server) navigation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
 		return
 	}
-	if body.Provider == "" {
-		body.Provider = journeymaps.ProviderBaidu
+	providerID, err := s.resolveMapProvider(r.Context(), body.Provider)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
+		return
 	}
+	body.Provider = providerID
 	provider, err := s.provider(body.Provider)
 	if err != nil {
 		writeMapError(w, err)

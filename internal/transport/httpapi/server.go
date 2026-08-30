@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"journeyin/internal/application"
 	"journeyin/internal/domain"
@@ -30,6 +31,7 @@ type Server struct {
 	amapBrowserKey     string
 	amapSecurityCode   string
 	defaultMapProvider string
+	defaultProviderMu  sync.RWMutex
 	shareService       *journeyshare.Service
 	publicURL          string
 	syncStore          *store.Store
@@ -53,8 +55,14 @@ func (s *Server) SetAMapBrowserKey(browserKey string) {
 }
 func (s *Server) SetAMapSecurityJSCode(code string) { s.amapSecurityCode = strings.TrimSpace(code) }
 func (s *Server) SetDefaultMapProvider(provider journeymaps.ProviderID) {
-	if provider == journeymaps.ProviderAMap || provider == journeymaps.ProviderBaidu {
-		s.defaultMapProvider = string(provider)
+	if !isSupportedMapProvider(provider) {
+		return
+	}
+	s.defaultProviderMu.Lock()
+	s.defaultMapProvider = string(provider)
+	s.defaultProviderMu.Unlock()
+	if s.trips != nil {
+		s.trips.SetDefaultMapProvider(provider)
 	}
 }
 func (s *Server) SetMapService(service *application.MapService) { s.mapService = service }
@@ -103,6 +111,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/sync/push", s.syncPush)
 	mux.HandleFunc("GET /api/v1/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/v1/settings/map-keys", s.updateMapKeys)
+	mux.HandleFunc("PUT /api/v1/settings/map", s.updateMapPreferences)
 	mux.HandleFunc("PUT /api/v1/settings/poi", s.updatePOIPreferences)
 	mux.HandleFunc("DELETE /api/v1/settings/place-directory", s.clearPlaceDirectory)
 	mux.HandleFunc("/_AMapService/", s.amapServiceProxy)
@@ -161,9 +170,10 @@ func (s *Server) capabilities(w http.ResponseWriter, r *http.Request) {
 			providers["amap"].(map[string]any)["registered"] = true
 		}
 	}
-	defaultProvider := s.defaultMapProvider
-	if defaultProvider == "" {
-		defaultProvider = string(journeymaps.ProviderBaidu)
+	defaultProvider, err := s.defaultMapProviderFor(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"version": s.version, "schema_versions": []int{1}, "default_map_provider": defaultProvider, "map_providers": providers, "mcp": map[string]any{"http_endpoint": "/mcp", "transports": []string{"streamable-http", "stdio"}}})
 }

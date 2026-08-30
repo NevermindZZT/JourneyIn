@@ -122,15 +122,19 @@ func (s *Server) publicShare(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	setSharePageHeaders(w)
-	_, _ = w.Write(s.renderShareShell(record, s.browserMapKey, s.amapBrowserKey, amapProxyPrefix))
+	defaultProvider := "baidu"
+	if configured, defaultErr := s.defaultMapProviderFor(r.Context()); defaultErr == nil {
+		defaultProvider = string(configured)
+	}
+	_, _ = w.Write(s.renderShareShell(record, s.browserMapKey, s.amapBrowserKey, amapProxyPrefix, defaultProvider))
 }
 
-func (s *Server) renderShareShell(record journeyshare.Record, browserKey, amapBrowserKey, amapSecurityProxyPath string) []byte {
+func (s *Server) renderShareShell(record journeyshare.Record, browserKey, amapBrowserKey, amapSecurityProxyPath, defaultMapProvider string) []byte {
 	index, err := fs.ReadFile(s.web, "index.html")
 	if err != nil {
 		return []byte("<!doctype html><html><body>分享页面资源不可用</body></html>")
 	}
-	data, _ := json.Marshal(map[string]any{"trip": json.RawMessage(record.Content), "browser_key": browserKey, "amap_browser_key": amapBrowserKey, "amap_security_proxy_path": amapSecurityProxyPath, "amap_security_js_code_configured": s.amapSecurityCode != "", "revision": record.Revision})
+	data, _ := json.Marshal(map[string]any{"trip": json.RawMessage(record.Content), "browser_key": browserKey, "amap_browser_key": amapBrowserKey, "amap_security_proxy_path": amapSecurityProxyPath, "amap_security_js_code_configured": s.amapSecurityCode != "", "default_map_provider": defaultMapProvider, "revision": record.Revision})
 	bootstrap := append([]byte("<script>window.__JOURNEYIN_SHARE__="), data...)
 	bootstrap = append(bootstrap, []byte(";</script>")...)
 	return bytes.Replace(index, []byte("</head>"), append(bootstrap, []byte("</head>")...), 1)

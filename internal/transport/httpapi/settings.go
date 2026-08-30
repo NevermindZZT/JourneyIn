@@ -1,11 +1,14 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
 	journeymaps "journeyin/internal/maps"
 )
+
+const defaultMapProviderSettingKey = "map.default_provider"
 
 type mapKeysBody struct {
 	BaiduBrowserKey    *string `json:"baidu_browser_key"`
@@ -15,9 +18,50 @@ type mapKeysBody struct {
 	AMapSecurityJSCode *string `json:"amap_security_js_code"`
 }
 
+type mapPreferencesBody struct {
+	DefaultProvider journeymaps.ProviderID `json:"default_provider"`
+}
+
+func isSupportedMapProvider(provider journeymaps.ProviderID) bool {
+	return provider == journeymaps.ProviderAMap || provider == journeymaps.ProviderBaidu
+}
+
+func (s *Server) defaultMapProviderFor(ctx context.Context) (journeymaps.ProviderID, error) {
+	s.defaultProviderMu.RLock()
+	provider := journeymaps.ProviderID(strings.TrimSpace(s.defaultMapProvider))
+	s.defaultProviderMu.RUnlock()
+	if s.settingsStore != nil {
+		value, ok, err := s.settingsStore.GetSetting(ctx, defaultMapProviderSettingKey)
+		if err != nil {
+			return "", err
+		}
+		configured := journeymaps.ProviderID(strings.TrimSpace(value))
+		if ok && isSupportedMapProvider(configured) {
+			provider = configured
+		}
+	}
+	if !isSupportedMapProvider(provider) {
+		provider = journeymaps.ProviderBaidu
+	}
+	return provider, nil
+}
+
+func (s *Server) resolveMapProvider(ctx context.Context, requested journeymaps.ProviderID) (journeymaps.ProviderID, error) {
+	requested = journeymaps.ProviderID(strings.TrimSpace(string(requested)))
+	if requested != "" {
+		return requested, nil
+	}
+	return s.defaultMapProviderFor(ctx)
+}
+
 func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	if s.settingsStore == nil {
 		writeError(w, http.StatusServiceUnavailable, "settings_unavailable", "settings store is not configured", nil)
+		return
+	}
+	defaultProvider, err := s.defaultMapProviderFor(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
 		return
 	}
 	_, browserOK, err := s.settingsStore.GetSetting(r.Context(), "map.baidu.browser_key")
@@ -76,8 +120,9 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"map": map[string]any{
-		"baidu": map[string]any{"browser_key_configured": browserOK, "server_key_configured": serverOK},
-		"amap":  map[string]any{"js_key_configured": amapJSOK, "server_key_configured": amapServerOK, "security_js_code_configured": amapSecurityOK},
+		"default_provider": defaultProvider,
+		"baidu":            map[string]any{"browser_key_configured": browserOK, "server_key_configured": serverOK},
+		"amap":             map[string]any{"js_key_configured": amapJSOK, "server_key_configured": amapServerOK, "security_js_code_configured": amapSecurityOK},
 	}, "poi": map[string]any{"provider_priority": priority, "local_directory_count": directoryCount}})
 }
 
@@ -157,6 +202,29 @@ func (s *Server) updateMapKeys(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"saved": true})
+}
+
+func (s *Server) updateMapPreferences(w http.ResponseWriter, r *http.Request) {
+	if s.settingsStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "settings_unavailable", "settings store is not configured", nil)
+		return
+	}
+	var body mapPreferencesBody
+	if err := decodeBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
+		return
+	}
+	provider := journeymaps.ProviderID(strings.TrimSpace(string(body.DefaultProvider)))
+	if !isSupportedMapProvider(provider) {
+		writeError(w, http.StatusBadRequest, "invalid_default_map_provider", "default_provider must be amap or baidu", nil)
+		return
+	}
+	if err := s.settingsStore.SetSetting(r.Context(), defaultMapProviderSettingKey, string(provider), false); err != nil {
+		writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
+		return
+	}
+	s.SetDefaultMapProvider(provider)
+	writeJSON(w, http.StatusOK, map[string]any{"saved": true, "default_provider": provider})
 }
 
 type poiPreferencesBody struct {

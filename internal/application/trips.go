@@ -10,16 +10,19 @@ import (
 	"time"
 
 	"journeyin/internal/domain"
+	journeymaps "journeyin/internal/maps"
 	"journeyin/internal/store"
 )
 
 type TripService struct {
-	store      *store.Store
-	mapService *MapService
-	mu         sync.Mutex
-	previews   map[string]preview
-	planMu     sync.Mutex
-	planLocks  map[string]chan struct{}
+	store              *store.Store
+	mapService         *MapService
+	mu                 sync.Mutex
+	defaultProviderMu  sync.RWMutex
+	defaultMapProvider journeymaps.ProviderID
+	previews           map[string]preview
+	planMu             sync.Mutex
+	planLocks          map[string]chan struct{}
 }
 
 type preview struct {
@@ -51,9 +54,28 @@ type CommitResult struct {
 }
 
 func NewTripService(s *store.Store) *TripService {
-	return &TripService{store: s, previews: make(map[string]preview), planLocks: make(map[string]chan struct{})}
+	return &TripService{store: s, previews: make(map[string]preview), planLocks: make(map[string]chan struct{}), defaultMapProvider: journeymaps.ProviderBaidu}
 }
 func (s *TripService) SetMapService(service *MapService) { s.mapService = service }
+
+func (s *TripService) SetDefaultMapProvider(provider journeymaps.ProviderID) {
+	if provider != journeymaps.ProviderAMap && provider != journeymaps.ProviderBaidu {
+		return
+	}
+	s.defaultProviderMu.Lock()
+	s.defaultMapProvider = provider
+	s.defaultProviderMu.Unlock()
+}
+
+func (s *TripService) DefaultMapProvider() journeymaps.ProviderID {
+	s.defaultProviderMu.RLock()
+	provider := s.defaultMapProvider
+	s.defaultProviderMu.RUnlock()
+	if provider != journeymaps.ProviderAMap && provider != journeymaps.ProviderBaidu {
+		return journeymaps.ProviderBaidu
+	}
+	return provider
+}
 
 func (s *TripService) acquirePlan(ctx context.Context, tripID string) (func(), error) {
 	s.planMu.Lock()

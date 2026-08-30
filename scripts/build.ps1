@@ -10,5 +10,5 @@ $env:CGO_ENABLED = "0"
 go test ./...
 go vet ./...
 New-Item -ItemType Directory -Force dist | Out-Null
-go build -trimpath -ldflags "-s -w -X main.version=0.2.4" -o dist/journeyin.exe ./cmd/journeyin
+go build -trimpath -ldflags "-s -w -X main.version=0.2.5" -o dist/journeyin.exe ./cmd/journeyin
 Write-Host "Built dist/journeyin.exe"

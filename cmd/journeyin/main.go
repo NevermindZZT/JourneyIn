@@ -23,7 +23,7 @@ import (
 	mcptransport "journeyin/internal/transport/mcp"
 )
 
-var version = "0.2.4"
+var version = "0.2.5"
 
 func main() {
 	if len(os.Args) >= 3 && os.Args[1] == "mcp" && os.Args[2] == "stdio" {
@@ -85,7 +85,7 @@ func main() {
 	mapService := application.NewMapService(database, mapRegistry, intEnv("JOURNEYIN_MAP_MAX_CONCURRENCY", 2), intEnv("JOURNEYIN_MAP_DAILY_LIMIT", 0))
 	app.SetMapService(mapService)
 	api.SetMapRegistry(mapRegistry, baiduBrowserKey)
-	defaultMapProvider := journeymaps.ProviderID(strings.TrimSpace(os.Getenv("JOURNEYIN_MAP_PROVIDER")))
+	defaultMapProvider := journeymaps.ProviderID(strings.TrimSpace(settingValue(ctx, database, "map.default_provider", os.Getenv("JOURNEYIN_MAP_PROVIDER"))))
 	if defaultMapProvider != journeymaps.ProviderAMap && defaultMapProvider != journeymaps.ProviderBaidu {
 		defaultMapProvider = journeymaps.ProviderBaidu
 	}
