@@ -607,6 +607,7 @@ async function addPlaceToTrip(candidate: PlaceCandidate) {
 }
 
 async function planRoutes() {
+  if (planningLoading.value) return
   if (!selected.value || !tripDocument.value) { error.value = '请先选择一条旅行规划'; return }
   if (!plannableDays.value.length) { error.value = '至少有两个相邻的带坐标规划点后才能生成路线'; return }
   planningLoading.value = true; error.value = ''

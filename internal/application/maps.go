@@ -18,12 +18,14 @@ type MapService struct {
 	registry  *journeymaps.Registry
 	store     *store.Store
 	semaphore chan struct{}
-	// Route/direction calls use a conservative single-flight gate; the general semaphore
-	// still limits other provider requests.
-	routeSemaphore chan struct{}
-	dailyLimit     int
-	mu             sync.Mutex
-	flights        map[string]*mapFlight
+	// Every provider gets its own conservative single-flight gate. This prevents
+	// route, POI, geocode, and weather calls from exceeding the provider's
+	// concurrent-request allowance while still allowing different providers to run independently.
+	providerMu         sync.Mutex
+	providerSemaphores map[journeymaps.ProviderID]chan struct{}
+	dailyLimit         int
+	mu                 sync.Mutex
+	flights            map[string]*mapFlight
 }
 
 type mapFlight struct {
@@ -36,7 +38,7 @@ func NewMapService(database *store.Store, registry *journeymaps.Registry, maxCon
 	if maxConcurrency < 1 {
 		maxConcurrency = 2
 	}
-	return &MapService{registry: registry, store: database, semaphore: make(chan struct{}, maxConcurrency), routeSemaphore: make(chan struct{}, 1), dailyLimit: dailyLimit, flights: make(map[string]*mapFlight)}
+	return &MapService{registry: registry, store: database, semaphore: make(chan struct{}, maxConcurrency), providerSemaphores: make(map[journeymaps.ProviderID]chan struct{}), dailyLimit: dailyLimit, flights: make(map[string]*mapFlight)}
 }
 
 func (s *MapService) provider(id journeymaps.ProviderID) (journeymaps.MapProvider, error) {
@@ -228,10 +230,6 @@ func (s *MapService) Route(ctx context.Context, providerID journeymaps.ProviderI
 	}
 	cacheKey := mapCacheKey(cacheRequest)
 	data, err := s.cached(ctx, providerID, "route", cacheKey, 30*time.Minute, func() ([]byte, error) {
-		if err := s.acquireRoute(ctx); err != nil {
-			return nil, err
-		}
-		defer s.releaseRoute()
 		// Use the same quarter-hour-bucketed departure that forms the cache key.
 		// Otherwise two requests in one bucket could share a snapshot fetched for a different time.
 		result, err := s.call(ctx, providerID, func() (any, error) { return provider.Route(ctx, cacheRequest) })
@@ -273,25 +271,28 @@ func (s *MapService) Weather(ctx context.Context, providerID journeymaps.Provide
 	return result, nil
 }
 
-func (s *MapService) acquireRoute(ctx context.Context) error {
-	if s.routeSemaphore == nil {
-		return nil
+func (s *MapService) acquireProvider(ctx context.Context, providerID journeymaps.ProviderID) (func(), error) {
+	s.providerMu.Lock()
+	gate := s.providerSemaphores[providerID]
+	if gate == nil {
+		gate = make(chan struct{}, 1)
+		s.providerSemaphores[providerID] = gate
 	}
+	s.providerMu.Unlock()
 	select {
-	case s.routeSemaphore <- struct{}{}:
-		return nil
+	case gate <- struct{}{}:
+		return func() { <-gate }, nil
 	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-func (s *MapService) releaseRoute() {
-	if s.routeSemaphore != nil {
-		<-s.routeSemaphore
+		return nil, ctx.Err()
 	}
 }
 
 func (s *MapService) call(ctx context.Context, providerID journeymaps.ProviderID, fn func() (any, error)) (any, error) {
+	releaseProvider, err := s.acquireProvider(ctx, providerID)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseProvider()
 	select {
 	case s.semaphore <- struct{}{}:
 	case <-ctx.Done():

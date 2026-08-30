@@ -28,7 +28,13 @@ const (
 	PlatformIOS     Platform         = "ios"
 )
 
-var ErrProviderUnavailable = errors.New("map provider unavailable")
+var (
+	ErrProviderUnavailable   = errors.New("map provider unavailable")
+	ErrProviderTemporary     = errors.New("map provider temporarily unavailable")
+	ErrProviderRateLimited   = errors.New("map provider rate limited")
+	ErrProviderUnauthorized  = errors.New("map provider unauthorized")
+	ErrProviderQuotaExceeded = errors.New("map provider quota exceeded")
+)
 
 type GeoPoint struct {
 	Lat float64          `json:"lat"`

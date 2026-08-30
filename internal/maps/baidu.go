@@ -3,7 +3,9 @@ package maps
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -34,7 +36,14 @@ func NewBaiduProvider(config BaiduConfig) *BaiduProvider {
 	}
 	client := config.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: config.RequestTimeout}
+		if transport, ok := http.DefaultTransport.(*http.Transport); ok {
+			transport = transport.Clone()
+			transport.MaxConnsPerHost = 1
+			transport.MaxIdleConnsPerHost = 1
+			client = &http.Client{Transport: transport, Timeout: config.RequestTimeout}
+		} else {
+			client = &http.Client{Timeout: config.RequestTimeout}
+		}
 	}
 	return &BaiduProvider{config: config, client: client}
 }
@@ -280,27 +289,140 @@ func (p *BaiduProvider) NavigationURL(target NavTarget, mode TravelMode, platfor
 	return prefix + query.Encode(), nil
 }
 
+const (
+	baiduMaxRequestAttempts = 3
+	baiduRetryBaseDelay     = 250 * time.Millisecond
+	baiduRetryMaxDelay      = 5 * time.Second
+)
+
 func (p *BaiduProvider) get(ctx context.Context, path string, params url.Values, output any) error {
 	requestCtx, cancel := context.WithTimeout(ctx, p.config.RequestTimeout)
 	defer cancel()
 	endpoint := strings.TrimRight(p.config.BaseURL, "/") + path + "?" + params.Encode()
-	request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return err
+	for attempt := 1; attempt <= baiduMaxRequestAttempts; attempt++ {
+		request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			return fmt.Errorf("baidu request %s: could not create request", path)
+		}
+		request.Header.Set("Accept", "application/json")
+		response, err := p.client.Do(request)
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if requestCtx.Err() != nil {
+				return baiduRequestError(path, requestCtx.Err())
+			}
+			if attempt < baiduMaxRequestAttempts && retryableBaiduTransportError(err) {
+				if waitErr := waitForBaiduRetry(requestCtx, attempt, ""); waitErr != nil {
+					if ctx.Err() != nil {
+						return ctx.Err()
+					}
+					return baiduRequestError(path, waitErr)
+				}
+				continue
+			}
+			return baiduRequestError(path, err)
+		}
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			retryAfter := response.Header.Get("Retry-After")
+			response.Body.Close()
+			if attempt < baiduMaxRequestAttempts && retryableBaiduHTTPStatus(response.StatusCode) {
+				if waitErr := waitForBaiduRetry(requestCtx, attempt, retryAfter); waitErr != nil {
+					if ctx.Err() != nil {
+						return ctx.Err()
+					}
+					return baiduRequestError(path, waitErr)
+				}
+				continue
+			}
+			return baiduHTTPError(path, response.StatusCode)
+		}
+		var payload json.RawMessage
+		decodeErr := json.NewDecoder(response.Body).Decode(&payload)
+		response.Body.Close()
+		if decodeErr != nil {
+			return fmt.Errorf("decode baidu response %s: %w", path, decodeErr)
+		}
+		var envelope struct {
+			Status *int `json:"status"`
+		}
+		if err := json.Unmarshal(payload, &envelope); err == nil && envelope.Status != nil && attempt < baiduMaxRequestAttempts && retryableBaiduAPIStatus(*envelope.Status) {
+			if waitErr := waitForBaiduRetry(requestCtx, attempt, ""); waitErr != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				return baiduRequestError(path, waitErr)
+			}
+			continue
+		}
+		if err := json.Unmarshal(payload, output); err != nil {
+			return fmt.Errorf("decode baidu response %s: %w", path, err)
+		}
+		return nil
 	}
-	request.Header.Set("Accept", "application/json")
-	response, err := p.client.Do(request)
-	if err != nil {
-		return fmt.Errorf("baidu request: %w", err)
+	return baiduRequestError(path, errors.New("request attempts exhausted"))
+}
+
+func retryableBaiduTransportError(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
 	}
-	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("baidu HTTP status %d", response.StatusCode)
+	var networkError net.Error
+	return errors.As(err, &networkError)
+}
+
+func retryableBaiduHTTPStatus(status int) bool {
+	return status == http.StatusRequestTimeout || status == http.StatusTooManyRequests || status >= 500
+}
+
+func retryableBaiduAPIStatus(status int) bool {
+	return status == 1 || status == 401
+}
+
+func waitForBaiduRetry(ctx context.Context, attempt int, retryAfter string) error {
+	delay := baiduRetryBaseDelay * time.Duration(1<<(attempt-1))
+	if seconds, err := strconv.Atoi(strings.TrimSpace(retryAfter)); err == nil && seconds >= 0 {
+		delay = time.Duration(seconds) * time.Second
 	}
-	if err := json.NewDecoder(response.Body).Decode(output); err != nil {
-		return fmt.Errorf("decode baidu response: %w", err)
+	if delay > baiduRetryMaxDelay {
+		delay = baiduRetryMaxDelay
 	}
-	return nil
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func baiduRequestError(path string, err error) error {
+	if err == nil {
+		return fmt.Errorf("%w: baidu request %s", ErrProviderTemporary, path)
+	}
+	for depth := 0; depth < 4; depth++ {
+		var urlError *url.Error
+		if !errors.As(err, &urlError) || urlError.Err == nil {
+			break
+		}
+		err = urlError.Err
+	}
+	return fmt.Errorf("%w: baidu request %s: %v", ErrProviderTemporary, path, err)
+}
+
+func baiduHTTPError(path string, status int) error {
+	switch {
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		return fmt.Errorf("%w: baidu request %s returned HTTP %d", ErrProviderUnauthorized, path, status)
+	case status == http.StatusTooManyRequests:
+		return fmt.Errorf("%w: baidu request %s returned HTTP %d", ErrProviderRateLimited, path, status)
+	case status >= 500:
+		return fmt.Errorf("%w: baidu request %s returned HTTP %d", ErrProviderTemporary, path, status)
+	default:
+		return fmt.Errorf("baidu request %s returned HTTP %d", path, status)
+	}
 }
 
 type baiduRouteResponse struct {
@@ -383,6 +505,20 @@ func parseBaiduPath(path string, crs CoordinateSystem) ([]GeoPoint, error) {
 func baiduStatusError(status int, message string) error {
 	if message == "" {
 		message = "unknown error"
+	}
+	var category error
+	switch status {
+	case 1:
+		category = ErrProviderTemporary
+	case 3, 5, 101, 200, 201, 202, 203, 210, 211, 240:
+		category = ErrProviderUnauthorized
+	case 4, 302:
+		category = ErrProviderQuotaExceeded
+	case 401:
+		category = ErrProviderRateLimited
+	}
+	if category != nil {
+		return fmt.Errorf("%w: baidu API status %d: %s", category, status, message)
 	}
 	return fmt.Errorf("baidu API status %d: %s", status, message)
 }

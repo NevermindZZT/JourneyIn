@@ -93,9 +93,17 @@ func (s *TripService) PlanTrip(ctx context.Context, tripID string, expectedRevis
 	if s.mapService == nil {
 		return store.TripRecord{}, errors.New("map service is not configured")
 	}
+	releasePlan, err := s.acquirePlan(ctx, tripID)
+	if err != nil {
+		return store.TripRecord{}, err
+	}
+	defer releasePlan()
 	record, err := s.store.GetTrip(ctx, tripID)
 	if err != nil {
 		return store.TripRecord{}, err
+	}
+	if record.Revision != expectedRevision {
+		return store.TripRecord{}, store.ErrRevisionConflict
 	}
 	var trip domain.Trip
 	if err := json.Unmarshal(record.Document, &trip); err != nil {

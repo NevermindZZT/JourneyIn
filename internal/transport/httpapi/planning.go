@@ -188,6 +188,22 @@ func writePlanningError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusTooManyRequests, "quota_exceeded", err.Error(), nil)
 		return
 	}
+	if errors.Is(err, journeymaps.ErrProviderRateLimited) {
+		writeError(w, http.StatusTooManyRequests, "provider_rate_limited", err.Error(), nil)
+		return
+	}
+	if errors.Is(err, journeymaps.ErrProviderQuotaExceeded) {
+		writeError(w, http.StatusTooManyRequests, "provider_quota_exceeded", err.Error(), nil)
+		return
+	}
+	if errors.Is(err, journeymaps.ErrProviderTemporary) {
+		writeError(w, http.StatusServiceUnavailable, "provider_temporary", err.Error(), nil)
+		return
+	}
+	if errors.Is(err, journeymaps.ErrProviderUnauthorized) {
+		writeError(w, http.StatusBadGateway, "provider_unauthorized", err.Error(), nil)
+		return
+	}
 	if errors.Is(err, journeymaps.ErrProviderUnavailable) {
 		writeError(w, http.StatusServiceUnavailable, "provider_unavailable", err.Error(), nil)
 		return

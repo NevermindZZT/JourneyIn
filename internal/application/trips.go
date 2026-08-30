@@ -18,6 +18,8 @@ type TripService struct {
 	mapService *MapService
 	mu         sync.Mutex
 	previews   map[string]preview
+	planMu     sync.Mutex
+	planLocks  map[string]chan struct{}
 }
 
 type preview struct {
@@ -49,9 +51,25 @@ type CommitResult struct {
 }
 
 func NewTripService(s *store.Store) *TripService {
-	return &TripService{store: s, previews: make(map[string]preview)}
+	return &TripService{store: s, previews: make(map[string]preview), planLocks: make(map[string]chan struct{})}
 }
 func (s *TripService) SetMapService(service *MapService) { s.mapService = service }
+
+func (s *TripService) acquirePlan(ctx context.Context, tripID string) (func(), error) {
+	s.planMu.Lock()
+	lock := s.planLocks[tripID]
+	if lock == nil {
+		lock = make(chan struct{}, 1)
+		s.planLocks[tripID] = lock
+	}
+	s.planMu.Unlock()
+	select {
+	case lock <- struct{}{}:
+		return func() { <-lock }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
 
 func (s *TripService) Validate(document []byte) ([]byte, domain.Trip, []domain.ValidationIssue, error) {
 	return domain.NormalizeTrip(document)
