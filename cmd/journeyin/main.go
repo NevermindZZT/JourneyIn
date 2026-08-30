@@ -40,6 +40,9 @@ func main() {
 			dataPath = absolute
 		}
 	}
+	if err := prepareDockerRuntime(dataPath); err != nil {
+		log.Fatal(err)
+	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	ctx := context.Background()
@@ -106,6 +109,14 @@ func main() {
 
 func runStdio() {
 	dataPath := envOr("JOURNEYIN_DATA_DIR", defaultDataPath())
+	if dataPath != ":memory:" {
+		if absolute, err := filepath.Abs(dataPath); err == nil {
+			dataPath = absolute
+		}
+	}
+	if err := prepareDockerRuntime(dataPath); err != nil {
+		log.New(os.Stderr, "", log.LstdFlags).Fatal(err)
+	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	migrations, err := fs.Sub(journeyin.MigrationFS, "migrations")
 	if err != nil {

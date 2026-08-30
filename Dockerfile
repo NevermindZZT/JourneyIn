@@ -31,6 +31,13 @@ LABEL org.opencontainers.image.title=JourneyIn \
       org.opencontainers.image.source="https://github.com/NevermindZZT/JourneyIn"
 COPY --from=go-build /out/journeyin /journeyin
 COPY --from=runtime-data --chown=65532:65532 /data /data
+
+# The single Go binary starts as root only to prepare the fixed /data mount.
+# It drops permanently to 65532:65532 before opening SQLite or serving HTTP.
+ENV JOURNEYIN_DATA_DIR=/data/journeyin.db \
+    JOURNEYIN_DOCKER_RUNTIME=1 \
+    JOURNEYIN_DOCKER_AUTO_FIX_PERMISSIONS=1
+USER 0:0
 VOLUME ["/data"]
 EXPOSE 8080
 ENTRYPOINT ["/journeyin"]

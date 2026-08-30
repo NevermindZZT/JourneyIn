@@ -19,7 +19,7 @@ services:
       JOURNEYIN_AMAP_JS_KEY: ${JOURNEYIN_AMAP_JS_KEY:-}
       JOURNEYIN_AMAP_SERVER_KEY: ${JOURNEYIN_AMAP_SERVER_KEY:-}
     volumes:
-      - journeyin-data:/data
+      - "${JOURNEYIN_DATA_PATH:-journeyin-data}:/data"
 
 volumes:
   journeyin-data:

@@ -9,6 +9,8 @@
 >
 > JourneyIn 是地图优先的旅行规划工具：把地点、顺序、路线、天气和备注放在同一张可保存的行程地图上。
 
+![snapshot](./docs/snapshot.jpg)
+
 项目主页：[github.com/NevermindZZT/JourneyIn](https://github.com/NevermindZZT/JourneyIn)。
 
 JourneyIn 当前提供 Go + SQLite 服务端、Vue/Ionic Web 客户端、Trip JSON、地图 Provider、只读分享、同步接口、MCP 和 Docker 配置。项目采用 [MIT License](LICENSE)，允许在保留版权和许可声明的前提下使用、修改和分发。
@@ -30,7 +32,7 @@ go run ./cmd/journeyin -listen 127.0.0.1:8080 -data D:/data/journeyin/journeyin.
 
 ~~~text
 nevermindzzt/journeyin:latest
-nevermindzzt/journeyin:0.2.4
+nevermindzzt/journeyin:0.2.3
 ~~~
 
 使用持久化卷启动：
@@ -51,9 +53,16 @@ docker compose -f docker-compose.hub.yml pull
 docker compose -f docker-compose.hub.yml up --detach
 ~~~
 
-如需固定版本，可设置 `$env:JOURNEYIN_IMAGE = 'nevermindzzt/journeyin:0.2.4'` 后再执行上述命令。
+如需固定版本，可设置 `$env:JOURNEYIN_IMAGE = 'nevermindzzt/journeyin:0.2.3'` 后再执行上述命令。
 
-默认使用 Docker named volume `journeyin-data`，由容器以非 root 用户写入。若改用 `./data:/data` bind mount，必须先创建可写目录；Linux 还需将目录所有者设置为容器用户 UID 65532，否则 SQLite 会报 `unable to open database file (14)`。Windows Docker Desktop 优先建议使用 named volume。
+默认使用 Docker named volume `journeyin-data`，由容器以非 root 用户写入，不需要创建或修改宿主机目录权限。若希望把数据直接放在宿主机目录，可设置 `JOURNEYIN_DATA_PATH` 切换为 bind mount；Compose 会自动创建目录，镜像启动时会检查固定的 `/data`，按需修复数据库目录及 SQLite sidecar 文件的所有者，然后同一个 Go 进程在打开 SQLite 前永久降权为 UID/GID 65532，不需要 `chmod 777` 或手动 `chown`：
+
+~~~powershell
+$env:JOURNEYIN_DATA_PATH = './data'
+docker compose -f docker-compose.hub.yml up --detach
+~~~
+
+Linux rootful Docker 和常见 Docker Desktop 环境可直接使用。rootless Docker、NFS/受限文件系统或只读挂载可能禁止容器内 `chown`；这类环境请继续使用 named volume，或提前按运行用户配置宿主机权限。`JOURNEYIN_DATA_PATH` 应映射到宿主机目录或 named volume，应用数据库固定为 `/data/journeyin.db`。
 
 构建和重新运行不会删除数据库。若省略 `-data` 与 `JOURNEYIN_DATA_DIR`，默认使用用户配置目录中的 `JourneyIn/journeyin.db`；程序也会兼容读取当前目录、可执行文件目录或其上级目录下已有的 `data/journeyin.db`。验收时建议始终使用固定绝对路径。
 
@@ -236,7 +245,7 @@ $env:JOURNEYIN_MCP_TOKEN = '<strong-random-token>'
 docker compose up --build -d
 ~~~
 
-数据保存于 Docker volume journeyin-data。生产环境请将服务放在 HTTPS 反向代理后，并注入地图服务商的 Key。
+数据默认保存于 Docker named volume `journeyin-data`；如果设置 `JOURNEYIN_DATA_PATH`，则保存于指定的宿主机目录或 named volume。生产环境请将服务放在 HTTPS 反向代理后，并注入地图服务商的 Key。
 
 ## 开源协议
 
