@@ -8,10 +8,11 @@ import (
 )
 
 type mapKeysBody struct {
-	BaiduBrowserKey *string `json:"baidu_browser_key"`
-	BaiduServerKey  *string `json:"baidu_server_key"`
-	AMapJSKey       *string `json:"amap_js_key"`
-	AMapServerKey   *string `json:"amap_server_key"`
+	BaiduBrowserKey    *string `json:"baidu_browser_key"`
+	BaiduServerKey     *string `json:"baidu_server_key"`
+	AMapJSKey          *string `json:"amap_js_key"`
+	AMapServerKey      *string `json:"amap_server_key"`
+	AMapSecurityJSCode *string `json:"amap_security_js_code"`
 }
 
 func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
@@ -47,10 +48,17 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
 		return
 	}
+	_, amapSecurityOK, err := s.settingsStore.GetSetting(r.Context(), "map.amap.security_js_code")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
+		return
+	}
 	if s.mapRegistry != nil {
 		if provider, ok := s.mapRegistry.Get(journeymaps.ProviderAMap); ok {
 			if amap, ok := provider.(*journeymaps.AMapProvider); ok {
+				amapJSOK = amapJSOK || amap.BrowserKeyConfigured()
 				amapServerOK = amapServerOK || amap.ServerKeyConfigured()
+				amapSecurityOK = amapSecurityOK || amap.SecurityJSCodeConfigured()
 			}
 		}
 	}
@@ -69,7 +77,7 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"map": map[string]any{
 		"baidu": map[string]any{"browser_key_configured": browserOK, "server_key_configured": serverOK},
-		"amap":  map[string]any{"js_key_configured": amapJSOK, "server_key_configured": amapServerOK},
+		"amap":  map[string]any{"js_key_configured": amapJSOK, "server_key_configured": amapServerOK, "security_js_code_configured": amapSecurityOK},
 	}, "poi": map[string]any{"provider_priority": priority, "local_directory_count": directoryCount}})
 }
 
@@ -92,6 +100,7 @@ func (s *Server) updateMapKeys(w http.ResponseWriter, r *http.Request) {
 		{"map.baidu.server_key", body.BaiduServerKey, true},
 		{"map.amap.js_key", body.AMapJSKey, false},
 		{"map.amap.server_key", body.AMapServerKey, true},
+		{"map.amap.security_js_code", body.AMapSecurityJSCode, true},
 	}
 	for _, update := range updates {
 		if update.value == nil {
@@ -123,6 +132,27 @@ func (s *Server) updateMapKeys(w http.ResponseWriter, r *http.Request) {
 		if provider, ok := s.mapRegistry.Get(journeymaps.ProviderAMap); ok {
 			if amap, ok := provider.(*journeymaps.AMapProvider); ok {
 				amap.SetServerKey(strings.TrimSpace(*body.AMapServerKey))
+			}
+		}
+	}
+	if body.AMapJSKey != nil && s.mapRegistry != nil {
+		if provider, ok := s.mapRegistry.Get(journeymaps.ProviderAMap); ok {
+			if amap, ok := provider.(*journeymaps.AMapProvider); ok {
+				amap.SetJSKey(strings.TrimSpace(*body.AMapJSKey))
+			}
+		}
+	}
+	if body.AMapJSKey != nil {
+		s.amapBrowserKey = strings.TrimSpace(*body.AMapJSKey)
+	}
+	if body.AMapSecurityJSCode != nil {
+		value := strings.TrimSpace(*body.AMapSecurityJSCode)
+		s.amapSecurityCode = value
+		if s.mapRegistry != nil {
+			if provider, ok := s.mapRegistry.Get(journeymaps.ProviderAMap); ok {
+				if amap, ok := provider.(*journeymaps.AMapProvider); ok {
+					amap.SetSecurityJSCode(value)
+				}
 			}
 		}
 	}

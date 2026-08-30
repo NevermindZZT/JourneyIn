@@ -92,6 +92,9 @@ type RouteLeg struct {
 type RouteSnapshot struct {
 	Provider         string      `json:"provider"`
 	CoordinateSystem string      `json:"coordinate_system"`
+	Mode             string      `json:"mode,omitempty"`
+	Strategy         string      `json:"strategy,omitempty"`
+	Source           string      `json:"source,omitempty"`
 	Geometry         [][]float64 `json:"geometry,omitempty"`
 	DistanceM        int         `json:"distance_m,omitempty"`
 	DurationS        int         `json:"duration_s,omitempty"`
@@ -194,6 +197,7 @@ func (t Trip) Validate() []ValidationIssue {
 	} else if _, err := time.LoadLocation(t.Timezone); err != nil {
 		add("timezone", "invalid", "timezone must be a valid IANA timezone", "error")
 	}
+	validateMapConfig(t.Map, add)
 	start, startErr := time.Parse("2006-01-02", t.DateRange.Start)
 	end, endErr := time.Parse("2006-01-02", t.DateRange.End)
 	if startErr != nil {
@@ -242,9 +246,123 @@ func (t Trip) Validate() []ValidationIssue {
 			}
 			validateLinks(stopPath+".links", stop.Links, add)
 		}
+		validateRouteLegs(path+".legs", day.Legs, add)
 	}
 	validateLinks("links", t.Links, add)
 	return issues
+}
+
+func validateMapConfig(config MapConfig, add func(string, string, string, string)) {
+	if config.PreferredProvider != "" && config.PreferredProvider != "baidu" && config.PreferredProvider != "amap" {
+		add("map.preferred_provider", "enum", "preferred_provider must be baidu or amap", "error")
+	}
+	seen := map[string]bool{}
+	for index, provider := range config.EnabledProviders {
+		path := fmt.Sprintf("map.enabled_providers[%d]", index)
+		if provider != "baidu" && provider != "amap" {
+			add(path, "enum", "enabled provider must be baidu or amap", "error")
+		}
+		if seen[provider] {
+			add(path, "duplicate", "enabled providers must be unique", "error")
+		}
+		seen[provider] = true
+	}
+	if config.PreferredProvider != "" && len(config.EnabledProviders) > 0 && !seen[config.PreferredProvider] {
+		add("map.preferred_provider", "disabled", "preferred provider is not enabled", "warning")
+	}
+	if config.DefaultMode != "" && !validRouteMode(config.DefaultMode) {
+		add("map.default_mode", "enum", "default_mode must be driving, walking, cycling, or transit", "error")
+	}
+}
+
+func validateRouteLegs(path string, legs []RouteLeg, add func(string, string, string, string)) {
+	if len(legs) > 100 {
+		add(path, "limit", "at most 100 route legs are supported per day", "error")
+	}
+	seenPairs := map[string]bool{}
+	for index, leg := range legs {
+		legPath := fmt.Sprintf("%s[%d]", path, index)
+		if strings.TrimSpace(leg.ID) == "" {
+			add(legPath+".id", "required", "route leg id is required", "error")
+		}
+		if strings.TrimSpace(leg.FromStopID) == "" {
+			add(legPath+".from_stop_id", "required", "route leg origin is required", "error")
+		}
+		if strings.TrimSpace(leg.ToStopID) == "" {
+			add(legPath+".to_stop_id", "required", "route leg destination is required", "error")
+		}
+		pair := leg.FromStopID + "\x00" + leg.ToStopID
+		if seenPairs[pair] {
+			add(legPath, "duplicate", "route leg endpoints must be unique within a day", "error")
+		}
+		seenPairs[pair] = true
+		if leg.Mode != "" && !validRouteMode(leg.Mode) {
+			add(legPath+".mode", "enum", "route leg mode is unsupported", "error")
+		}
+		if len(leg.Snapshots) > 8 {
+			add(legPath+".snapshots", "limit", "at most 8 route snapshots are supported per leg", "error")
+		}
+		for snapshotIndex, snapshot := range leg.Snapshots {
+			validateRouteSnapshot(fmt.Sprintf("%s.snapshots[%d]", legPath, snapshotIndex), snapshot, add)
+		}
+	}
+}
+
+func validateRouteSnapshot(path string, snapshot RouteSnapshot, add func(string, string, string, string)) {
+	if strings.TrimSpace(snapshot.Provider) == "" {
+		add(path+".provider", "required", "route snapshot provider is required", "error")
+	}
+	if snapshot.CoordinateSystem != "wgs84" && snapshot.CoordinateSystem != "gcj02" && snapshot.CoordinateSystem != "bd09ll" {
+		add(path+".coordinate_system", "enum", "route snapshot coordinate_system is unsupported", "error")
+	}
+	if snapshot.Mode != "" && !validRouteMode(snapshot.Mode) {
+		add(path+".mode", "enum", "route snapshot mode is unsupported", "error")
+	}
+	if snapshot.DistanceM < 0 {
+		add(path+".distance_m", "range", "route snapshot distance_m must not be negative", "error")
+	}
+	if snapshot.DurationS < 0 {
+		add(path+".duration_s", "range", "route snapshot duration_s must not be negative", "error")
+	}
+	if len(snapshot.Geometry) > 20000 {
+		add(path+".geometry", "limit", "route snapshot geometry is too large", "error")
+	}
+	for pointIndex, point := range snapshot.Geometry {
+		pointPath := fmt.Sprintf("%s.geometry[%d]", path, pointIndex)
+		if len(point) != 2 {
+			add(pointPath, "shape", "route geometry points must be [lng, lat]", "error")
+			continue
+		}
+		if point[0] < -180 || point[0] > 180 || point[1] < -90 || point[1] > 90 {
+			add(pointPath, "range", "route geometry coordinates are out of range", "error")
+		}
+	}
+	var fetched, expires time.Time
+	var fetchedErr, expiresErr error
+	if snapshot.FetchedAt != "" {
+		fetched, fetchedErr = time.Parse(time.RFC3339Nano, snapshot.FetchedAt)
+		if fetchedErr != nil {
+			add(path+".fetched_at", "datetime", "fetched_at must be RFC3339", "error")
+		}
+	}
+	if snapshot.ExpiresAt != "" {
+		expires, expiresErr = time.Parse(time.RFC3339Nano, snapshot.ExpiresAt)
+		if expiresErr != nil {
+			add(path+".expires_at", "datetime", "expires_at must be RFC3339", "error")
+		}
+	}
+	if fetchedErr == nil && expiresErr == nil && !fetched.IsZero() && !expires.IsZero() && expires.Before(fetched) {
+		add(path, "order", "route snapshot expires_at must not be before fetched_at", "warning")
+	}
+}
+
+func validRouteMode(mode string) bool {
+	switch mode {
+	case "driving", "walking", "cycling", "transit":
+		return true
+	default:
+		return false
+	}
 }
 
 func validateLinks(path string, links []Link, add func(string, string, string, string)) {

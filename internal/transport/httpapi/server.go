@@ -19,19 +19,22 @@ import (
 )
 
 type Server struct {
-	trips         *application.TripService
-	web           fs.FS
-	schema        fs.FS
-	version       string
-	logger        *slog.Logger
-	mapRegistry   *journeymaps.Registry
-	mapService    *application.MapService
-	browserMapKey string
-	shareService  *journeyshare.Service
-	publicURL     string
-	syncStore     *store.Store
-	settingsStore *store.Store
-	auth          *Authenticator
+	trips              *application.TripService
+	web                fs.FS
+	schema             fs.FS
+	version            string
+	logger             *slog.Logger
+	mapRegistry        *journeymaps.Registry
+	mapService         *application.MapService
+	browserMapKey      string
+	amapBrowserKey     string
+	amapSecurityCode   string
+	defaultMapProvider string
+	shareService       *journeyshare.Service
+	publicURL          string
+	syncStore          *store.Store
+	settingsStore      *store.Store
+	auth               *Authenticator
 }
 
 func NewServer(trips *application.TripService, web, schema fs.FS, version string, logger *slog.Logger) *Server {
@@ -44,6 +47,15 @@ func NewServer(trips *application.TripService, web, schema fs.FS, version string
 func (s *Server) SetMapRegistry(registry *journeymaps.Registry, browserKey string) {
 	s.mapRegistry = registry
 	s.browserMapKey = browserKey
+}
+func (s *Server) SetAMapBrowserKey(browserKey string) {
+	s.amapBrowserKey = strings.TrimSpace(browserKey)
+}
+func (s *Server) SetAMapSecurityJSCode(code string) { s.amapSecurityCode = strings.TrimSpace(code) }
+func (s *Server) SetDefaultMapProvider(provider journeymaps.ProviderID) {
+	if provider == journeymaps.ProviderAMap || provider == journeymaps.ProviderBaidu {
+		s.defaultMapProvider = string(provider)
+	}
 }
 func (s *Server) SetMapService(service *application.MapService) { s.mapService = service }
 
@@ -75,6 +87,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/trips/{id}/days/{dayID}/stops/{stopID}/children", s.addSubStop)
 	mux.HandleFunc("POST /api/v1/trips/{id}/days/{dayID}/stops/{stopID}/weather", s.refreshWeather)
 	mux.HandleFunc("POST /api/v1/trips/{id}/plan", s.planTrip)
+	mux.HandleFunc("POST /api/v1/trips/{id}/routes/refresh", s.planTrip)
 	mux.HandleFunc("DELETE /api/v1/trips/{id}", s.deleteTrip)
 	mux.HandleFunc("GET /api/v1/trips/{id}/export.json", s.exportTrip)
 	mux.HandleFunc("POST /api/v1/maps/geocode", s.geocode)
@@ -92,6 +105,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/v1/settings/map-keys", s.updateMapKeys)
 	mux.HandleFunc("PUT /api/v1/settings/poi", s.updatePOIPreferences)
 	mux.HandleFunc("DELETE /api/v1/settings/place-directory", s.clearPlaceDirectory)
+	mux.HandleFunc("/_AMapService/", s.amapServiceProxy)
 	mux.Handle("/", s.staticHandler())
 	return requestLogger(mux, s.logger)
 }
@@ -137,7 +151,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 func (s *Server) capabilities(w http.ResponseWriter, r *http.Request) {
 	providers := map[string]any{
 		"baidu": map[string]any{"registered": false, "browser_key_configured": s.browserMapKey != "", "browser_key": s.browserMapKey},
-		"amap":  map[string]any{"registered": false, "browser_key_configured": false},
+		"amap":  map[string]any{"registered": false, "browser_key_configured": s.amapBrowserKey != "", "browser_key": s.amapBrowserKey, "security_proxy_path": "/_AMapService", "security_js_code_configured": s.amapSecurityCode != ""},
 	}
 	if s.mapRegistry != nil {
 		if _, ok := s.mapRegistry.Get(journeymaps.ProviderBaidu); ok {
@@ -147,7 +161,11 @@ func (s *Server) capabilities(w http.ResponseWriter, r *http.Request) {
 			providers["amap"].(map[string]any)["registered"] = true
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"version": s.version, "schema_versions": []int{1}, "map_providers": providers, "mcp": map[string]any{"http_endpoint": "/mcp", "transports": []string{"streamable-http", "stdio"}}})
+	defaultProvider := s.defaultMapProvider
+	if defaultProvider == "" {
+		defaultProvider = string(journeymaps.ProviderBaidu)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"version": s.version, "schema_versions": []int{1}, "default_map_provider": defaultProvider, "map_providers": providers, "mcp": map[string]any{"http_endpoint": "/mcp", "transports": []string{"streamable-http", "stdio"}}})
 }
 
 func (s *Server) schemaTrip(w http.ResponseWriter, r *http.Request) {

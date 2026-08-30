@@ -34,6 +34,13 @@ type mapFlight struct {
 	err  error
 }
 
+type placeDirectoryLocation struct {
+	Point    journeymaps.GeoPoint `json:"point"`
+	CityCode string               `json:"citycode,omitempty"`
+	AdCode   string               `json:"adcode,omitempty"`
+	TypeCode string               `json:"typecode,omitempty"`
+}
+
 func NewMapService(database *store.Store, registry *journeymaps.Registry, maxConcurrency, dailyLimit int) *MapService {
 	if maxConcurrency < 1 {
 		maxConcurrency = 2
@@ -66,10 +73,13 @@ func (s *MapService) SearchPOIByPriority(ctx context.Context, preferred journeym
 			items := make([]journeymaps.PlaceCandidate, 0, len(records))
 			for _, record := range records {
 				var point journeymaps.GeoPoint
-				if json.Unmarshal(record.LocationJSON, &point) != nil {
+				var metadata placeDirectoryLocation
+				if json.Unmarshal(record.LocationJSON, &metadata) == nil && metadata.Point.CRS != "" {
+					point = metadata.Point
+				} else if json.Unmarshal(record.LocationJSON, &point) != nil {
 					continue
 				}
-				items = append(items, journeymaps.PlaceCandidate{ID: record.ProviderID, Name: record.Name, Address: record.Address, Location: point, Provider: journeymaps.ProviderID(record.Provider)})
+				items = append(items, journeymaps.PlaceCandidate{ID: record.ProviderID, Name: record.Name, Address: record.Address, Location: point, Provider: journeymaps.ProviderID(record.Provider), CityCode: metadata.CityCode, AdCode: metadata.AdCode, TypeCode: metadata.TypeCode})
 			}
 			if len(items) > 0 {
 				return journeymaps.ProviderID(records[0].Provider), journeymaps.POISearchResult{Items: items, Total: len(items), Page: page, PageSize: pageSize}, nil
@@ -180,7 +190,7 @@ func (s *MapService) persistPlaceDirectory(ctx context.Context, result journeyma
 		if item.Name == "" || item.Location.CRS == "" {
 			continue
 		}
-		location, err := json.Marshal(item.Location)
+		location, err := json.Marshal(placeDirectoryLocation{Point: item.Location, CityCode: item.CityCode, AdCode: item.AdCode, TypeCode: item.TypeCode})
 		if err != nil {
 			continue
 		}
@@ -218,6 +228,29 @@ func (s *MapService) Geocode(ctx context.Context, providerID journeymaps.Provide
 	return result, nil
 }
 
+func (s *MapService) ReverseGeocode(ctx context.Context, providerID journeymaps.ProviderID, point journeymaps.GeoPoint) (string, error) {
+	provider, err := s.provider(providerID)
+	if err != nil {
+		return "", err
+	}
+	cacheKey := mapCacheKey(point)
+	data, err := s.cached(ctx, providerID, "reverse_geocode", cacheKey, 24*time.Hour, func() ([]byte, error) {
+		result, err := s.call(ctx, providerID, func() (any, error) { return provider.ReverseGeocode(ctx, point) })
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(result)
+	})
+	if err != nil {
+		return "", err
+	}
+	var result string
+	if err := json.Unmarshal(data, &result); err != nil {
+		return "", err
+	}
+	return result, nil
+}
+
 func (s *MapService) Route(ctx context.Context, providerID journeymaps.ProviderID, request journeymaps.RouteRequest) (journeymaps.RouteSnapshot, error) {
 	provider, err := s.provider(providerID)
 	if err != nil {
@@ -225,7 +258,8 @@ func (s *MapService) Route(ctx context.Context, providerID journeymaps.ProviderI
 	}
 	cacheRequest := request
 	if cacheRequest.DepartureAt != nil {
-		bucket := cacheRequest.DepartureAt.UTC().Truncate(15 * time.Minute)
+		value := cacheRequest.DepartureAt.In(cacheRequest.DepartureAt.Location())
+		bucket := time.Date(value.Year(), value.Month(), value.Day(), value.Hour(), (value.Minute()/15)*15, 0, 0, value.Location())
 		cacheRequest.DepartureAt = &bucket
 	}
 	cacheKey := mapCacheKey(cacheRequest)

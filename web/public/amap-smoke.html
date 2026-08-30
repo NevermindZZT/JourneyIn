@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JourneyIn AMap JSAPI Smoke Test</title><style>body{margin:0;padding:24px;font:16px system-ui;background:#f7faf9;color:#172624}#result{padding:16px;border:1px solid #cbd9d5;border-radius:12px;white-space:pre-wrap}#map{width:100%;height:520px;margin-top:16px;border-radius:12px;background:#e6f0ed}</style></head>
+<body><h1>高德 JS API 2.0 官方初始化 Smoke Test</h1><div id="result">正在检查 capabilities 和高德 JS API…</div><div id="map"></div><script>
+(async function(){
+  var result=document.getElementById('result');
+  function show(value){result.textContent=JSON.stringify(value,null,2)}
+  window.addEventListener('error',function(event){if(event.filename&&event.filename.indexOf('amap.com')>=0){show({status:'sdk_runtime_error',message:event.message,source:event.filename})}});
+  window.addEventListener('unhandledrejection',function(event){show({status:'sdk_promise_error',message:String(event.reason)})});
+  function load(url){return new Promise(function(resolve,reject){var script=document.createElement('script');script.src=url;script.onload=resolve;script.onerror=reject;document.head.appendChild(script)})}
+  try{
+    var response=await fetch('/api/v1/capabilities');var caps=await response.json();var provider=caps.map_providers&&caps.map_providers.amap;var key=provider&&provider.browser_key;
+    if(!key){show({status:'no_browser_key',hint:'请配置高德 Web 端 JS API Key'});return}
+    if(provider.security_js_code_configured&&provider.security_proxy_path){window._AMapSecurityConfig={serviceHost:new URL(provider.security_proxy_path,window.location.origin).toString().replace(/\/$/,'')}}
+    try{await load('https://webapi.amap.com/maps?v=2.0&key='+encodeURIComponent(key))}catch(error){show({status:'sdk_load_failed',error:String(error),hint:'请检查高德 JS Key、安全密钥、域名白名单和网络连接'});return}
+    var info={sdk:'AMap JS API 2.0',map:window.AMap?typeof window.AMap.Map:'undefined',marker:window.AMap?typeof window.AMap.Marker:'undefined',polyline:window.AMap?typeof window.AMap.Polyline:'undefined'};
+    if(!window.AMap||typeof window.AMap.Map!=='function'){show(Object.assign(info,{status:'map_constructor_unavailable'}));return}
+    try{var map=new window.AMap.Map('map',{viewMode:'2D',zoom:5,center:[116.397428,39.90923],resizeEnable:true});show(Object.assign(info,{status:'map_constructed',hint:'若地图瓦片未出现，请检查 JS Key、安全密钥、白名单和网络'}));window.setTimeout(function(){map.destroy&&map.destroy()},60000)}catch(error){show(Object.assign(info,{status:'map_construct_failed',error:String(error)}))}
+  }catch(error){show({status:'capabilities_failed',error:String(error)})}
+})();
+</script></body></html>

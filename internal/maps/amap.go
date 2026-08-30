@@ -2,7 +2,6 @@ package maps
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
@@ -15,6 +14,8 @@ import (
 
 type AMapConfig struct {
 	ServerKey      string
+	JSKey          string
+	SecurityJSCode string
 	BaseURL        string
 	HTTPClient     *http.Client
 	RequestTimeout time.Duration
@@ -44,7 +45,14 @@ func NewAMapProviderWithConfig(source string, config AMapConfig) *AMapProvider {
 	}
 	client := config.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: config.RequestTimeout}
+		if transport, ok := http.DefaultTransport.(*http.Transport); ok {
+			transport = transport.Clone()
+			transport.MaxConnsPerHost = 1
+			transport.MaxIdleConnsPerHost = 1
+			client = &http.Client{Transport: transport, Timeout: config.RequestTimeout}
+		} else {
+			client = &http.Client{Timeout: config.RequestTimeout}
+		}
 	}
 	return &AMapProvider{UnavailableProvider: NewUnavailableProvider(ProviderAMap), SourceApplication: source, config: config, client: client}
 }
@@ -54,12 +62,34 @@ func (p *AMapProvider) SetServerKey(value string) {
 	p.config.ServerKey = strings.TrimSpace(value)
 	p.configMu.Unlock()
 }
+func (p *AMapProvider) SetJSKey(value string) {
+	p.configMu.Lock()
+	p.config.JSKey = strings.TrimSpace(value)
+	p.configMu.Unlock()
+}
+func (p *AMapProvider) SetSecurityJSCode(value string) {
+	p.configMu.Lock()
+	p.config.SecurityJSCode = strings.TrimSpace(value)
+	p.configMu.Unlock()
+}
 func (p *AMapProvider) serverKey() string {
 	p.configMu.RLock()
 	defer p.configMu.RUnlock()
 	return p.config.ServerKey
 }
 func (p *AMapProvider) ServerKeyConfigured() bool { return p.serverKey() != "" }
+func (p *AMapProvider) browserKey() string {
+	p.configMu.RLock()
+	defer p.configMu.RUnlock()
+	return p.config.JSKey
+}
+func (p *AMapProvider) securityJSCode() string {
+	p.configMu.RLock()
+	defer p.configMu.RUnlock()
+	return p.config.SecurityJSCode
+}
+func (p *AMapProvider) BrowserKeyConfigured() bool     { return p.browserKey() != "" }
+func (p *AMapProvider) SecurityJSCodeConfigured() bool { return p.securityJSCode() != "" }
 
 func (p *AMapProvider) Geocode(ctx context.Context, address, city string) ([]PlaceCandidate, error) {
 	if p.serverKey() == "" {
@@ -76,13 +106,17 @@ func (p *AMapProvider) Geocode(ctx context.Context, address, city string) ([]Pla
 		Geocodes []struct {
 			FormattedAddress string `json:"formatted_address"`
 			Location         string `json:"location"`
+			CityCode         string `json:"citycode"`
+			AdCode           string `json:"adcode"`
 		} `json:"geocodes"`
 	}
-	if err := p.get(ctx, "/v3/geocode/geo", params, &response); err != nil {
+	if err := p.getWithRetry(ctx, "/v3/geocode/geo", params, &response, func() error {
+		if response.Status != "1" {
+			return amapStatusError(response.InfoCode, response.Info)
+		}
+		return nil
+	}); err != nil {
 		return nil, err
-	}
-	if response.Status != "1" {
-		return nil, fmt.Errorf("amap API %s: %s", response.InfoCode, response.Info)
 	}
 	items := make([]PlaceCandidate, 0, len(response.Geocodes))
 	for _, item := range response.Geocodes {
@@ -94,7 +128,7 @@ func (p *AMapProvider) Geocode(ctx context.Context, address, city string) ([]Pla
 		if name == "" {
 			name = item.FormattedAddress
 		}
-		items = append(items, PlaceCandidate{Name: name, Address: item.FormattedAddress, Location: point, Provider: p.ID()})
+		items = append(items, PlaceCandidate{Name: name, Address: item.FormattedAddress, Location: point, Provider: p.ID(), CityCode: item.CityCode, AdCode: item.AdCode})
 	}
 	return items, nil
 }
@@ -138,13 +172,18 @@ func (p *AMapProvider) SearchPOIWithTag(ctx context.Context, query, region, tag 
 			Name     string `json:"name"`
 			Address  string `json:"address"`
 			Location string `json:"location"`
+			CityCode string `json:"citycode"`
+			AdCode   string `json:"adcode"`
+			TypeCode string `json:"typecode"`
 		} `json:"pois"`
 	}
-	if err := p.get(ctx, "/v5/place/text", params, &response); err != nil {
+	if err := p.getWithRetry(ctx, "/v5/place/text", params, &response, func() error {
+		if response.Status != "1" {
+			return amapStatusError(response.InfoCode, response.Info)
+		}
+		return nil
+	}); err != nil {
 		return POISearchResult{}, err
-	}
-	if response.Status != "1" {
-		return POISearchResult{}, fmt.Errorf("amap API %s: %s", response.InfoCode, response.Info)
 	}
 	items := make([]PlaceCandidate, 0, len(response.Pois))
 	for _, item := range response.Pois {
@@ -152,26 +191,14 @@ func (p *AMapProvider) SearchPOIWithTag(ctx context.Context, query, region, tag 
 		if err != nil || item.Name == "" {
 			continue
 		}
-		items = append(items, PlaceCandidate{ID: item.ID, Name: item.Name, Address: item.Address, Location: point, Provider: p.ID()})
+		items = append(items, PlaceCandidate{ID: item.ID, Name: item.Name, Address: item.Address, Location: point, Provider: p.ID(), CityCode: item.CityCode, AdCode: item.AdCode, TypeCode: item.TypeCode})
 	}
 	total, _ := strconv.Atoi(response.Count)
 	return POISearchResult{Items: items, Total: total, Page: page, PageSize: pageSize}, nil
 }
 
 func (p *AMapProvider) get(ctx context.Context, path string, params url.Values, target any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(p.config.BaseURL, "/")+path+"?"+params.Encode(), nil)
-	if err != nil {
-		return err
-	}
-	response, err := p.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("amap request: %w", err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("amap HTTP status %d", response.StatusCode)
-	}
-	return json.NewDecoder(response.Body).Decode(target)
+	return p.getWithRetry(ctx, path, params, target, nil)
 }
 func parseAMapLocation(raw string) (GeoPoint, error) {
 	values := strings.Split(strings.TrimSpace(raw), ",")

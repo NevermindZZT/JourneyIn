@@ -5,22 +5,23 @@ import {
   IonPage, IonTitle, IonToolbar,
 } from '@ionic/vue'
 import BMapLoader from '@baidumap/jsapi-loader'
+import AMapLoader from '@amap/amap-jsapi-loader'
 import { addOutline, chevronDownOutline, chevronUpOutline, closeOutline, cloudOfflineOutline, linkOutline, logInOutline, mapOutline, menuOutline, navigateOutline, searchOutline, settingsOutline, sunnyOutline } from 'ionicons/icons'
 
 type Theme = 'system' | 'light' | 'dark'
 type Coord = { lat: number; lng: number }
-type LocationData = { preferred?: string; coordinates?: Record<string, Coord>; source?: string; provider_refs?: Record<string, unknown>; geocoded_at?: string; precision?: string; confidence?: number }
+type LocationData = { preferred?: string; coordinates?: Record<string, Coord>; source?: string; provider_refs?: Record<string, unknown>; citycode?: string; adcode?: string; geocoded_at?: string; precision?: string; confidence?: number }
 type LinkData = { id?: string; title: string; url: string; kind?: string }
 type Stop = { id: string; sequence: number; kind?: string; title: string; address?: string; location?: LocationData; time_window?: { arrival?: string; departure?: string }; description_markdown?: string; links?: LinkData[]; weather?: Record<string, unknown>; children?: SubStop[] }
 type SubStop = { id: string; sequence: number; kind?: string; title: string; address?: string; location?: LocationData; time_window?: { arrival?: string; departure?: string }; description_markdown?: string; links?: LinkData[]; weather?: Record<string, unknown> }
-type Leg = { id: string; from_stop_id: string; to_stop_id: string; mode?: string; snapshots?: Array<{ provider?: string; coordinate_system?: string; geometry?: Array<[number, number]> | Array<Coord>; distance_m?: number; duration_s?: number; fetched_at?: string }> }
+type Leg = { id: string; from_stop_id: string; to_stop_id: string; mode?: string; snapshots?: Array<{ provider?: string; coordinate_system?: string; mode?: string; strategy?: string; source?: string; geometry?: Array<[number, number]> | Array<Coord>; distance_m?: number; duration_s?: number; fetched_at?: string }> }
 type Day = { id: string; date: string; title?: string; notes_markdown?: string; stops: Stop[]; legs?: Leg[] }
-type TripDocument = { title: string; timezone: string; description_markdown?: string; links?: LinkData[]; days: Day[] }
-type SharedBootstrap = { trip: TripDocument & { id?: string; status?: string }; browser_key?: string; revision?: number }
+type TripDocument = { title: string; timezone: string; description_markdown?: string; links?: LinkData[]; map?: { preferred_provider?: 'baidu' | 'amap'; enabled_providers?: Array<'baidu' | 'amap'>; default_mode?: TravelMode }; days: Day[] }
+type SharedBootstrap = { trip: TripDocument & { id?: string; status?: string }; browser_key?: string; amap_browser_key?: string; amap_security_proxy_path?: string; amap_security_js_code_configured?: boolean; revision?: number }
 type TripSummary = { id: string; title: string; status: string; start_date: string; end_date: string; timezone: string; revision: number; days?: number; stops?: number }
-type Capabilities = { version?: string; map_providers?: { baidu?: { browser_key_configured?: boolean; browser_key?: string }; amap?: { browser_key_configured?: boolean } }; mcp?: { http_endpoint?: string } }
-type KeySettings = { map?: { baidu?: { browser_key_configured?: boolean; server_key_configured?: boolean }; amap?: { js_key_configured?: boolean; server_key_configured?: boolean } }; poi?: { provider_priority?: 'amap' | 'baidu'; local_directory_count?: number } }
-type PlaceCandidate = { id?: string; name: string; address?: string; location: Coord & { crs?: string }; provider?: string }
+type Capabilities = { version?: string; default_map_provider?: 'baidu' | 'amap'; map_providers?: { baidu?: { browser_key_configured?: boolean; browser_key?: string }; amap?: { browser_key_configured?: boolean; browser_key?: string; security_proxy_path?: string; security_js_code_configured?: boolean } }; mcp?: { http_endpoint?: string } }
+type KeySettings = { map?: { baidu?: { browser_key_configured?: boolean; server_key_configured?: boolean }; amap?: { js_key_configured?: boolean; server_key_configured?: boolean; security_js_code_configured?: boolean } }; poi?: { provider_priority?: 'amap' | 'baidu'; local_directory_count?: number } }
+type PlaceCandidate = { id?: string; name: string; address?: string; location: Coord & { crs?: string }; provider?: string; citycode?: string; adcode?: string; typecode?: string }
 type TravelMode = 'driving' | 'walking' | 'cycling' | 'transit'
 
 const APP_VERSION = '0.2.4'
@@ -28,7 +29,7 @@ const APP_SLOGAN = '在地图上规划每一段旅程'
 const GITHUB_URL = 'https://github.com/NevermindZZT/JourneyIn'
 const shareMode = window.location.pathname.startsWith('/s/') && !window.location.pathname.endsWith('.json')
 
-declare global { interface Window { BMap?: any; BMapGL?: any; BMAP_NORMAL_MAP?: any; BMAP_SATELLITE_MAP?: any } }
+declare global { interface Window { BMap?: any; BMapGL?: any; BMAP_NORMAL_MAP?: any; BMAP_SATELLITE_MAP?: any; _AMapSecurityConfig?: { securityJsCode?: string; serviceHost?: string } } }
 
 const trips = ref<TripSummary[]>([])
 const selected = ref<TripSummary | null>(null)
@@ -36,6 +37,7 @@ const tripDocument = ref<TripDocument | null>(null)
 const capabilities = ref<Capabilities | null>(null)
 const selectedStopId = ref('')
 const selectedSubStopId = ref('')
+const selectedLegId = ref('')
 const searchParentStopId = ref('')
 const weatherLoading = ref(false)
 const descriptionEditing = ref(false)
@@ -81,6 +83,7 @@ const baiduBrowserKeyInput = ref('')
 const baiduServerKeyInput = ref('')
 const amapJSKeyInput = ref('')
 const amapServerKeyInput = ref('')
+const amapSecurityJSCodeInput = ref('')
 const poiProviderPriority = ref<'amap' | 'baidu'>('amap')
 const localDirectoryCount = ref(0)
 const settingsSaving = ref(false)
@@ -105,6 +108,9 @@ const searchResults = ref<PlaceCandidate[]>([])
 const searchLoading = ref(false)
 const searchMessage = ref('')
 const planningMode = ref<TravelMode>('walking')
+const planningStrategy = ref('32')
+const planningProvider = ref<'baidu' | 'amap'>(localStorage.getItem('journeyin.planningProvider') === 'amap' ? 'amap' : 'baidu')
+const selectedMapProvider = ref<'baidu' | 'amap'>(localStorage.getItem('journeyin.mapProvider') === 'amap' ? 'amap' : 'baidu')
 const planningLoading = ref(false)
 const reorderMessage = ref('')
 const reorderMode = ref(false)
@@ -113,14 +119,30 @@ const dragOverStopID = ref('')
 let mapInstance: any = null
 let mapAPI: any = null
 let mapScriptPromise: Promise<void> | null = null
+let amapScriptPromise: Promise<void> | null = null
+let mapOverlays: any[] = []
+let amapSatelliteLayer: any = null
 let mediaQuery: MediaQueryList | null = null
 let mapReadyTimer: number | null = null
 let loadedMapKey = ''
+let loadedAMapKey = ''
 let mapRenderVersion = 0
 let mapFocusVersion = 0
 
-const key = computed(() => capabilities.value?.map_providers?.baidu?.browser_key || '')
+const baiduKey = computed(() => capabilities.value?.map_providers?.baidu?.browser_key || '')
+const amapKey = computed(() => capabilities.value?.map_providers?.amap?.browser_key || '')
+const key = computed(() => selectedMapProvider.value === 'amap' ? amapKey.value : baiduKey.value)
 const keyConfigured = computed(() => Boolean(key.value))
+const mapProviderLabel = computed(() => selectedMapProvider.value === 'amap' ? '高德地图' : '百度地图')
+function syncProviderFromDocument(document: TripDocument | null) {
+  const preferred = document?.map?.preferred_provider
+  if (preferred === 'baidu' || preferred === 'amap') {
+    const changed = selectedMapProvider.value !== preferred
+    selectedMapProvider.value = preferred
+    planningProvider.value = preferred
+    if (changed) resetMapSDK()
+  }
+}
 const visibleDays = computed(() => {
   if (!tripDocument.value) return []
   return selectedDay.value === 'all' ? tripDocument.value.days : tripDocument.value.days.filter((_, index) => index + 1 === selectedDay.value)
@@ -139,17 +161,21 @@ const mapStops = computed(() => {
   return [carryOver, ...visibleStops.value]
 })
 const visibleRouteSummary = computed(() => {
-  let distanceM = 0; let durationS = 0; let segments = 0
+  let distanceM = 0; let durationS = 0; let segments = 0; let zeroSegments = 0
   for (const day of visibleDays.value) for (const leg of day.legs || []) {
-    const snapshot = (leg.snapshots || []).find(item => item.distance_m !== undefined || item.duration_s !== undefined)
+    const snapshot = chooseSnapshotMetadata(leg, selectedMapProvider.value, planningMode.value)
     if (!snapshot) continue
+    if (!snapshot.geometry || snapshot.geometry.length < 2) {
+      if (snapshot.source === 'journeyin-same-location') zeroSegments++
+      continue
+    }
     distanceM += snapshot.distance_m || 0; durationS += snapshot.duration_s || 0; segments++
   }
-  return { distanceM, durationS, segments }
+  return { distanceM, durationS, segments, zeroSegments }
 })
 const hasCarryOverRoute = computed(() => {
   const carryOver = carryOverStop.value
-  return Boolean(carryOver && visibleDays.value.some(day => (day.legs || []).some(leg => leg.from_stop_id === carryOver.id)))
+  return Boolean(carryOver && visibleDays.value.some(day => (day.legs || []).some(leg => leg.from_stop_id === carryOver.id && chooseSnapshot(leg, selectedMapProvider.value, planningMode.value))))
 })
 function canPlanDay(day: Day) {
   const stops = day.stops || []
@@ -185,6 +211,10 @@ async function loadTrips() {
     if (!tripResponse.ok) throw new Error('无法读取旅行规划')
     trips.value = ((await tripResponse.json()) as { items?: TripSummary[] }).items || []
     capabilities.value = capabilityResponse.ok ? await capabilityResponse.json() as Capabilities : null
+    if (!localStorage.getItem('journeyin.mapProvider') && (capabilities.value?.default_map_provider === 'baidu' || capabilities.value?.default_map_provider === 'amap')) {
+      selectedMapProvider.value = capabilities.value.default_map_provider
+      planningProvider.value = selectedMapProvider.value
+    }
     if (settingsResponse.ok) { const settings = await settingsResponse.json() as KeySettings; settingsData.value = settings; poiProviderPriority.value = settings.poi?.provider_priority === 'baidu' ? 'baidu' : 'amap'; localDirectoryCount.value = settings.poi?.local_directory_count || 0 }
     const currentID = selected.value?.id
     const nextTrip = trips.value.find(trip => trip.id === currentID) || trips.value[0]
@@ -204,7 +234,8 @@ async function loadSharedTrip() {
   const stops = document.days.reduce((total, day) => total + (day.stops || []).length, 0)
   tripDocument.value = document
   selected.value = { id: document.id || 'shared', title: document.title, status: document.status || 'shared', start_date: document.days[0]?.date || '', end_date: document.days[document.days.length - 1]?.date || '', timezone: document.timezone, revision: bootstrap.revision || 1, days: document.days.length, stops }
-  capabilities.value = { version: APP_VERSION, map_providers: { baidu: { browser_key_configured: Boolean(bootstrap.browser_key), browser_key: bootstrap.browser_key || '' } } }
+  capabilities.value = { version: APP_VERSION, map_providers: { baidu: { browser_key_configured: Boolean(bootstrap.browser_key), browser_key: bootstrap.browser_key || '' }, amap: { browser_key_configured: Boolean(bootstrap.amap_browser_key), browser_key: bootstrap.amap_browser_key || '', security_proxy_path: bootstrap.amap_security_proxy_path || '/_AMapService', security_js_code_configured: bootstrap.amap_security_js_code_configured } } }
+  syncProviderFromDocument(document)
   selectedDay.value = 'all'; tripView.value = 'detail'; panelMode.value = 'journey'; panelOpen.value = true; panelCollapsed.value = false; mobileMapToolsOpen.value = false; selectedStopId.value = ''; selectedSubStopId.value = ''; reorderMode.value = false; descriptionEditing.value = false; tripDescriptionEditing.value = false
   await nextTick(); await renderMap()
 }
@@ -227,6 +258,7 @@ async function loadDetail(trip: TripSummary) {
     if (!response.ok) throw new Error('无法读取行程详情')
     const payload = await response.json() as { document?: TripDocument }
     tripDocument.value = payload.document || null
+    syncProviderFromDocument(tripDocument.value)
     selectedDay.value = 'all'
     await nextTick()
     await renderMap()
@@ -257,86 +289,36 @@ async function createTrip() {
   for (let index = 0; index < total; index++) days.push({ id: makeID('day'), date: dateAfter(start, index), title: '第 ' + (index + 1) + ' 天', notes_markdown: '', stops: [], legs: [] })
   actionLoading.value = true
   try {
-    const response = await apiFetch('/api/v1/trips', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ schema_version: 1, title: newTitle.value.trim(), status: 'draft', locale: 'zh-CN', timezone: newTimezone.value, date_range: { start, end }, description_markdown: newDescription.value, links: [], map: { preferred_provider: 'baidu', enabled_providers: ['baidu', 'amap'], default_mode: 'walking' }, days, metadata: { source: 'human' } }) })
+    const response = await apiFetch('/api/v1/trips', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ schema_version: 1, title: newTitle.value.trim(), status: 'draft', locale: 'zh-CN', timezone: newTimezone.value, date_range: { start, end }, description_markdown: newDescription.value, links: [], map: { preferred_provider: selectedMapProvider.value, enabled_providers: ['baidu', 'amap'], default_mode: 'walking' }, days, metadata: { source: 'human' } }) })
     if (!response.ok) { const payload = await response.json() as { error?: { message?: string } }; throw new Error(payload.error?.message || '新建旅行规划失败') }
     newTripOpen.value = false
     await loadTrips()
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '新建旅行规划失败' } finally { actionLoading.value = false }
 }
 
-function gcj02ToBd09(point: Coord) {
-  const x = point.lng; const y = point.lat; const z = Math.sqrt(x * x + y * y) + 0.00002 * Math.sin(y * Math.PI * 3000 / 180); const theta = Math.atan2(y, x) + 0.000003 * Math.cos(x * Math.PI * 3000 / 180); return { lng: z * Math.cos(theta) + 0.0065, lat: z * Math.sin(theta) + 0.006, crs: 'bd09ll' }
+function outOfChina(point: Coord) { return point.lng < 72.004 || point.lng > 137.8347 || point.lat < 0.8293 || point.lat > 55.8271 }
+function transformLat(x: number, y: number) { let ret = -100 + 2 * x + 3 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x)); ret += (20 * Math.sin(6 * x * Math.PI) + 20 * Math.sin(2 * x * Math.PI)) * 2 / 3; ret += (20 * Math.sin(y * Math.PI) + 40 * Math.sin(y / 3 * Math.PI)) * 2 / 3; ret += (160 * Math.sin(y / 12 * Math.PI) + 320 * Math.sin(y * Math.PI / 30)) * 2 / 3; return ret }
+function transformLng(x: number, y: number) { let ret = 300 + x + 2 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x)); ret += (20 * Math.sin(6 * x * Math.PI) + 20 * Math.sin(2 * x * Math.PI)) * 2 / 3; ret += (20 * Math.sin(x * Math.PI) + 40 * Math.sin(x / 3 * Math.PI)) * 2 / 3; ret += (150 * Math.sin(x / 12 * Math.PI) + 300 * Math.sin(x / 30 * Math.PI)) * 2 / 3; return ret }
+function wgs84ToGcj02(point: Coord) {
+  if (outOfChina(point)) return { ...point, crs: 'gcj02' }
+  const a = 6378245; const ee = 0.00669342162296594323; const dLat = transformLat(point.lng - 105, point.lat - 35); const dLng = transformLng(point.lng - 105, point.lat - 35); const radLat = point.lat / 180 * Math.PI; let magic = Math.sin(radLat); magic = 1 - ee * magic * magic; const sqrtMagic = Math.sqrt(magic); return { lng: point.lng + dLng * 180 / (a / sqrtMagic * Math.cos(radLat) * Math.PI), lat: point.lat + dLat * 180 / ((a * (1 - ee)) / (magic * sqrtMagic) * Math.PI), crs: 'gcj02' }
 }
-function savedLocationFor(candidate: PlaceCandidate): LocationData {
-  const sourceCRS = candidate.location.crs || (candidate.provider === 'amap' ? 'gcj02' : 'bd09ll'); const coordinates: Record<string, Coord & { crs?: string }> = { [sourceCRS]: { lat: candidate.location.lat, lng: candidate.location.lng, crs: sourceCRS } }; if (sourceCRS === 'gcj02') coordinates.bd09ll = gcj02ToBd09(candidate.location); const provider = candidate.provider === 'amap' ? 'amap' : 'baidu'; return { preferred: coordinates.bd09ll ? 'bd09ll' : sourceCRS, coordinates, source: provider + '-place-search', provider_refs: candidate.id ? { [provider + '_uid']: candidate.id } : {}, geocoded_at: new Date().toISOString(), precision: 'poi' }
-}
-function pointFor(stop: Stop | SubStop): (Coord & { crs: string }) | null {
-  const coordinates = stop.location?.coordinates
-  if (!coordinates) return null
-  const preferred = coordinates.bd09ll ? 'bd09ll' : stop.location?.preferred && coordinates[stop.location.preferred] ? stop.location.preferred : Object.keys(coordinates)[0]
-  const point = preferred ? coordinates[preferred] : null
-  if (!point || !Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return null
-  return { ...point, crs: preferred }
-}
-function navigationPointFor(stop: Stop | SubStop, provider: 'baidu' | 'amap'): (Coord & { crs: string }) | null {
-  const coordinates = stop.location?.coordinates
-  if (!coordinates) return null
-  const order = provider === 'amap' ? ['gcj02', 'bd09ll', 'wgs84'] : ['bd09ll', 'gcj02', 'wgs84']
-  for (const crs of order) {
-    const point = coordinates[crs]
-    if (point && Number.isFinite(point.lat) && Number.isFinite(point.lng)) return { ...point, crs }
-  }
-  return null
-}
-function navigationPlatform(): 'android' | 'ios' | 'web' {
-  const userAgent = navigator.userAgent
-  if (/Android/i.test(userAgent)) return 'android'
-  if (/iPhone|iPad|iPod/i.test(userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) return 'ios'
-  return 'web'
-}
-function reserveNavigationWindow(platform: 'android' | 'ios' | 'web') {
-  if (platform !== 'web') return null
-  const opened = window.open('about:blank', '_blank')
-  if (opened) { try { opened.opener = null } catch { /* best effort */ } }
-  return opened
-}
-function openNavigationURL(url: string, platform: 'android' | 'ios' | 'web', reservedWindow: Window | null, fallbackURL = '') {
-  if (platform === 'web' && reservedWindow && !reservedWindow.closed) {
-    reservedWindow.location.replace(url)
-    return
-  }
-  if (platform === 'web') {
-    window.location.assign(url)
-    return
-  }
-  let appOpened = false
-  const onPageHide = () => { appOpened = true }
-  const onVisibilityChange = () => { if (document.visibilityState === 'hidden') appOpened = true }
-  document.addEventListener('visibilitychange', onVisibilityChange)
-  window.addEventListener('pagehide', onPageHide, { once: true })
-  window.location.assign(url)
-  if (fallbackURL) window.setTimeout(() => {
-    document.removeEventListener('visibilitychange', onVisibilityChange)
-    window.removeEventListener('pagehide', onPageHide)
-    if (!appOpened && document.visibilityState === 'visible') window.location.assign(fallbackURL)
-  }, 1800)
-}
-function mapPointFor(stop: Stop | SubStop): (Coord & { crs: string }) | null {
-  const point = pointFor(stop)
-  if (!point) return null
-  return point.crs === 'gcj02' ? gcj02ToBd09(point) : point
-}
-function routePoint(value: [number, number] | Coord, crs: string) {
-  if (Array.isArray(value)) return { lng: value[0], lat: value[1], crs }
-  return { lng: value.lng, lat: value.lat, crs: (value as Coord & { crs?: string }).crs || crs }
-}
-function mapRoutePoint(value: [number, number] | Coord, crs: string): (Coord & { crs: string }) | null {
-  const point = routePoint(value, crs)
-  if (point.crs === 'gcj02') return gcj02ToBd09(point)
-  return point.crs === 'bd09ll' ? point : null
-}
+function gcj02ToBd09(point: Coord) { const x = point.lng; const y = point.lat; const z = Math.sqrt(x * x + y * y) + 0.00002 * Math.sin(y * Math.PI * 3000 / 180); const theta = Math.atan2(y, x) + 0.000003 * Math.cos(x * Math.PI * 3000 / 180); return { lng: z * Math.cos(theta) + 0.0065, lat: z * Math.sin(theta) + 0.006, crs: 'bd09ll' } }
+function bd09ToGcj02(point: Coord) { const x = point.lng - 0.0065; const y = point.lat - 0.006; const z = Math.sqrt(x * x + y * y) - 0.00002 * Math.sin(y * Math.PI * 3000 / 180); const theta = Math.atan2(y, x) - 0.000003 * Math.cos(x * Math.PI * 3000 / 180); return { lng: z * Math.cos(theta), lat: z * Math.sin(theta), crs: 'gcj02' } }
+function savedLocationFor(candidate: PlaceCandidate): LocationData { const sourceCRS = candidate.location.crs || (candidate.provider === 'amap' ? 'gcj02' : 'bd09ll'); const coordinates: Record<string, Coord & { crs?: string }> = { [sourceCRS]: { lat: candidate.location.lat, lng: candidate.location.lng, crs: sourceCRS } }; if (sourceCRS === 'gcj02') coordinates.bd09ll = gcj02ToBd09(candidate.location); const provider = candidate.provider === 'amap' ? 'amap' : 'baidu'; return { preferred: coordinates.bd09ll ? 'bd09ll' : sourceCRS, coordinates, source: provider + '-place-search', provider_refs: candidate.id ? { [provider + '_uid']: candidate.id } : {}, citycode: candidate.citycode, adcode: candidate.adcode, geocoded_at: new Date().toISOString(), precision: 'poi' } }
+function pointFor(stop: Stop | SubStop): (Coord & { crs: string }) | null { const coordinates = stop.location?.coordinates; if (!coordinates) return null; const preferred = stop.location?.preferred && coordinates[stop.location.preferred] ? stop.location.preferred : Object.keys(coordinates)[0]; const point = preferred ? coordinates[preferred] : null; if (!point || !Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return null; return { ...point, crs: preferred } }
+function pointForProvider(stop: Stop | SubStop, provider: 'baidu' | 'amap'): (Coord & { crs: string }) | null { const point = pointFor(stop); if (!point) return null; if (provider === 'amap') { if (point.crs === 'gcj02') return point; if (point.crs === 'bd09ll') return bd09ToGcj02(point); if (point.crs === 'wgs84') return wgs84ToGcj02(point) } else { if (point.crs === 'bd09ll') return point; if (point.crs === 'gcj02') return gcj02ToBd09(point); if (point.crs === 'wgs84') return gcj02ToBd09(wgs84ToGcj02(point)) } return null }
+function navigationPointFor(stop: Stop | SubStop, provider: 'baidu' | 'amap'): (Coord & { crs: string }) | null { const coordinates = stop.location?.coordinates; if (!coordinates) return null; const order = provider === 'amap' ? ['gcj02', 'bd09ll', 'wgs84'] : ['bd09ll', 'gcj02', 'wgs84']; for (const crs of order) { const point = coordinates[crs]; if (point && Number.isFinite(point.lat) && Number.isFinite(point.lng)) return { ...point, crs } } return null }
+function navigationPlatform(): 'android' | 'ios' | 'web' { const userAgent = navigator.userAgent; if (/Android/i.test(userAgent)) return 'android'; if (/iPhone|iPad|iPod/i.test(userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) return 'ios'; return 'web' }
+function reserveNavigationWindow(platform: 'android' | 'ios' | 'web') { if (platform !== 'web') return null; const opened = window.open('about:blank', '_blank'); if (opened) { try { opened.opener = null } catch { /* best effort */ } } return opened }
+function openNavigationURL(url: string, platform: 'android' | 'ios' | 'web', reservedWindow: Window | null, fallbackURL = '') { if (platform === 'web' && reservedWindow && !reservedWindow.closed) { reservedWindow.location.replace(url); return } if (platform === 'web') { window.location.assign(url); return } let appOpened = false; const onPageHide = () => { appOpened = true }; const onVisibilityChange = () => { if (document.visibilityState === 'hidden') appOpened = true }; document.addEventListener('visibilitychange', onVisibilityChange); window.addEventListener('pagehide', onPageHide, { once: true }); window.location.assign(url); if (fallbackURL) window.setTimeout(() => { document.removeEventListener('visibilitychange', onVisibilityChange); window.removeEventListener('pagehide', onPageHide); if (!appOpened && document.visibilityState === 'visible') window.location.assign(fallbackURL) }, 1800) }
+function mapPointFor(stop: Stop | SubStop): (Coord & { crs: string }) | null { return pointForProvider(stop, 'baidu') }
+function routePoint(value: [number, number] | Coord, crs: string) { if (Array.isArray(value)) return { lng: value[0], lat: value[1], crs }; return { lng: value.lng, lat: value.lat, crs: (value as Coord & { crs?: string }).crs || crs } }
+function mapRoutePointFor(value: [number, number] | Coord, crs: string, provider: 'baidu' | 'amap'): (Coord & { crs: string }) | null { const point = routePoint(value, crs); return pointForProvider({ location: { preferred: point.crs, coordinates: { [point.crs]: point } } } as unknown as Stop, provider) }
+function mapRoutePoint(value: [number, number] | Coord, crs: string): (Coord & { crs: string }) | null { return mapRoutePointFor(value, crs, 'baidu') }
 const SELECTED_STOP_ZOOM = 16
-function chooseSnapshot(leg: Leg) { return (leg.snapshots || []).find(snapshot => (snapshot.coordinate_system === 'bd09ll' || snapshot.coordinate_system === 'gcj02') && snapshot.geometry && snapshot.geometry.length > 1) || null }
+function chooseSnapshotMetadata(leg: Leg, provider: 'baidu' | 'amap' = selectedMapProvider.value, mode: TravelMode = planningMode.value, strategy: string = mode === 'driving' ? planningStrategy.value : '') { return (leg.snapshots || []).find(snapshot => snapshot.provider === provider && (!snapshot.mode || snapshot.mode === mode) && (!strategy || !snapshot.strategy || snapshot.strategy === strategy)) || null }
+function chooseSnapshot(leg: Leg, provider: 'baidu' | 'amap' = selectedMapProvider.value, mode: TravelMode = planningMode.value, strategy: string = mode === 'driving' ? planningStrategy.value : '') { return chooseSnapshotMetadata(leg, provider, mode, strategy)?.geometry && chooseSnapshotMetadata(leg, provider, mode, strategy)!.geometry!.length > 1 ? chooseSnapshotMetadata(leg, provider, mode, strategy) : null }
 function mapFocusViewport(): { width: number; height: number; x: number; y: number } | null {
   const container = mapContainer.value
   if (!container) return null
@@ -421,32 +403,9 @@ async function saveDescription() {
   } catch (cause) { target.description_markdown = previous; error.value = cause instanceof Error ? cause.message : '保存地点说明失败' } finally { descriptionSaving.value = false }
 }
 
-function resetBaiduMapSDK() {
-  try { mapInstance?.destroy?.() } catch { /* SDK cleanup is best effort */ }
-  mapInstance = null
-  mapAPI = null
-  mapReady.value = false
-  mapWarning.value = ''
-  try { BMapLoader.reset() } catch { /* loader reset is best effort */ }
-  mapScriptPromise = null
-  loadedMapKey = ''
-}
-async function loadBaiduMap() {
-  const currentKey = key.value.trim()
-  if (!currentKey) return
-  if (loadedMapKey && loadedMapKey !== currentKey) resetBaiduMapSDK()
-  if (mapAPI && typeof mapAPI.Map === 'function') return
-  if (!mapScriptPromise) {
-    mapScriptPromise = BMapLoader.load({ ak: currentKey, version: '4.0', timeout: 8000 }).then(namespace => {
-      mapAPI = namespace
-      loadedMapKey = currentKey
-    })
-  }
-  try { await mapScriptPromise } catch (cause) { resetBaiduMapSDK(); throw cause }
-}
 
-async function renderMap() {
-  if (!key.value || !mapContainer.value || !tripDocument.value) return
+async function renderBaiduMap() {
+  if (!baiduKey.value || !mapContainer.value || !tripDocument.value) return
   const renderVersion = ++mapRenderVersion
   ++mapFocusVersion
   try {
@@ -498,11 +457,14 @@ async function renderMap() {
       mapInstance.addOverlay(marker)
     }
     for (const day of visibleDays.value) for (const leg of day.legs || []) {
-      const snapshot = chooseSnapshot(leg)
+      const snapshot = chooseSnapshot(leg, 'baidu', planningMode.value)
       if (!snapshot || !snapshot.geometry) continue
       const line = snapshot.geometry.map(value => mapRoutePoint(value, snapshot.coordinate_system || 'bd09ll')).filter((point): point is Coord & { crs: string } => Boolean(point)).map(point => new mapAPI.Point(point.lng, point.lat))
       if (line.length > 1) {
-        mapInstance.addOverlay(new mapAPI.Polyline(line, { strokeColor: '#006874', strokeWeight: 5, strokeOpacity: .82 }))
+        const polyline = new mapAPI.Polyline(line, { strokeColor: '#006874', strokeWeight: 5, strokeOpacity: .82 })
+        polyline.__journeyinLegId = leg.id
+        polyline.addEventListener?.('click', () => { selectedLegId.value = leg.id })
+        mapInstance.addOverlay(polyline)
         attachRouteLabel(snapshot)
       }
     }
@@ -515,9 +477,176 @@ async function renderMap() {
     else mapInstance.centerAndZoom('中国', 5)
     applyMapType()
     mapError.value = ''
-  } catch (cause) { mapReady.value = false; mapWarning.value = ''; mapError.value = cause instanceof Error ? cause.message : '地图初始化失败' }
+  } catch (cause) { mapReady.value = false; mapWarning.value = ''; mapError.value = safeMapError(cause, '地图初始化失败') }
 }
-function retryMap() { mapError.value = ''; mapWarning.value = ''; resetBaiduMapSDK(); void renderMap() }
+function resetMapSDK() {
+  try { mapInstance?.destroy?.() } catch { /* SDK cleanup is best effort */ }
+  mapInstance = null
+  mapAPI = null
+  mapOverlays = []
+  amapSatelliteLayer = null
+  mapReady.value = false
+  mapWarning.value = ''
+  if (mapReadyTimer !== null) { window.clearTimeout(mapReadyTimer); mapReadyTimer = null }
+  try { BMapLoader.reset() } catch { /* loader reset is best effort */ }
+  mapScriptPromise = null
+  amapScriptPromise = null
+  loadedMapKey = ''
+  loadedAMapKey = ''
+}
+async function loadBaiduMap() {
+  const currentKey = baiduKey.value.trim()
+  if (!currentKey) return
+  if (loadedMapKey && loadedMapKey !== currentKey) resetMapSDK()
+  if (mapAPI && typeof mapAPI.Map === 'function') return
+  if (!mapScriptPromise) {
+    mapScriptPromise = BMapLoader.load({ ak: currentKey, version: '4.0', timeout: 8000 }).then(namespace => {
+      mapAPI = namespace
+      loadedMapKey = currentKey
+    })
+  }
+  try { await mapScriptPromise } catch (cause) { resetMapSDK(); throw cause }
+}
+async function loadAMap() {
+  const currentKey = amapKey.value.trim()
+  if (!currentKey) return
+  if (loadedAMapKey && loadedAMapKey !== currentKey) resetMapSDK()
+  if (mapAPI && typeof mapAPI.Map === 'function' && loadedAMapKey === currentKey) return
+  if (!amapScriptPromise) {
+    const proxyPath = capabilities.value?.map_providers?.amap?.security_proxy_path || '/_AMapService'
+    if (capabilities.value?.map_providers?.amap?.security_js_code_configured !== false && proxyPath) {
+      window._AMapSecurityConfig = { serviceHost: new URL(proxyPath, window.location.origin).toString().replace(/\/$/, '') }
+    } else {
+      delete (window as any)._AMapSecurityConfig
+    }
+    amapScriptPromise = AMapLoader.load({ key: currentKey, version: '2.0', plugins: ['AMap.Scale'] }).then(namespace => {
+      mapAPI = namespace
+      loadedAMapKey = currentKey
+    })
+  }
+  try { await amapScriptPromise } catch (cause) { resetMapSDK(); throw cause }
+}
+function safeMapError(cause: unknown, fallback: string) { const message = cause instanceof Error ? cause.message : String(cause || ''); return (message || fallback).replace(/([?&](?:ak|key|jscode)=)[^&\s'\"]+/gi, '$1<redacted>') }
+function amapPointToArray(point: Coord) { return [point.lng, point.lat] }
+function addAMapOverlay(overlay: any) { mapInstance?.add?.(overlay); mapOverlays.push(overlay); return overlay }
+function clearAMapOverlays() { mapInstance?.clearMap?.(); mapOverlays = [] }
+function attachAMapLabel(marker: any, title: string, date: string) {
+  if (!showMapLabels.value || typeof marker.setLabel !== 'function') return
+  const content = '<span style="display:inline-block;padding:5px 9px;border:1px solid #0b2f35;border-radius:8px;color:#ffffff;background:#173f47ee;box-shadow:0 3px 10px #0006;font-size:12px;font-weight:700;line-height:16px;white-space:nowrap;text-shadow:0 1px 2px #0008;">' + escapeHTML(title + ' · ' + date) + '</span>'
+  marker.setLabel({ content, direction: 'right', offset: new mapAPI.Pixel(12, -6) })
+}
+function attachAMapRouteLabel(snapshot: { geometry?: Array<[number, number]> | Array<Coord>; coordinate_system?: string; distance_m?: number; duration_s?: number }) {
+  if (!showMapLabels.value || !snapshot.geometry?.length || typeof mapAPI?.Text !== 'function') return
+  const text = [formatDistance(snapshot.distance_m), formatDuration(snapshot.duration_s)].filter(Boolean).join(' · ')
+  if (!text) return
+  const middle = mapRoutePointFor(snapshot.geometry[Math.floor(snapshot.geometry.length / 2)], snapshot.coordinate_system || 'gcj02', 'amap')
+  if (!middle) return
+  addAMapOverlay(new mapAPI.Text({ text, position: amapPointToArray(middle), style: { backgroundColor: '#006874dd', color: '#ffffff', border: '0', borderRadius: '999px', padding: '4px 8px', fontSize: '12px', lineHeight: '16px', whiteSpace: 'nowrap', boxShadow: '0 3px 10px #0003' } }))
+}
+function focusAMapPoint(stop: Stop | SubStop) {
+  if (!mapInstance || selectedMapProvider.value !== 'amap') return
+  const point = pointForProvider(stop, 'amap')
+  if (!point) return
+  mapInstance.resize?.()
+  mapInstance.setCenter?.(amapPointToArray(point), true)
+  mapInstance.setZoom?.(SELECTED_STOP_ZOOM, true)
+}
+async function renderAMapMap() {
+  if (!amapKey.value || !mapContainer.value || !tripDocument.value) return
+  const renderVersion = ++mapRenderVersion
+  ++mapFocusVersion
+  try {
+    await loadAMap()
+    if (renderVersion !== mapRenderVersion) return
+    if (!mapAPI || typeof mapAPI.Map !== 'function' || !mapContainer.value) throw new Error('高德 JS API 2.0 未提供可用的 Map 构造器；请检查 JS Key、安全密钥、域名白名单和网络连接')
+    if (!mapInstance || loadedMapKey) {
+      if (mapInstance) { try { mapInstance.destroy?.() } catch { /* best effort */ } }
+      mapReady.value = false
+      const first = mapStops.value.map(stop => pointForProvider(stop, 'amap')).find(Boolean)
+      mapInstance = new mapAPI.Map(mapContainer.value, { viewMode: '2D', zoom: first ? 12 : 5, center: first ? amapPointToArray(first) : [116.397428, 39.90923], resizeEnable: true })
+      mapInstance.on?.('click', (event: any) => {
+        const lnglat = event?.lnglat
+        const lng = Number(lnglat?.lng ?? lnglat?.getLng?.())
+        const lat = Number(lnglat?.lat ?? lnglat?.getLat?.())
+        if (Number.isFinite(lng) && Number.isFinite(lat)) handleMapClick({ point: { lng, lat, crs: 'gcj02' } })
+      })
+      mapInstance.on?.('complete', () => { mapReady.value = true; mapError.value = ''; mapWarning.value = '' })
+      if (mapReadyTimer !== null) window.clearTimeout(mapReadyTimer)
+      mapReadyTimer = window.setTimeout(() => { if (!mapReady.value) mapWarning.value = '高德地图底图加载较慢；请检查 JS Key、安全密钥、域名白名单和网络连接。地图仍可继续尝试加载。' }, 8000)
+      loadedMapKey = ''
+    }
+    clearAMapOverlays()
+    const points: any[] = []
+    for (const stop of mapStops.value) {
+      const point = pointForProvider(stop, 'amap')
+      if (!point) continue
+      const mapPoint = amapPointToArray(point)
+      points.push(mapPoint)
+      const marker = addAMapOverlay(new mapAPI.Marker({ position: mapPoint, title: stop.title, anchor: 'bottom-center' }))
+      const carryOver = carryOverStop.value?.id === stop.id && selectedDay.value !== 'all'
+      marker.__journeyinStopId = stop.id
+      marker.__journeyinCarryOver = carryOver
+      marker.on?.('click', () => {
+        if (mapPickMode.value) { handleMapClick({ point: { lng: point.lng, lat: point.lat, crs: 'gcj02' } }); return }
+        if (carryOver) {
+          const carryOverDayIndex = tripDocument.value?.days.findIndex(day => day.stops.some(item => item.id === stop.id)) ?? -1
+          if (carryOverDayIndex >= 0) { selectedDay.value = carryOverDayIndex + 1; selectStop(stop) }
+          return
+        }
+        selectStop(stop)
+      })
+      attachAMapLabel(marker, carryOver ? '前日终点 · ' + stop.title : stop.title, stopDate(stop))
+    }
+    if (selectedStop.value?.children?.length) for (const child of selectedStop.value.children) {
+      const point = pointForProvider(child, 'amap')
+      if (!point) continue
+      const mapPoint = amapPointToArray(point)
+      const marker = addAMapOverlay(new mapAPI.Marker({ position: mapPoint, title: child.title, anchor: 'bottom-center' }))
+      marker.__journeyinSubStopId = child.id
+      marker.on?.('click', () => { if (mapPickMode.value) { handleMapClick({ point: { lng: point.lng, lat: point.lat, crs: 'gcj02' } }); return }; selectSubStop(child, selectedStop.value!) })
+      attachAMapLabel(marker, child.title, stopDate(child))
+    }
+    for (const day of visibleDays.value) for (const leg of day.legs || []) {
+      const snapshot = chooseSnapshot(leg, 'amap', planningMode.value)
+      if (!snapshot?.geometry?.length) continue
+      const line = snapshot.geometry.map(value => mapRoutePointFor(value, snapshot.coordinate_system || 'gcj02', 'amap')).filter((point): point is Coord & { crs: string } => Boolean(point)).map(point => amapPointToArray(point))
+      if (line.length < 2) continue
+      const polyline = addAMapOverlay(new mapAPI.Polyline({ path: line, strokeColor: '#006874', strokeWeight: 5, strokeOpacity: .82, lineJoin: 'round', showDir: true, zIndex: 50 }))
+      polyline.__journeyinLegId = leg.id
+      polyline.on?.('click', () => { selectedLegId.value = leg.id })
+      attachAMapRouteLabel(snapshot)
+    }
+    const focusTarget = selectedTarget.value
+    if (focusTarget) { await nextTick(); if (renderVersion !== mapRenderVersion) return; focusAMapPoint(focusTarget) }
+    else if (points.length) mapInstance.setFitView?.()
+    else mapInstance.setCenter?.([116.397428, 39.90923])
+    applyMapType()
+    mapError.value = ''
+  } catch (cause) {
+    mapReady.value = false
+    mapWarning.value = ''
+    mapError.value = safeMapError(cause, '高德地图初始化失败')
+  }
+}
+async function renderMap() {
+  if (!mapContainer.value || !tripDocument.value) return
+  if (!key.value) { resetMapSDK(); return }
+  if (selectedMapProvider.value === 'amap') return renderAMapMap()
+  return renderBaiduMap()
+}
+function setMapProvider(provider: 'baidu' | 'amap') {
+  if (provider !== 'baidu' && provider !== 'amap') return
+  if (selectedMapProvider.value === provider) return
+  selectedMapProvider.value = provider
+  planningProvider.value = provider
+  localStorage.setItem('journeyin.mapProvider', provider)
+  localStorage.setItem('journeyin.planningProvider', provider)
+  resetMapSDK()
+  mapError.value = ''
+  mapWarning.value = ''
+  void nextTick().then(() => renderMap())
+}
+function retryMap() { mapError.value = ''; mapWarning.value = ''; resetMapSDK(); void nextTick().then(() => renderMap()) }
 
 function togglePanel() {
   panelOpen.value = !panelOpen.value
@@ -534,20 +663,28 @@ function toggleDetailCollapsed() {
   localStorage.setItem('journeyin.detailCollapsed', String(detailCollapsed.value))
 }
 function applyMapType() {
-  if (!mapInstance || !mapAPI || typeof mapInstance.setMapType !== 'function') return
+  if (!mapInstance || !mapAPI) return
+  if (selectedMapProvider.value === 'amap') {
+    if (typeof mapAPI.TileLayer?.Satellite !== 'function') return
+    if (!amapSatelliteLayer) amapSatelliteLayer = new mapAPI.TileLayer.Satellite({ zIndex: 10 })
+    if (mapType.value === 'satellite') mapInstance.add?.(amapSatelliteLayer)
+    else mapInstance.remove?.(amapSatelliteLayer)
+    return
+  }
+  if (typeof mapInstance.setMapType !== 'function') return
   const type = mapType.value === 'satellite' ? mapAPI.BMAP_SATELLITE_MAP || (window as any).BMAP_SATELLITE_MAP : mapAPI.BMAP_NORMAL_MAP || (window as any).BMAP_NORMAL_MAP
   if (type) mapInstance.setMapType(type)
 }
 function toggleMapType() { mapType.value = mapType.value === 'normal' ? 'satellite' : 'normal'; localStorage.setItem('journeyin.mapType', mapType.value); applyMapType() }
 function toggleMapLabels() { showMapLabels.value = !showMapLabels.value; localStorage.setItem('journeyin.mapLabels', String(showMapLabels.value)); void renderMap() }
 function toggleMapPick() { if (!mapReady.value || !tripDocument.value) { error.value = '地图加载完成后才能使用地图选点'; return }; mapPickMode.value = !mapPickMode.value; error.value = '' }
-function handleMapClick(event: any) { if (!mapPickMode.value || !event?.point || !tripDocument.value) return; mapPickLocation.value = { lat: Number(event.point.lat), lng: Number(event.point.lng), crs: 'bd09ll' }; mapPickTitle.value = ''; mapPickAddress.value = ''; const day = selectedDay.value === 'all' ? tripDocument.value.days[0] : tripDocument.value.days[selectedDay.value - 1]; mapPickDayID.value = day?.id || tripDocument.value.days[0]?.id || ''; mapPickMode.value = false; mapPickOpen.value = true }
+function handleMapClick(event: any) { if (!mapPickMode.value || !event?.point || !tripDocument.value) return; mapPickLocation.value = { lat: Number(event.point.lat), lng: Number(event.point.lng), crs: selectedMapProvider.value === 'amap' ? 'gcj02' : 'bd09ll' }; mapPickTitle.value = ''; mapPickAddress.value = ''; const day = selectedDay.value === 'all' ? tripDocument.value.days[0] : tripDocument.value.days[selectedDay.value - 1]; mapPickDayID.value = day?.id || tripDocument.value.days[0]?.id || ''; mapPickMode.value = false; mapPickOpen.value = true }
 function cancelMapPick() { mapPickOpen.value = false; mapPickLocation.value = null; mapPickTitle.value = ''; mapPickAddress.value = '' }
 async function saveMapPick() {
   if (!selected.value || !tripDocument.value || !mapPickLocation.value || !mapPickTitle.value.trim() || !mapPickDayID.value) { error.value = '请填写地点名称并选择行程日期'; return }
   actionLoading.value = true; error.value = ''
   try {
-    const point = mapPickLocation.value; const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(mapPickDayID.value) + '/stops', { method: 'POST', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision }, body: JSON.stringify({ stop: { title: mapPickTitle.value.trim(), address: mapPickAddress.value.trim(), location: { preferred: 'bd09ll', coordinates: { bd09ll: point }, source: 'baidu-map-click', geocoded_at: new Date().toISOString(), precision: 'map-click' } } }) })
+    const point = mapPickLocation.value; const provider = selectedMapProvider.value; const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(mapPickDayID.value) + '/stops', { method: 'POST', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision }, body: JSON.stringify({ stop: { title: mapPickTitle.value.trim(), address: mapPickAddress.value.trim(), location: { preferred: point.crs, coordinates: { [point.crs]: point }, source: provider + '-map-click', geocoded_at: new Date().toISOString(), precision: 'map-click' } } }) })
     const payload = await response.json() as { document?: TripDocument; revision?: number; stops?: number; days?: number; error?: { message?: string } }; if (!response.ok) throw new Error(payload.error?.message || '保存地图选点失败'); applyTripPayload(payload); selectedDay.value = tripDocument.value.days.findIndex(day => day.id === mapPickDayID.value) + 1; cancelMapPick()
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '保存地图选点失败' } finally { actionLoading.value = false }
 }
@@ -613,7 +750,9 @@ async function planRoutes() {
   planningLoading.value = true; error.value = ''
   try {
     const day = selectedDay.value === 'all' ? undefined : tripDocument.value.days[selectedDay.value - 1]?.id
-    const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/plan', { method: 'POST', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision }, body: JSON.stringify({ provider: 'baidu', mode: planningMode.value, day_id: day }) })
+    const provider = planningProvider.value
+    localStorage.setItem('journeyin.planningProvider', provider)
+    const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/plan', { method: 'POST', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision }, body: JSON.stringify({ provider, mode: planningMode.value, strategy: planningMode.value === 'driving' ? planningStrategy.value : undefined, day_id: day }) })
     const payload = await response.json() as { document?: TripDocument; revision?: number; stops?: number; days?: number; error?: { message?: string } }
     if (!response.ok) throw new Error(payload.error?.message || '路线生成失败')
     applyTripPayload(payload)
@@ -741,7 +880,7 @@ async function refreshWeather() {
   weatherLoading.value = true; error.value = ''
   const childID = selectedSubStop.value?.id || ''
   try {
-    const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(day.id) + '/stops/' + encodeURIComponent(selectedTarget.value.id) + '/weather', { method: 'POST', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision }, body: JSON.stringify({ provider: 'baidu', local_date: day.date }) })
+    const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(day.id) + '/stops/' + encodeURIComponent(selectedTarget.value.id) + '/weather', { method: 'POST', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision }, body: JSON.stringify({ provider: selectedMapProvider.value, local_date: day.date }) })
     const payload = await response.json() as { document?: TripDocument; revision?: number; stops?: number; days?: number; error?: { message?: string } }
     if (!response.ok) throw new Error(payload.error?.message || '天气查询失败')
     applyTripPayload(payload); selectedStopId.value = parent.id; selectedSubStopId.value = childID
@@ -868,6 +1007,7 @@ async function openSettings() {
     baiduServerKeyInput.value = ''
     amapJSKeyInput.value = ''
     amapServerKeyInput.value = ''
+    amapSecurityJSCodeInput.value = ''
   } catch (cause) { settingsMessage.value = cause instanceof Error ? cause.message : '无法读取设置' }
 }
 
@@ -896,12 +1036,13 @@ async function saveMapKeys() {
     if (baiduServerKeyInput.value.trim()) body.baidu_server_key = baiduServerKeyInput.value.trim()
     if (amapJSKeyInput.value.trim()) body.amap_js_key = amapJSKeyInput.value.trim()
     if (amapServerKeyInput.value.trim()) body.amap_server_key = amapServerKeyInput.value.trim()
+    if (amapSecurityJSCodeInput.value.trim()) body.amap_security_js_code = amapSecurityJSCodeInput.value.trim()
     if (!Object.keys(body).length) { settingsMessage.value = '未填写新的 Key，现有配置保持不变。'; return }
     const response = await apiFetch('/api/v1/settings/map-keys', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
     const payload = await response.json() as { error?: { message?: string } }
     if (!response.ok) throw new Error(payload.error?.message || '保存地图 Key 失败')
     settingsMessage.value = '地图 Key 已保存到 SQLite；浏览器端 Key 已立即生效。'
-    baiduServerKeyInput.value = ''; amapJSKeyInput.value = ''; amapServerKeyInput.value = ''
+    baiduServerKeyInput.value = ''; amapJSKeyInput.value = ''; amapServerKeyInput.value = ''; amapSecurityJSCodeInput.value = ''
     await loadTrips(); await openSettings()
   } catch (cause) { settingsMessage.value = cause instanceof Error ? cause.message : '保存地图 Key 失败' } finally { settingsSaving.value = false }
 }
@@ -942,23 +1083,23 @@ onUnmounted(() => mediaQuery?.removeEventListener?.('change', systemThemeChanged
 
         <main class="map-shell" :class="{ 'mobile-panel-open': panelOpen, 'mobile-map-tools-open': mobileMapToolsOpen }">
           <div class="map-canvas" :class="{ 'map-pick-active': mapPickMode }">
-            <div v-if="keyConfigured && tripDocument && !mapError" ref="mapContainer" id="bmap"></div>
+            <div v-if="keyConfigured && tripDocument && !mapError" ref="mapContainer" id="map"></div>
             <div v-if="!tripDocument || !keyConfigured || mapError" class="map-fallback">
               <IonIcon :icon="mapOutline" />
-              <strong>{{ !tripDocument ? '选择或创建一条旅行规划' : mapError || '百度地图未配置' }}</strong>
-              <span>{{ !tripDocument ? '创建或导入 Trip 后显示地图。' : mapError ? '请确认浏览器端 AK、JSAPI 服务、域名白名单和网络连接。当前页面：' + serverURL : '配置浏览器端 Key 后显示真实地图。当前不会伪造道路或路线。' }}</span>
+              <strong>{{ !tripDocument ? '选择或创建一条旅行规划' : mapError || (mapProviderLabel + '未配置') }}</strong>
+              <span>{{ !tripDocument ? '创建或导入 Trip 后显示地图。' : mapError ? '请确认' + mapProviderLabel + '浏览器端 Key、JSAPI 服务、域名白名单和网络连接。当前页面：' + serverURL : '配置' + mapProviderLabel + '浏览器端 Key 后显示真实地图。当前不会伪造道路或路线。' }}</span>
               <IonChip color="warning"><IonIcon :icon="cloudOfflineOutline" /> {{ !tripDocument ? '等待行程' : '降级模式' }}</IonChip>
             </div>
-            <div v-if="keyConfigured && tripDocument && !mapError && !mapReady && !mapWarning" class="map-loading"><IonIcon :icon="mapOutline" /><span>正在加载百度地图…</span></div>
+            <div v-if="keyConfigured && tripDocument && !mapError && !mapReady && !mapWarning" class="map-loading"><IonIcon :icon="mapOutline" /><span>正在加载{{ mapProviderLabel }}…</span></div>
             <div v-if="mapWarning" class="map-warning"><span>{{ mapWarning }}</span><button type="button" @click="retryMap">重新加载</button></div>
           </div>
           <button v-if="!selectedStop && !mobileMapToolsOpen" class="mobile-map-tools-toggle" :class="{ active: mobileMapToolsOpen }" :aria-expanded="mobileMapToolsOpen" :aria-label="mobileMapToolsOpen ? '收起地图工具' : '展开地图工具'" @click="toggleMobileMapTools"><IonIcon :icon="mapOutline" /><span>{{ mobileMapToolsOpen ? '收起工具' : '地图工具' }}</span></button>
           <div v-if="!selectedStop" class="map-hud">
             <button v-if="!panelOpen" class="panel-open-button" aria-label="显示行程面板" @click="togglePanel"><IonIcon :icon="menuOutline" /> 行程面板</button>
-            <button class="map-type-button" :class="{ active: mapType === 'satellite' }" @click="toggleMapType">{{ mapType === 'satellite' ? '标准图' : '卫星图' }}</button>
+            <div class="map-provider-switch" role="group" aria-label="选择地图 Provider"><button type="button" :class="{ active: selectedMapProvider === 'baidu' }" @click="setMapProvider('baidu')">百度地图</button><button type="button" :class="{ active: selectedMapProvider === 'amap' }" @click="setMapProvider('amap')">高德地图</button></div><button class="map-type-button" :class="{ active: mapType === 'satellite' }" @click="toggleMapType">{{ mapType === 'satellite' ? '标准图' : '卫星图' }}</button>
             <button class="map-label-button" :class="{ active: showMapLabels }" @click="toggleMapLabels">{{ showMapLabels ? '隐藏标签' : '显示标签' }}</button>
             <button v-if="!shareMode" class="map-pick-button" :class="{ active: mapPickMode }" :disabled="!mapReady || !tripDocument" @click="toggleMapPick">{{ mapPickMode ? '取消选点' : '地图选点' }}</button>
-            <div class="map-status-pill"><IonIcon :icon="keyConfigured && mapReady && !mapError ? sunnyOutline : cloudOfflineOutline" /> <span>{{ !tripDocument ? '等待行程' : !keyConfigured ? '离线数据可用' : mapError ? '百度地图不可用' : mapWarning ? '百度地图底图加载中' : mapReady ? '百度地图已连接' : '百度地图加载中' }} · {{ visibleStops.length }} 个规划点</span><button v-if="mobileMapToolsOpen" class="mobile-map-tools-close" type="button" aria-label="收起地图工具" @click="toggleMobileMapTools"><IonIcon :icon="chevronUpOutline" /><span>收起</span></button></div>
+            <div class="map-status-pill"><IonIcon :icon="keyConfigured && mapReady && !mapError ? sunnyOutline : cloudOfflineOutline" /> <span>{{ !tripDocument ? '等待行程' : !keyConfigured ? '离线数据可用' : mapError ? mapProviderLabel + '不可用' : mapWarning ? mapProviderLabel + '底图加载中' : mapReady ? mapProviderLabel + '已连接' : mapProviderLabel + '加载中' }} · {{ visibleStops.length }} 个规划点</span><button v-if="mobileMapToolsOpen" class="mobile-map-tools-close" type="button" aria-label="收起地图工具" @click="toggleMobileMapTools"><IonIcon :icon="chevronUpOutline" /><span>收起</span></button></div>
           </div>
           <section v-if="error || shareURL" class="map-notices">
             <div v-if="error" class="global-error">{{ error }}<button aria-label="关闭错误" @click="error = ''">×</button></div>
@@ -994,13 +1135,13 @@ onUnmounted(() => mediaQuery?.removeEventListener?.('change', systemThemeChanged
                   <div class="panel-section">
                     <div class="section-heading compact"><div><p class="eyebrow">ITINERARY</p><h3>规划点</h3></div><div class="itinerary-actions"><span class="count-label">{{ visibleStops.length }} 个</span><button v-if="!shareMode" class="text-button reorder-toggle" :class="{ selected: reorderMode }" :aria-pressed="reorderMode" @click="toggleReorderMode">{{ reorderMode ? '完成排序' : '调整顺序' }}</button></div></div>
                     <div class="day-tabs"><button :class="{ selected: selectedDay === 'all' }" @click="selectedDay = 'all'">全程</button><button v-for="(_, index) in tripDocument.days" :key="index" :class="{ selected: selectedDay === index + 1 }" @click="selectedDay = index + 1">D{{ index + 1 }} · {{ tripDocument.days[index].date }}</button></div>
-                    <div v-if="!shareMode" class="plan-controls"><label>路线方式<select v-model="planningMode"><option value="walking">步行</option><option value="driving">驾车</option><option value="cycling">骑行</option><option value="transit">公交</option></select></label><IonButton size="small" :disabled="planningLoading || !plannableDays.length" @click="planRoutes"><IonIcon slot="start" :icon="navigateOutline" /> {{ planningLoading ? '规划中…' : '生成路线' }}</IonButton></div>
-                    <div class="route-summary"><div><span class="route-summary-label">{{ selectedDay === 'all' ? '全程路线' : 'D' + selectedDay + ' 当天路线' }}</span><strong v-if="visibleRouteSummary.segments">{{ formatDistance(visibleRouteSummary.distanceM) || '距离未知' }} · {{ formatDuration(visibleRouteSummary.durationS) || '时间未知' }}</strong><span v-else>尚未生成路线</span></div><small v-if="visibleRouteSummary.segments">{{ visibleRouteSummary.segments }} 段相邻路线</small></div>
+                    <div v-if="!shareMode" class="plan-controls"><label>路线 Provider<select v-model="planningProvider"><option value="baidu">百度地图</option><option value="amap">高德地图</option></select></label><label>路线方式<select v-model="planningMode"><option value="walking">步行</option><option value="driving">驾车</option><option value="cycling">骑行</option><option value="transit">公交</option></select></label><label v-if="planningMode === 'driving'">驾车策略<select v-model="planningStrategy"><option value="32">高德推荐</option><option value="33">躲避拥堵</option><option value="34">高速优先</option><option value="35">不走高速</option><option value="36">少收费</option></select></label><IonButton size="small" :disabled="planningLoading || !plannableDays.length" @click="planRoutes"><IonIcon slot="start" :icon="navigateOutline" /> {{ planningLoading ? '规划中…' : '生成路线' }}</IonButton></div>
+                    <div class="route-summary"><div><span class="route-summary-label">{{ selectedDay === 'all' ? '全程路线' : 'D' + selectedDay + ' 当天路线' }}</span><strong v-if="visibleRouteSummary.segments">{{ formatDistance(visibleRouteSummary.distanceM) || '距离未知' }} · {{ formatDuration(visibleRouteSummary.durationS) || '时间未知' }}</strong><span v-else-if="visibleRouteSummary.zeroSegments">{{ visibleRouteSummary.zeroSegments }} 段为同一地点，无需绘制道路路线</span><span v-else>尚未生成路线</span></div><small v-if="visibleRouteSummary.segments">{{ visibleRouteSummary.segments }} 段相邻路线</small><small v-else-if="visibleRouteSummary.zeroSegments">坐标相同的跨天停留不会调用地图路线 API</small></div>
                     <p v-if="hasCarryOverRoute" class="route-ready">路线从前一天的最后一个规划点“{{ carryOverStop?.title }}”开始。</p>
                     <p v-if="!shareMode" class="order-help">{{ reorderMode ? '排序模式已开启：拖动每行左侧的 ⋮⋮ 手柄到目标位置，松开后立即保存。' : '需要调整规划点顺序？点击上方“调整顺序”，然后拖动左侧手柄。' }}</p>
                     <p v-if="reorderMessage" class="inline-message">{{ reorderMessage }}</p>
                     <p v-if="!plannableDays.length" class="hint">{{ shareMode ? '当前选择范围暂无可生成的路线。' : '添加至少两个相邻的带坐标规划点后，点击“生成路线”。跨天行程会自动从前一天最后一个点接续。' }}</p>
-                    <p v-else-if="visibleDays.some(day => day.legs?.some(leg => leg.snapshots?.length))" class="route-ready"><IonIcon :icon="navigateOutline" /> 已有路线快照；重复点击会优先使用缓存。</p>
+                    <p v-else-if="visibleDays.some(day => day.legs?.some(leg => chooseSnapshot(leg, selectedMapProvider, planningMode)))" class="route-ready"><IonIcon :icon="navigateOutline" /> {{ mapProviderLabel }}已有路线快照；重复点击会优先使用缓存。</p>
                     <div v-if="visibleStops.length" class="stop-list"><article v-for="stop in visibleStops" :key="stop.id" class="stop-row" :class="{ selected: selectedStopId === stop.id, 'reorder-dragging': draggedStopID === stop.id, 'reorder-drop-target': dragOverStopID === stop.id }" :draggable="reorderMode" @dragstart="startPlanningPointDrag($event, stop)" @dragover="dragOverPlanningPoint($event, stop)" @dragleave="dragLeavePlanningPoint($event, stop)" @drop="dropPlanningPoint($event, stop)" @dragend="endPlanningPointDrag" @pointerenter="enterPlanningPointPointer($event, stop)" @pointerup="dropPlanningPointPointer($event, stop)"><span v-if="reorderMode" class="drag-handle" aria-hidden="true" @pointerdown.stop="startPlanningPointPointer($event, stop)">⋮⋮</span><button class="stop-row-main" @click="selectStop(stop)"><span class="stop-number">{{ stop.sequence }}</span><span><b>{{ stop.title }}</b><small>{{ stopDate(stop) }} · {{ stop.address || '地址已保存' }}</small></span><span class="stop-arrow">›</span></button><button v-if="!shareMode" class="icon-delete stop-delete" :aria-label="'删除规划点 ' + stop.title" @click.stop="deletePlanningPoint(stop)">×</button></article></div>
                     <p v-else class="empty compact-empty">当前日期还没有规划点。</p>
                     <button v-if="!shareMode" class="add-place-cta" @click="searchParentStopId = ''; panelMode = 'search'"><IonIcon :icon="searchOutline" /> 搜索并添加规划点</button>
@@ -1044,7 +1185,7 @@ onUnmounted(() => mediaQuery?.removeEventListener?.('change', systemThemeChanged
       <div v-if="tripDescriptionFullscreen && tripDescriptionEditing" class="fullscreen-editor-backdrop"><section class="fullscreen-editor" role="dialog" aria-modal="true" aria-labelledby="fullscreen-trip-description-title"><header><h2 id="fullscreen-trip-description-title">编辑行程总体说明</h2><button class="modal-close" aria-label="退出全屏编辑" @click="closeTripDescriptionFullscreen">×</button></header><textarea v-model="tripDescriptionDraft" class="fullscreen-description-editor" autofocus placeholder="补充整个行程的背景、节奏和注意事项"></textarea><div class="description-actions"><button class="text-button" @click="cancelEditTripDescription">取消</button><button class="primary-text-button" :disabled="tripDescriptionSaving" @click="saveTripDescription">{{ tripDescriptionSaving ? '保存中…' : '保存说明' }}</button></div></section></div>
       <div v-if="mapPickOpen" class="modal-backdrop" @click.self="cancelMapPick"><section class="modal-panel map-pick-panel" role="dialog" aria-modal="true" aria-labelledby="map-pick-title"><button class="modal-close" aria-label="取消地图选点" @click="cancelMapPick">×</button><p class="eyebrow">MAP PICK</p><h2 id="map-pick-title">保存地图选点</h2><p class="map-pick-coordinate">{{ mapPickLocation?.crs }} · {{ mapPickLocation?.lat.toFixed(6) }}, {{ mapPickLocation?.lng.toFixed(6) }}</p><label>地点名称<input v-model="mapPickTitle" required autofocus placeholder="例如：临时观景点" /></label><label>地址或备注（可选）<input v-model="mapPickAddress" placeholder="补充位置说明" /></label><label>加入日期<select v-model="mapPickDayID"><option v-for="day in tripDocument?.days || []" :key="day.id" :value="day.id">{{ day.date }}{{ day.title ? ' · ' + day.title : '' }}</option></select></label><div class="modal-actions"><button type="button" @click="cancelMapPick">取消</button><button type="button" class="primary" :disabled="actionLoading || !mapPickTitle.trim()" @click="saveMapPick">{{ actionLoading ? '保存中…' : '保存规划点' }}</button></div></section></div>
       <div v-if="newTripOpen" class="modal-backdrop" @click.self="newTripOpen = false"><section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="new-trip-title"><button class="modal-close" aria-label="关闭" @click="newTripOpen = false">×</button><p class="eyebrow">NEW JOURNEY</p><h2 id="new-trip-title">新建旅行规划</h2><form @submit.prevent="createTrip"><label>规划名称<input v-model="newTitle" maxlength="120" required /></label><div class="form-grid"><label>开始日期<input v-model="newStartDate" type="date" required /></label><label>结束日期<input v-model="newEndDate" type="date" required /></label></div><label>时区<input v-model="newTimezone" placeholder="Asia/Shanghai" required /></label><label>总体说明（Markdown）<textarea v-model="newDescription" rows="5" placeholder="写下这次旅行的总体说明"></textarea></label><div class="modal-actions"><button type="button" @click="newTripOpen = false">取消</button><button class="primary" type="submit" :disabled="actionLoading">创建草稿</button></div></form></section></div>
-      <div v-if="settingsOpen" class="modal-backdrop" @click.self="settingsOpen = false"><section class="modal-panel settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title"><button class="modal-close" aria-label="关闭" @click="settingsOpen = false">×</button><p class="eyebrow">JOURNEYIN SETTINGS</p><h2 id="settings-title">设置</h2><p class="settings-intro">当前主题：{{ themeLabel }}。Key 配置保存到 SQLite，服务端 Key 不会回显。</p><section class="settings-section"><h3>外观</h3><p class="settings-label">主题：{{ themeLabel }}</p><div class="theme-options"><button type="button" :class="{ selected: theme === 'system' }" @click="setTheme('system')">跟随系统</button><button type="button" :class="{ selected: theme === 'light' }" @click="setTheme('light')">浅色</button><button type="button" :class="{ selected: theme === 'dark' }" @click="setTheme('dark')">深色</button></div></section><section class="settings-section"><h3>服务端连接</h3><label>当前服务地址<input v-model="serverURL" readonly /></label><label>兼容 REST API Token<input v-model="authTokenInput" type="password" placeholder="仅用于兼容旧客户端，可留空" autocomplete="off" /></label><div class="modal-actions"><button type="button" @click="logout">清除令牌</button><button type="button" class="primary" @click="saveAuth">保存令牌</button></div><p v-if="settingsMessage" class="settings-message">{{ settingsMessage }}</p></section><section class="settings-section"><h3>百度地图</h3><p class="key-status">浏览器端 Key：<strong>{{ keyConfigured ? '已配置' : '未配置' }}</strong> · 服务端 Key：<strong>{{ settingsData?.map?.baidu?.server_key_configured ? '已配置' : '未配置' }}</strong></p><label>百度浏览器端 Key<input v-model="baiduBrowserKeyInput" type="password" :placeholder="settingsData?.map?.baidu?.browser_key_configured ? '已配置，输入新 Key 可替换' : '用于 JSAPI 4.0/BMap 网页地图'" autocomplete="off" /></label><label>百度服务端 Key<input v-model="baiduServerKeyInput" type="password" placeholder="已配置时输入新 Key 可替换；留空保持当前值" autocomplete="off" /></label><p class="key-help">浏览器端 Key 用于地图底图；服务端 Key 用于 POI 搜索、地理编码、路线和天气。请确认当前访问 host 在百度控制台白名单内。</p><a href="https://lbsyun.baidu.com/apiconsole/key" target="_blank" rel="noopener noreferrer">申请/管理百度地图 Key ↗</a></section><section class="settings-section"><h3>高德地图</h3><p class="key-status">JS Key：<strong>{{ settingsData?.map?.amap?.js_key_configured ? '已配置' : '未配置' }}</strong> · 服务端 Key：<strong>{{ settingsData?.map?.amap?.server_key_configured ? '已配置' : '未配置' }}</strong></p><label>高德 JS Key<input v-model="amapJSKeyInput" type="password" placeholder="用于高德 Web 地图" autocomplete="off" /></label><label>高德服务端 Key<input v-model="amapServerKeyInput" type="password" placeholder="已配置时输入新 Key 可替换；留空保持当前值" autocomplete="off" /></label><a href="https://console.amap.com/dev/key/app" target="_blank" rel="noopener noreferrer">申请/管理高德 Key ↗</a><p class="key-help">保存后，规划点会优先使用已经保存的坐标，不会因为重新绘制地图重复查询。</p><div class="modal-actions"><button type="button" class="primary" :disabled="settingsSaving" @click="saveMapKeys">{{ settingsSaving ? '保存中…' : '保存地图 Key 到数据库' }}</button></div></section><section class="settings-section"><h3>地点检索</h3><label>优先 Provider<select v-model="poiProviderPriority"><option value="amap">高德优先</option><option value="baidu">百度优先</option></select></label><p class="key-help">当前策略会先查询本地地点目录；未命中后使用所选 Provider，Provider 不可用时自动尝试另一家。新搜索结果只保留 7 天。</p><p class="key-status">本地地点记录：<strong>{{ localDirectoryCount }}</strong> 条</p><div class="modal-actions"><button type="button" @click="savePOIPreferences">保存检索优先级</button><button type="button" @click="clearLocalDirectory">清除本地记录</button></div></section><section class="settings-section"><h3>MCP</h3><p>MCP 地址：{{ capabilities?.mcp?.http_endpoint || '/mcp' }}</p><p class="key-help">Docker 远程部署时设置 JOURNEYIN_MCP_TOKEN；本地 localhost 调试可不设置。</p></section></section></div>
+      <div v-if="settingsOpen" class="modal-backdrop" @click.self="settingsOpen = false"><section class="modal-panel settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title"><button class="modal-close" aria-label="关闭" @click="settingsOpen = false">×</button><p class="eyebrow">JOURNEYIN SETTINGS</p><h2 id="settings-title">设置</h2><p class="settings-intro">当前主题：{{ themeLabel }}。Key 配置保存到 SQLite，服务端 Key 不会回显。</p><section class="settings-section"><h3>外观</h3><p class="settings-label">主题：{{ themeLabel }}</p><div class="theme-options"><button type="button" :class="{ selected: theme === 'system' }" @click="setTheme('system')">跟随系统</button><button type="button" :class="{ selected: theme === 'light' }" @click="setTheme('light')">浅色</button><button type="button" :class="{ selected: theme === 'dark' }" @click="setTheme('dark')">深色</button></div></section><section class="settings-section"><h3>服务端连接</h3><label>当前服务地址<input v-model="serverURL" readonly /></label><label>兼容 REST API Token<input v-model="authTokenInput" type="password" placeholder="仅用于兼容旧客户端，可留空" autocomplete="off" /></label><div class="modal-actions"><button type="button" @click="logout">清除令牌</button><button type="button" class="primary" @click="saveAuth">保存令牌</button></div><p v-if="settingsMessage" class="settings-message">{{ settingsMessage }}</p></section><section class="settings-section"><h3>百度地图</h3><p class="key-status">浏览器端 Key：<strong>{{ baiduKey ? '已配置' : '未配置' }}</strong> · 服务端 Key：<strong>{{ settingsData?.map?.baidu?.server_key_configured ? '已配置' : '未配置' }}</strong></p><label>百度浏览器端 Key<input v-model="baiduBrowserKeyInput" type="password" :placeholder="settingsData?.map?.baidu?.browser_key_configured ? '已配置，输入新 Key 可替换' : '用于 JSAPI 4.0/BMap 网页地图'" autocomplete="off" /></label><label>百度服务端 Key<input v-model="baiduServerKeyInput" type="password" placeholder="已配置时输入新 Key 可替换；留空保持当前值" autocomplete="off" /></label><p class="key-help">浏览器端 Key 用于地图底图；服务端 Key 用于 POI 搜索、地理编码、路线和天气。请确认当前访问 host 在百度控制台白名单内。</p><a href="https://lbsyun.baidu.com/apiconsole/key" target="_blank" rel="noopener noreferrer">申请/管理百度地图 Key ↗</a></section><section class="settings-section"><h3>高德地图</h3><p class="key-status">JS Key：<strong>{{ settingsData?.map?.amap?.js_key_configured ? '已配置' : '未配置' }}</strong> · 服务端 Key：<strong>{{ settingsData?.map?.amap?.server_key_configured ? '已配置' : '未配置' }}</strong> · 安全密钥：<strong>{{ settingsData?.map?.amap?.security_js_code_configured ? '已配置' : '未配置' }}</strong></p><label>高德 JS Key<input v-model="amapJSKeyInput" type="password" placeholder="用于高德 Web 地图" autocomplete="off" /></label><label>高德服务端 Key<input v-model="amapServerKeyInput" type="password" placeholder="已配置时输入新 Key 可替换；留空保持当前值" autocomplete="off" /></label><label>高德 JS 安全密钥<input v-model="amapSecurityJSCodeInput" type="password" placeholder="用于 JSAPI 安全代理；已配置时输入新密钥可替换" autocomplete="off" /></label><a href="https://console.amap.com/dev/key/app" target="_blank" rel="noopener noreferrer">申请/管理高德 Key ↗</a><p class="key-help">保存后，规划点会优先使用已经保存的坐标，不会因为重新绘制地图重复查询。</p><div class="modal-actions"><button type="button" class="primary" :disabled="settingsSaving" @click="saveMapKeys">{{ settingsSaving ? '保存中…' : '保存地图 Key 到数据库' }}</button></div></section><section class="settings-section"><h3>地点检索</h3><label>优先 Provider<select v-model="poiProviderPriority"><option value="amap">高德优先</option><option value="baidu">百度优先</option></select></label><p class="key-help">当前策略会先查询本地地点目录；未命中后使用所选 Provider，Provider 不可用时自动尝试另一家。新搜索结果只保留 7 天。</p><p class="key-status">本地地点记录：<strong>{{ localDirectoryCount }}</strong> 条</p><div class="modal-actions"><button type="button" @click="savePOIPreferences">保存检索优先级</button><button type="button" @click="clearLocalDirectory">清除本地记录</button></div></section><section class="settings-section"><h3>MCP</h3><p>MCP 地址：{{ capabilities?.mcp?.http_endpoint || '/mcp' }}</p><p class="key-help">Docker 远程部署时设置 JOURNEYIN_MCP_TOKEN；本地 localhost 调试可不设置。</p></section></section></div>
       <div v-if="authOpen" class="modal-backdrop" @click.self="authOpen = false"><section class="modal-panel auth-panel" role="dialog" aria-modal="true" aria-labelledby="auth-title"><IonIcon class="auth-icon" :icon="logInOutline" /><h2 id="auth-title">登录 JourneyIn</h2><p>请输入 Docker 服务配置的账号和密码。登录成功后会在当前浏览器保存一个 HttpOnly 会话。</p><form class="auth-form" @submit.prevent="login"><label>账号<input v-model="loginUsername" type="text" autofocus autocomplete="username" /></label><label>密码<input v-model="loginPassword" type="password" autocomplete="current-password" /></label><p v-if="loginMessage" class="auth-error">{{ loginMessage }}</p><div class="modal-actions"><button type="button" @click="authOpen = false">稍后</button><button type="submit" class="primary" :disabled="loginLoading">{{ loginLoading ? '登录中…' : '登录' }}</button></div></form></section></div>
     </IonPage>
   </IonApp>

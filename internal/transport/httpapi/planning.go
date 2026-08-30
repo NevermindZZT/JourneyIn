@@ -35,6 +35,8 @@ type planTripBody struct {
 	Mode             journeymaps.TravelMode `json:"mode,omitempty"`
 	DayID            string                 `json:"day_id,omitempty"`
 	DepartureAt      string                 `json:"departure_at,omitempty"`
+	Strategy         string                 `json:"strategy,omitempty"`
+	AlternativeRoute int                    `json:"alternative_route,omitempty"`
 }
 
 func (s *Server) addStop(w http.ResponseWriter, r *http.Request) {
@@ -160,7 +162,7 @@ func (s *Server) planTrip(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_departure_at", err.Error(), nil)
 		return
 	}
-	record, err := s.trips.PlanTrip(r.Context(), r.PathValue("id"), expected, application.PlanInput{Provider: body.Provider, Mode: body.Mode, DayID: body.DayID, DepartureAt: departureAt}, "rest:plan")
+	record, err := s.trips.PlanTrip(r.Context(), r.PathValue("id"), expected, application.PlanInput{Provider: body.Provider, Mode: body.Mode, DayID: body.DayID, DepartureAt: departureAt, Strategy: body.Strategy, AlternativeRoute: body.AlternativeRoute}, "rest:plan")
 	if err != nil {
 		writePlanningError(w, err)
 		return

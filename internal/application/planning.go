@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -28,10 +29,33 @@ type AddStopInput struct {
 }
 
 type PlanInput struct {
-	Provider    journeymaps.ProviderID
-	Mode        journeymaps.TravelMode
-	DayID       string
-	DepartureAt *time.Time
+	Provider         journeymaps.ProviderID
+	Mode             journeymaps.TravelMode
+	DayID            string
+	DepartureAt      *time.Time
+	Strategy         string
+	AlternativeRoute int
+}
+
+type routePlanSegment struct {
+	dayIndex int
+	from     domain.Stop
+	to       domain.Stop
+}
+
+type plannedRoute struct {
+	dayIndex int
+	fromID   string
+	toID     string
+	snapshot journeymaps.RouteSnapshot
+}
+
+type savedLocationData struct {
+	Point        journeymaps.GeoPoint
+	Coordinates  map[string]journeymaps.GeoPoint
+	ProviderRefs map[string]string
+	CityCode     string
+	AdCode       string
 }
 
 var ErrPlanningLocationRequired = errors.New("all planned stops must have a saved location")
@@ -116,6 +140,18 @@ func (s *TripService) PlanTrip(ctx context.Context, tripID string, expectedRevis
 	if providerID == "" {
 		providerID = journeymaps.ProviderBaidu
 	}
+	if len(trip.Map.EnabledProviders) > 0 {
+		enabled := false
+		for _, candidate := range trip.Map.EnabledProviders {
+			if candidate == string(providerID) {
+				enabled = true
+				break
+			}
+		}
+		if !enabled {
+			return store.TripRecord{}, fmt.Errorf("map provider %s is disabled for this trip", providerID)
+		}
+	}
 	mode := input.Mode
 	if mode == "" {
 		mode = journeymaps.TravelMode(trip.Map.DefaultMode)
@@ -126,12 +162,8 @@ func (s *TripService) PlanTrip(ctx context.Context, tripID string, expectedRevis
 	if !validTravelMode(mode) {
 		return store.TripRecord{}, fmt.Errorf("unsupported planning mode %q", mode)
 	}
-	type routePlanSegment struct {
-		dayIndex int
-		from     domain.Stop
-		to       domain.Stop
-	}
 	segments := make([]routePlanSegment, 0)
+	targetDays := make(map[int]bool)
 	foundDay := input.DayID == ""
 	for dayIndex := range trip.Days {
 		day := &trip.Days[dayIndex]
@@ -139,7 +171,7 @@ func (s *TripService) PlanTrip(ctx context.Context, tripID string, expectedRevis
 			continue
 		}
 		foundDay = true
-		day.Legs = nil
+		targetDays[dayIndex] = true
 		stops := orderedRouteStops(day.Stops)
 		// A day's first route point can be the previous day's final point.
 		// Store this boundary leg on the destination day so a single-day view
@@ -160,24 +192,65 @@ func (s *TripService) PlanTrip(ctx context.Context, tripID string, expectedRevis
 	if len(segments) == 0 {
 		return store.TripRecord{}, errors.New("at least two adjacent saved stops are required to plan a route")
 	}
+	planned := make([]plannedRoute, 0, len(segments))
 	for _, segment := range segments {
-		origin, err := savedPoint(segment.from.Location)
+		originData, err := parseSavedLocation(segment.from.Location)
 		if err != nil {
 			return store.TripRecord{}, fmt.Errorf("day %s stop %s: %w", trip.Days[segment.dayIndex].ID, segment.from.ID, err)
 		}
-		destination, err := savedPoint(segment.to.Location)
+		destinationData, err := parseSavedLocation(segment.to.Location)
 		if err != nil {
 			return store.TripRecord{}, fmt.Errorf("day %s stop %s: %w", trip.Days[segment.dayIndex].ID, segment.to.ID, err)
 		}
-		snapshot, err := s.mapService.Route(ctx, providerID, journeymaps.RouteRequest{Origin: origin, Destination: destination, Mode: mode, DepartureAt: input.DepartureAt})
+		originPoint := savedPointForProvider(originData, providerID)
+		destinationPoint := savedPointForProvider(destinationData, providerID)
+		strategy := strings.TrimSpace(input.Strategy)
+		if strategy == "" && mode == journeymaps.ModeDriving && providerID == journeymaps.ProviderAMap {
+			strategy = "32"
+		}
+		var snapshot journeymaps.RouteSnapshot
+		if sameRouteLocation(originData, destinationData, providerID, originPoint, destinationPoint) {
+			now := time.Now().UTC()
+			snapshot = journeymaps.RouteSnapshot{Provider: providerID, CoordinateSystem: routeCoordinateSystem(providerID), Mode: mode, Strategy: strategy, Source: "journeyin-same-location", DistanceM: 0, DurationS: 0, FetchedAt: now, ExpiresAt: now.Add(time.Hour)}
+		} else {
+			request := journeymaps.RouteRequest{
+				Origin:              originPoint,
+				Destination:         destinationPoint,
+				Mode:                mode,
+				DepartureAt:         input.DepartureAt,
+				OriginPOIID:         providerPOIID(originData.ProviderRefs, providerID),
+				DestinationPOIID:    providerPOIID(destinationData.ProviderRefs, providerID),
+				OriginCityCode:      originData.CityCode,
+				DestinationCityCode: destinationData.CityCode,
+				Strategy:            strings.TrimSpace(input.Strategy),
+				AlternativeRoute:    input.AlternativeRoute,
+			}
+			snapshot, err = s.mapService.Route(ctx, providerID, request)
+			if err != nil {
+				return store.TripRecord{}, fmt.Errorf("route %s -> %s: %w", segment.from.ID, segment.to.ID, err)
+			}
+		}
 		if err != nil {
 			return store.TripRecord{}, fmt.Errorf("route %s -> %s: %w", segment.from.ID, segment.to.ID, err)
 		}
-		legID, err := domain.NewID("leg")
+		planned = append(planned, plannedRoute{dayIndex: segment.dayIndex, fromID: segment.from.ID, toID: segment.to.ID, snapshot: snapshot})
+	}
+	for dayIndex := range targetDays {
+		dayPlans := make([]plannedRoute, 0)
+		for _, item := range planned {
+			if item.dayIndex == dayIndex {
+				dayPlans = append(dayPlans, item)
+			}
+		}
+		if len(dayPlans) == 0 {
+			trip.Days[dayIndex].Legs = nil
+			continue
+		}
+		merged, err := mergeRouteLegs(trip.Days[dayIndex].Legs, dayPlans, providerID, mode)
 		if err != nil {
 			return store.TripRecord{}, err
 		}
-		trip.Days[segment.dayIndex].Legs = append(trip.Days[segment.dayIndex].Legs, domain.RouteLeg{ID: legID, FromStopID: segment.from.ID, ToStopID: segment.to.ID, Mode: string(mode), Snapshots: []domain.RouteSnapshot{routeSnapshot(snapshot)}})
+		trip.Days[dayIndex].Legs = merged
 	}
 	normalized, err := json.Marshal(trip)
 	if err != nil {
@@ -202,27 +275,170 @@ func clearRouteLegsAroundDay(trip *domain.Trip, dayIndex int) {
 	}
 }
 
-func savedPoint(raw json.RawMessage) (journeymaps.GeoPoint, error) {
+func parseSavedLocation(raw json.RawMessage) (savedLocationData, error) {
 	if len(raw) == 0 || string(raw) == "null" {
-		return journeymaps.GeoPoint{}, ErrPlanningLocationRequired
+		return savedLocationData{}, ErrPlanningLocationRequired
 	}
 	var location struct {
-		Preferred   string                          `json:"preferred"`
-		Coordinates map[string]journeymaps.GeoPoint `json:"coordinates"`
+		Preferred    string                          `json:"preferred"`
+		Coordinates  map[string]journeymaps.GeoPoint `json:"coordinates"`
+		ProviderRefs map[string]string               `json:"provider_refs"`
+		CityCode     string                          `json:"citycode"`
+		AdCode       string                          `json:"adcode"`
+		Lat          *float64                        `json:"lat"`
+		Lng          *float64                        `json:"lng"`
+		CRS          string                          `json:"crs"`
 	}
 	if err := json.Unmarshal(raw, &location); err != nil {
-		return journeymaps.GeoPoint{}, fmt.Errorf("invalid saved location: %w", err)
+		return savedLocationData{}, fmt.Errorf("invalid saved location: %w", err)
 	}
-	keys := []string{location.Preferred, string(journeymaps.CRSBD09LL), string(journeymaps.CRSGCJ02), string(journeymaps.CRSWGS84)}
-	for _, key := range keys {
-		if point, ok := location.Coordinates[key]; ok && point.CRS != "" {
-			return point, nil
-		} else if ok {
-			point.CRS = journeymaps.CoordinateSystem(key)
-			return point, nil
+	normalizedCoordinates := make(map[string]journeymaps.GeoPoint, len(location.Coordinates)+1)
+	for rawCRS, point := range location.Coordinates {
+		crs := normalizeSavedCRS(rawCRS)
+		if crs == "" {
+			crs = normalizeSavedCRS(string(point.CRS))
+		}
+		if crs == "" {
+			continue
+		}
+		point.CRS = journeymaps.CoordinateSystem(crs)
+		normalizedCoordinates[crs] = point
+	}
+	preferred := normalizeSavedCRS(location.Preferred)
+	if len(normalizedCoordinates) == 0 && location.Lat != nil && location.Lng != nil {
+		crs := normalizeSavedCRS(location.CRS)
+		if crs == "" {
+			crs = preferred
+		}
+		if crs != "" {
+			normalizedCoordinates[crs] = journeymaps.GeoPoint{Lat: *location.Lat, Lng: *location.Lng, CRS: journeymaps.CoordinateSystem(crs)}
 		}
 	}
-	return journeymaps.GeoPoint{}, ErrPlanningLocationRequired
+	keys := []string{preferred, string(journeymaps.CRSBD09LL), string(journeymaps.CRSGCJ02), string(journeymaps.CRSWGS84)}
+	for _, key := range keys {
+		if key == "" {
+			continue
+		}
+		if point, ok := normalizedCoordinates[key]; ok {
+			return savedLocationData{Point: point, Coordinates: normalizedCoordinates, ProviderRefs: location.ProviderRefs, CityCode: strings.TrimSpace(location.CityCode), AdCode: strings.TrimSpace(location.AdCode)}, nil
+		}
+	}
+	return savedLocationData{}, ErrPlanningLocationRequired
+}
+
+func normalizeSavedCRS(raw string) string {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	value = strings.NewReplacer("-", "", "_", "").Replace(value)
+	switch value {
+	case "bd09", "bd09ll", "baidu":
+		return string(journeymaps.CRSBD09LL)
+	case "gcj02", "gcj02ll", "amap", "autonavi":
+		return string(journeymaps.CRSGCJ02)
+	case "wgs84", "wgs84ll", "gps":
+		return string(journeymaps.CRSWGS84)
+	default:
+		return ""
+	}
+}
+
+func savedPoint(raw json.RawMessage) (journeymaps.GeoPoint, error) {
+	location, err := parseSavedLocation(raw)
+	if err != nil {
+		return journeymaps.GeoPoint{}, err
+	}
+	return location.Point, nil
+}
+
+func savedPointForProvider(location savedLocationData, provider journeymaps.ProviderID) journeymaps.GeoPoint {
+	preferred := string(journeymaps.CRSBD09LL)
+	if provider == journeymaps.ProviderAMap {
+		preferred = string(journeymaps.CRSGCJ02)
+	}
+	if point, ok := location.Coordinates[preferred]; ok {
+		if point.CRS == "" {
+			point.CRS = journeymaps.CoordinateSystem(preferred)
+		}
+		return point
+	}
+	return location.Point
+}
+
+func sameRoutePoint(a, b journeymaps.GeoPoint) bool {
+	return a.CRS == b.CRS && math.Abs(a.Lat-b.Lat) <= 1e-7 && math.Abs(a.Lng-b.Lng) <= 1e-7
+}
+
+func sameRouteLocation(a, b savedLocationData, provider journeymaps.ProviderID, aPoint, bPoint journeymaps.GeoPoint) bool {
+	aID := providerPOIID(a.ProviderRefs, provider)
+	bID := providerPOIID(b.ProviderRefs, provider)
+	return (aID != "" && aID == bID) || sameRoutePoint(aPoint, bPoint)
+}
+
+func routeCoordinateSystem(provider journeymaps.ProviderID) journeymaps.CoordinateSystem {
+	if provider == journeymaps.ProviderAMap {
+		return journeymaps.CRSGCJ02
+	}
+	return journeymaps.CRSBD09LL
+}
+
+func providerPOIID(refs map[string]string, provider journeymaps.ProviderID) string {
+	for _, key := range []string{string(provider) + "_uid", string(provider) + "_poi_id", string(provider) + "_id"} {
+		if value := strings.TrimSpace(refs[key]); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func routePairKey(fromID, toID string) string { return fromID + "\x00" + toID }
+
+func mergeRouteLegs(existing []domain.RouteLeg, planned []plannedRoute, providerID journeymaps.ProviderID, mode journeymaps.TravelMode) ([]domain.RouteLeg, error) {
+	validPairs := make(map[string]bool, len(planned))
+	for _, item := range planned {
+		validPairs[routePairKey(item.fromID, item.toID)] = true
+	}
+	existingByPair := make(map[string]domain.RouteLeg, len(existing))
+	for _, leg := range existing {
+		key := routePairKey(leg.FromStopID, leg.ToStopID)
+		if !validPairs[key] {
+			continue
+		}
+		filtered := make([]domain.RouteSnapshot, 0, len(leg.Snapshots))
+		for _, snapshot := range leg.Snapshots {
+			if snapshot.Provider == string(providerID) && (snapshot.Mode == "" || snapshot.Mode == string(mode)) {
+				continue
+			}
+			filtered = append(filtered, snapshot)
+		}
+		leg.Snapshots = filtered
+		if len(filtered) > 0 {
+			existingByPair[key] = leg
+		}
+	}
+	merged := make([]domain.RouteLeg, 0, len(planned))
+	for _, item := range planned {
+		key := routePairKey(item.fromID, item.toID)
+		leg, ok := existingByPair[key]
+		if !ok {
+			id, err := domain.NewID("leg")
+			if err != nil {
+				return nil, err
+			}
+			leg.ID = id
+		}
+		leg.FromStopID = item.fromID
+		leg.ToStopID = item.toID
+		leg.Mode = string(mode)
+		snapshot := routeSnapshot(item.snapshot)
+		if snapshot.Provider == "" {
+			snapshot.Provider = string(providerID)
+		}
+		if snapshot.Mode == "" {
+			snapshot.Mode = string(mode)
+		}
+		leg.Snapshots = append(leg.Snapshots, snapshot)
+		merged = append(merged, leg)
+	}
+	return merged, nil
 }
 
 func routeSnapshot(snapshot journeymaps.RouteSnapshot) domain.RouteSnapshot {
@@ -230,7 +446,7 @@ func routeSnapshot(snapshot journeymaps.RouteSnapshot) domain.RouteSnapshot {
 	for _, point := range snapshot.Geometry {
 		geometry = append(geometry, []float64{point.Lng, point.Lat})
 	}
-	return domain.RouteSnapshot{Provider: string(snapshot.Provider), CoordinateSystem: string(snapshot.CoordinateSystem), Geometry: geometry, DistanceM: snapshot.DistanceM, DurationS: snapshot.DurationS, FetchedAt: snapshot.FetchedAt.UTC().Format(time.RFC3339Nano), ExpiresAt: snapshot.ExpiresAt.UTC().Format(time.RFC3339Nano)}
+	return domain.RouteSnapshot{Provider: string(snapshot.Provider), CoordinateSystem: string(snapshot.CoordinateSystem), Mode: string(snapshot.Mode), Strategy: snapshot.Strategy, Source: snapshot.Source, Geometry: geometry, DistanceM: snapshot.DistanceM, DurationS: snapshot.DurationS, FetchedAt: snapshot.FetchedAt.UTC().Format(time.RFC3339Nano), ExpiresAt: snapshot.ExpiresAt.UTC().Format(time.RFC3339Nano)}
 }
 func validTravelMode(mode journeymaps.TravelMode) bool {
 	return mode == journeymaps.ModeDriving || mode == journeymaps.ModeWalking || mode == journeymaps.ModeCycling || mode == journeymaps.ModeTransit
@@ -521,7 +737,7 @@ func (s *TripService) RefreshWeather(ctx context.Context, tripID string, expecte
 	if !found {
 		return store.TripRecord{}, fmt.Errorf("stop %s not found", stopID)
 	}
-	point, err := savedPoint(targetLocation)
+	locationData, err := parseSavedLocation(targetLocation)
 	if err != nil {
 		return store.TripRecord{}, err
 	}
@@ -529,7 +745,7 @@ func (s *TripService) RefreshWeather(ctx context.Context, tripID string, expecte
 	if localDate == "" {
 		localDate = dayDate
 	}
-	snapshot, err := s.mapService.Weather(ctx, provider, journeymaps.WeatherRequest{Location: point, LocalDate: localDate, Timezone: trip.Timezone})
+	snapshot, err := s.mapService.Weather(ctx, provider, journeymaps.WeatherRequest{Location: locationData.Point, LocalDate: localDate, Timezone: trip.Timezone, CityCode: locationData.CityCode, AdCode: locationData.AdCode})
 	if err != nil {
 		return store.TripRecord{}, err
 	}

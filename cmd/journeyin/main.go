@@ -75,17 +75,23 @@ func main() {
 	if strings.TrimSpace(baiduBrowserKey) == "" {
 		baiduBrowserKey = settingValue(ctx, database, "map.baidu.browser_key", "")
 	}
-	amapServerKey := settingValue(ctx, database, "map.amap.server_key", "")
-	if strings.TrimSpace(amapServerKey) == "" {
-		amapServerKey = os.Getenv("JOURNEYIN_AMAP_SERVER_KEY")
-	}
+	amapServerKey := settingValue(ctx, database, "map.amap.server_key", os.Getenv("JOURNEYIN_AMAP_SERVER_KEY"))
+	amapJSKey := settingValue(ctx, database, "map.amap.js_key", os.Getenv("JOURNEYIN_AMAP_JS_KEY"))
+	amapSecurityCode := settingValue(ctx, database, "map.amap.security_js_code", os.Getenv("JOURNEYIN_AMAP_SECURITY_JS_CODE"))
 	mapRegistry := journeymaps.NewRegistry(
 		journeymaps.NewBaiduProvider(journeymaps.BaiduConfig{ServerAK: baiduServerAK}),
-		journeymaps.NewAMapProviderWithConfig("journeyin", journeymaps.AMapConfig{ServerKey: amapServerKey}),
+		journeymaps.NewAMapProviderWithConfig("journeyin", journeymaps.AMapConfig{ServerKey: amapServerKey, JSKey: amapJSKey, SecurityJSCode: amapSecurityCode}),
 	)
 	mapService := application.NewMapService(database, mapRegistry, intEnv("JOURNEYIN_MAP_MAX_CONCURRENCY", 2), intEnv("JOURNEYIN_MAP_DAILY_LIMIT", 0))
 	app.SetMapService(mapService)
 	api.SetMapRegistry(mapRegistry, baiduBrowserKey)
+	defaultMapProvider := journeymaps.ProviderID(strings.TrimSpace(os.Getenv("JOURNEYIN_MAP_PROVIDER")))
+	if defaultMapProvider != journeymaps.ProviderAMap && defaultMapProvider != journeymaps.ProviderBaidu {
+		defaultMapProvider = journeymaps.ProviderBaidu
+	}
+	api.SetDefaultMapProvider(defaultMapProvider)
+	api.SetAMapBrowserKey(amapJSKey)
+	api.SetAMapSecurityJSCode(amapSecurityCode)
 	api.SetMapService(mapService)
 	api.SetSettingsStore(database)
 	api.SetShareService(journeyshare.NewService(journeyshare.NewSQLiteStore(database)), envOr("JOURNEYIN_PUBLIC_URL", "http://"+listen))

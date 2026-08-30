@@ -17,6 +17,7 @@ Assert-Ok ($health.status -eq "ok") "health check failed"
 $capabilities = Invoke-RestMethod -Uri "$ServerUrl/api/v1/capabilities"
 Assert-Ok ($capabilities.schema_versions -contains 1) "Trip schema v1 is not advertised"
 Assert-Ok ($null -ne $capabilities.mcp) "MCP capability is missing"
+Assert-Ok ($null -ne $capabilities.map_providers.amap -and $capabilities.map_providers.amap.registered) "AMap provider capability is missing"
 
 $schema = Invoke-WebRequest -UseBasicParsing -Uri "$ServerUrl/api/v1/schema/trip/v1.json"
 Assert-Ok ($schema.StatusCode -eq 200) "Trip schema endpoint failed"
@@ -25,6 +26,8 @@ Assert-Ok ($schema.Content.Length -gt 500) "Trip schema is unexpectedly small"
 $web = Invoke-WebRequest -UseBasicParsing -Uri "$WebUrl/"
 Assert-Ok ($web.StatusCode -eq 200) "Web root failed"
 Assert-Ok ($web.Content.Contains("JourneyIn")) "Web root does not contain JourneyIn"
+$amapSmoke = Invoke-WebRequest -UseBasicParsing -Uri "$WebUrl/amap-smoke.html"
+Assert-Ok ($amapSmoke.StatusCode -eq 200 -and $amapSmoke.Content.Contains("AMap JS API 2.0")) "AMap smoke page failed"
 
 Write-Host "Local verification passed"
 Write-Host ("server=" + $ServerUrl)

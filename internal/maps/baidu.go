@@ -232,7 +232,7 @@ func (p *BaiduProvider) Route(ctx context.Context, request RouteRequest) (RouteS
 		geometry = append(geometry, points...)
 	}
 	now := time.Now().UTC()
-	return RouteSnapshot{Provider: p.ID(), CoordinateSystem: CRSBD09LL, Mode: request.Mode, Geometry: geometry, DistanceM: route.Distance, DurationS: route.Duration, FetchedAt: now, ExpiresAt: now.Add(time.Hour)}, nil
+	return RouteSnapshot{Provider: p.ID(), CoordinateSystem: CRSBD09LL, Mode: request.Mode, Strategy: request.Strategy, Source: "baidu-webapi-route", Geometry: geometry, DistanceM: route.Distance, DurationS: route.Duration, FetchedAt: now, ExpiresAt: now.Add(time.Hour)}, nil
 }
 
 func (p *BaiduProvider) Weather(ctx context.Context, request WeatherRequest) (WeatherSnapshot, error) {

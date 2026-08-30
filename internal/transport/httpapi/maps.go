@@ -124,7 +124,12 @@ func (s *Server) reverseGeocode(w http.ResponseWriter, r *http.Request) {
 		writeMapError(w, err)
 		return
 	}
-	address, err := provider.ReverseGeocode(r.Context(), body.Location)
+	var address string
+	if s.mapService != nil {
+		address, err = s.mapService.ReverseGeocode(r.Context(), body.Provider, body.Location)
+	} else {
+		address, err = provider.ReverseGeocode(r.Context(), body.Location)
+	}
 	if err != nil {
 		writeMapError(w, err)
 		return
@@ -228,11 +233,23 @@ func decodeBody(r *http.Request, value any) error {
 func writeMapError(w http.ResponseWriter, err error) {
 	status := http.StatusBadRequest
 	code := "map_error"
-	if errors.Is(err, journeymaps.ErrProviderUnavailable) {
+	switch {
+	case errors.Is(err, journeymaps.ErrProviderRateLimited):
+		status = http.StatusTooManyRequests
+		code = "provider_rate_limited"
+	case errors.Is(err, journeymaps.ErrProviderQuotaExceeded):
+		status = http.StatusTooManyRequests
+		code = "provider_quota_exceeded"
+	case errors.Is(err, journeymaps.ErrProviderTemporary):
+		status = http.StatusServiceUnavailable
+		code = "provider_temporary"
+	case errors.Is(err, journeymaps.ErrProviderUnauthorized):
+		status = http.StatusBadGateway
+		code = "provider_unauthorized"
+	case errors.Is(err, journeymaps.ErrProviderUnavailable):
 		status = http.StatusServiceUnavailable
 		code = "provider_unavailable"
-	}
-	if errors.Is(err, store.ErrMapQuotaExceeded) {
+	case errors.Is(err, store.ErrMapQuotaExceeded):
 		status = http.StatusTooManyRequests
 		code = "quota_exceeded"
 	}

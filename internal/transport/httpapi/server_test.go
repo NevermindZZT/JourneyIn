@@ -271,7 +271,7 @@ func TestMapKeysArePersistedWithoutReturningSecretValues(t *testing.T) {
 	server := testHTTPServer(t)
 	defer server.Close()
 	body := strings.NewReader(
-		`{"baidu_browser_key":"browser-test","baidu_server_key":"server-test","amap_js_key":"amap-js-test"}`,
+		`{"baidu_browser_key":"browser-test","baidu_server_key":"server-test","amap_js_key":"amap-js-test","amap_server_key":"amap-server-test","amap_security_js_code":"amap-security-test"}`,
 	)
 	request, err := http.NewRequest(http.MethodPut, server.URL+"/api/v1/settings/map-keys", body)
 	if err != nil {
@@ -299,12 +299,16 @@ func TestMapKeysArePersistedWithoutReturningSecretValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	encoded, _ := json.Marshal(result)
-	if strings.Contains(string(encoded), "server-test") || strings.Contains(string(encoded), "browser-test") {
+	if strings.Contains(string(encoded), "server-test") || strings.Contains(string(encoded), "browser-test") || strings.Contains(string(encoded), "amap-server-test") || strings.Contains(string(encoded), "amap-security-test") {
 		t.Fatal("map key value was returned")
 	}
 	mapData := result["map"].(map[string]any)
 	baidu := mapData["baidu"].(map[string]any)
 	if baidu["browser_key_configured"] != true || baidu["server_key_configured"] != true {
-		t.Fatalf("unexpected settings: %+v", result)
+		t.Fatalf("unexpected Baidu settings: %+v", result)
+	}
+	amap := mapData["amap"].(map[string]any)
+	if amap["js_key_configured"] != true || amap["server_key_configured"] != true || amap["security_js_code_configured"] != true {
+		t.Fatalf("unexpected AMap settings: %+v", result)
 	}
 }

@@ -48,6 +48,9 @@ type PlaceCandidate struct {
 	Address  string     `json:"address,omitempty"`
 	Location GeoPoint   `json:"location"`
 	Provider ProviderID `json:"provider"`
+	CityCode string     `json:"citycode,omitempty"`
+	AdCode   string     `json:"adcode,omitempty"`
+	TypeCode string     `json:"typecode,omitempty"`
 }
 
 type POISearchResult struct {
@@ -66,16 +69,24 @@ type TaggedPOISearchProvider interface {
 }
 
 type RouteRequest struct {
-	Origin      GeoPoint   `json:"origin"`
-	Destination GeoPoint   `json:"destination"`
-	Mode        TravelMode `json:"mode"`
-	DepartureAt *time.Time `json:"departure_at,omitempty"`
+	Origin              GeoPoint   `json:"origin"`
+	Destination         GeoPoint   `json:"destination"`
+	Mode                TravelMode `json:"mode"`
+	DepartureAt         *time.Time `json:"departure_at,omitempty"`
+	OriginPOIID         string     `json:"origin_poi_id,omitempty"`
+	DestinationPOIID    string     `json:"destination_poi_id,omitempty"`
+	OriginCityCode      string     `json:"origin_citycode,omitempty"`
+	DestinationCityCode string     `json:"destination_citycode,omitempty"`
+	Strategy            string     `json:"strategy,omitempty"`
+	AlternativeRoute    int        `json:"alternative_route,omitempty"`
 }
 
 type RouteSnapshot struct {
 	Provider         ProviderID       `json:"provider"`
 	CoordinateSystem CoordinateSystem `json:"coordinate_system"`
 	Mode             TravelMode       `json:"mode"`
+	Strategy         string           `json:"strategy,omitempty"`
+	Source           string           `json:"source,omitempty"`
 	Geometry         []GeoPoint       `json:"geometry,omitempty"`
 	DistanceM        int              `json:"distance_m,omitempty"`
 	DurationS        int              `json:"duration_s,omitempty"`
@@ -87,6 +98,8 @@ type WeatherRequest struct {
 	Location  GeoPoint `json:"location"`
 	LocalDate string   `json:"local_date"`
 	Timezone  string   `json:"timezone"`
+	CityCode  string   `json:"citycode,omitempty"`
+	AdCode    string   `json:"adcode,omitempty"`
 }
 
 type WeatherSnapshot struct {

@@ -16,14 +16,14 @@ import (
 )
 
 const sharePageContentSecurityPolicy = "default-src 'self'; " +
-	"script-src 'self' 'unsafe-inline' 'unsafe-eval' https://api.map.baidu.com http://api.map.baidu.com https://*.baidu.com http://*.baidu.com https://*.bdimg.com http://*.bdimg.com https://*.bdstatic.com http://*.bdstatic.com; " +
-	"style-src 'self' 'unsafe-inline' data: blob: https://*.baidu.com http://*.baidu.com https://*.bdimg.com http://*.bdimg.com https://*.bdstatic.com http://*.bdstatic.com; " +
-	"img-src 'self' data: blob: https://*.baidu.com http://*.baidu.com https://*.bdimg.com http://*.bdimg.com https://*.bdstatic.com http://*.bdstatic.com; " +
-	"connect-src 'self' https://*.baidu.com http://*.baidu.com https://*.bdimg.com http://*.bdimg.com https://*.bdstatic.com http://*.bdstatic.com; " +
-	"font-src 'self' data: https://*.baidu.com http://*.baidu.com https://*.bdimg.com http://*.bdimg.com https://*.bdstatic.com http://*.bdstatic.com; " +
-	"worker-src 'self' blob: https://*.baidu.com http://*.baidu.com https://*.bdimg.com http://*.bdimg.com https://*.bdstatic.com http://*.bdstatic.com; " +
-	"child-src 'self' blob: https://*.baidu.com http://*.baidu.com https://*.bdimg.com http://*.bdimg.com https://*.bdstatic.com http://*.bdstatic.com; " +
-	"frame-src 'self' https://*.baidu.com http://*.baidu.com https://*.bdimg.com http://*.bdimg.com https://*.bdstatic.com http://*.bdstatic.com; " +
+	"script-src 'self' 'unsafe-inline' 'unsafe-eval' https://api.map.baidu.com http://api.map.baidu.com https://*.baidu.com http://*.baidu.com https://*.bdimg.com http://*.bdimg.com https://*.bdstatic.com http://*.bdstatic.com https://webapi.amap.com https://*.amap.com https://*.autonavi.com; " +
+	"style-src 'self' 'unsafe-inline' data: blob: https://*.baidu.com http://*.baidu.com https://*.bdimg.com http://*.bdimg.com https://*.bdstatic.com http://*.bdstatic.com https://*.amap.com https://*.autonavi.com; " +
+	"img-src 'self' data: blob: https://*.baidu.com http://*.baidu.com https://*.bdimg.com http://*.bdimg.com https://*.bdstatic.com http://*.bdstatic.com https://*.amap.com https://*.autonavi.com; " +
+	"connect-src 'self' https://*.baidu.com http://*.baidu.com https://*.bdimg.com http://*.bdimg.com https://*.bdstatic.com http://*.bdstatic.com https://*.amap.com https://*.autonavi.com; " +
+	"font-src 'self' data: https://*.baidu.com http://*.baidu.com https://*.bdimg.com http://*.bdimg.com https://*.bdstatic.com http://*.bdstatic.com https://*.amap.com https://*.autonavi.com; " +
+	"worker-src 'self' blob: https://*.baidu.com http://*.baidu.com https://*.bdimg.com http://*.bdimg.com https://*.bdstatic.com http://*.bdstatic.com https://*.amap.com https://*.autonavi.com; " +
+	"child-src 'self' blob: https://*.baidu.com http://*.baidu.com https://*.bdimg.com http://*.bdimg.com https://*.bdstatic.com http://*.bdstatic.com https://*.amap.com https://*.autonavi.com; " +
+	"frame-src 'self' https://*.baidu.com http://*.baidu.com https://*.bdimg.com http://*.bdimg.com https://*.bdstatic.com http://*.bdstatic.com https://*.amap.com https://*.autonavi.com; " +
 	"base-uri 'self'; object-src 'none'; form-action 'none'; frame-ancestors 'none'"
 
 type createShareBody struct {
@@ -122,15 +122,15 @@ func (s *Server) publicShare(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	setSharePageHeaders(w)
-	_, _ = w.Write(s.renderShareShell(record, s.browserMapKey))
+	_, _ = w.Write(s.renderShareShell(record, s.browserMapKey, s.amapBrowserKey, amapProxyPrefix))
 }
 
-func (s *Server) renderShareShell(record journeyshare.Record, browserKey string) []byte {
+func (s *Server) renderShareShell(record journeyshare.Record, browserKey, amapBrowserKey, amapSecurityProxyPath string) []byte {
 	index, err := fs.ReadFile(s.web, "index.html")
 	if err != nil {
 		return []byte("<!doctype html><html><body>分享页面资源不可用</body></html>")
 	}
-	data, _ := json.Marshal(map[string]any{"trip": json.RawMessage(record.Content), "browser_key": browserKey, "revision": record.Revision})
+	data, _ := json.Marshal(map[string]any{"trip": json.RawMessage(record.Content), "browser_key": browserKey, "amap_browser_key": amapBrowserKey, "amap_security_proxy_path": amapSecurityProxyPath, "amap_security_js_code_configured": s.amapSecurityCode != "", "revision": record.Revision})
 	bootstrap := append([]byte("<script>window.__JOURNEYIN_SHARE__="), data...)
 	bootstrap = append(bootstrap, []byte(";</script>")...)
 	return bytes.Replace(index, []byte("</head>"), append(bootstrap, []byte("</head>")...), 1)
