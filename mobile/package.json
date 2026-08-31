@@ -1,7 +1,7 @@
 {
   "name": "journeyin-mobile",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.3.0",
   "scripts": {
     "sync": "cap sync",
     "android": "cap open android",

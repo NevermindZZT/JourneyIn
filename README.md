@@ -32,7 +32,7 @@ go run ./cmd/journeyin -listen 127.0.0.1:8080 -data D:/data/journeyin/journeyin.
 
 ~~~text
 nevermindzzt/journeyin:latest
-nevermindzzt/journeyin:0.2.5
+nevermindzzt/journeyin:0.3.0
 ~~~
 
 使用持久化卷启动：
@@ -53,7 +53,7 @@ docker compose -f docker-compose.hub.yml pull
 docker compose -f docker-compose.hub.yml up --detach
 ~~~
 
-如需固定版本，可设置 `$env:JOURNEYIN_IMAGE = 'nevermindzzt/journeyin:0.2.5'` 后再执行上述命令。
+如需固定版本，可设置 `$env:JOURNEYIN_IMAGE = 'nevermindzzt/journeyin:0.3.0'` 后再执行上述命令。
 
 默认使用 Docker named volume `journeyin-data`，由容器以非 root 用户写入，不需要创建或修改宿主机目录权限。若希望把数据直接放在宿主机目录，可设置 `JOURNEYIN_DATA_PATH` 切换为 bind mount；Compose 会自动创建目录，镜像启动时会检查固定的 `/data`，按需修复数据库目录及 SQLite sidecar 文件的所有者，然后同一个 Go 进程在打开 SQLite 前永久降权为 UID/GID 65532，不需要 `chmod 777` 或手动 `chown`：
 

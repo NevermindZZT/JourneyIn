@@ -53,7 +53,7 @@ const poiPriorityOptions = [
   { value: 'baidu', label: '百度优先' },
 ]
 
-const APP_VERSION = '0.2.5'
+const APP_VERSION = '0.3.0'
 const APP_SLOGAN = '在地图上规划每一段旅程'
 const GITHUB_URL = 'https://github.com/NevermindZZT/JourneyIn'
 const shareMode = window.location.pathname.startsWith('/s/') && !window.location.pathname.endsWith('.json')
@@ -92,9 +92,10 @@ const shareURL = ref('')
 const shareID = ref('')
 const shareExpiresAt = ref('')
 const shareCopyMessage = ref('')
+const shareNoticeVisible = ref(false)
 const actionLoading = ref(false)
 const settingsOpen = ref(false)
-type SettingsSection = 'appearance' | 'connection' | 'maps' | 'search' | 'mcp'
+type SettingsSection = 'appearance' | 'connection' | 'maps' | 'search' | 'sharing' | 'mcp'
 const settingsSection = ref<SettingsSection>('appearance')
 const newTripOpen = ref(false)
 const authOpen = ref(false)
@@ -132,6 +133,7 @@ const sheetBreakpoint = ref<SheetBreakpoint>('half')
 type JourneySection = 'overview' | 'itinerary'
 const journeySection = ref<JourneySection>('itinerary')
 const tripMenuID = ref('')
+const detailMoreOpen = ref(false)
 const navigationApplying = ref(false)
 let navigationSequence = 0
 const mapType = ref<'normal' | 'satellite'>((localStorage.getItem('journeyin.mapType') as 'normal' | 'satellite') || 'normal')
@@ -351,6 +353,19 @@ function toggleDetailSheet() {
   setSheetBreakpoint(sheetBreakpoint.value === 'expanded' ? 'half' : 'expanded')
 }
 
+function toggleDetailMore() {
+  detailMoreOpen.value = !detailMoreOpen.value
+}
+function editSelectedDescriptionFromMenu() {
+  detailMoreOpen.value = false
+  beginEditDescription()
+}
+function deleteSelectedPointFromMenu() {
+  detailMoreOpen.value = false
+  const target = selectedTarget.value
+  if (target) void deletePlanningPoint(target)
+}
+
 function startSheetDrag(event: PointerEvent) {
   if (window.matchMedia('(min-width: 901px)').matches) return
   sheetDragCleanup?.()
@@ -395,6 +410,7 @@ function navigateToList(mode: 'push' | 'replace' = 'push') {
   panelOpen.value = false
   mobileMapToolsOpen.value = false
   tripMenuID.value = ''
+  detailMoreOpen.value = false
   resetMapSDK()
   syncNavigationURL(mode, { layer: 'list' })
 }
@@ -409,6 +425,7 @@ function navigateToTrip(trip: TripSummary, mode: 'push' | 'replace' = 'push') {
   panelOpen.value = true
   mobileMapToolsOpen.value = false
   tripMenuID.value = ''
+  detailMoreOpen.value = false
   setSheetBreakpoint('half', 'replace', false)
   syncNavigationURL(mode, { layer: 'trip', tripID: trip.id, day: 'all', sheet: 'half' })
   void loadDetail(trip)
@@ -422,6 +439,7 @@ function navigateToStop(stop: Stop | SubStop, parent: Stop | null = null, mode: 
   panelMode.value = 'journey'
   panelOpen.value = true
   mobileMapToolsOpen.value = false
+  detailMoreOpen.value = false
   setSheetBreakpoint('half', 'replace', false)
   syncNavigationURL(mode)
   void renderMap()
@@ -443,6 +461,7 @@ async function applyNavigationRoute(route: NavigationURLState) {
   panelMode.value = 'journey'
   journeySection.value = route.layer === 'trip' ? 'itinerary' : 'itinerary'
   panelOpen.value = true
+  detailMoreOpen.value = false
   selectedDay.value = route.day && route.day !== 'all' && route.day <= (tripDocument.value?.days.length || 0) ? route.day : 'all'
   setSheetBreakpoint(route.sheet || (route.layer === 'trip' ? 'half' : 'expanded'), 'replace', false)
   selectedStopId.value = ''
@@ -482,6 +501,7 @@ function handleGlobalKeyDown(event: KeyboardEvent) {
   if (authOpen.value) { authOpen.value = false; event.preventDefault(); return }
   if (mobileMapToolsOpen.value) { mobileMapToolsOpen.value = false; event.preventDefault(); return }
   if (panelMode.value === 'search') { closeJourneySearch(); event.preventDefault(); return }
+  if (detailMoreOpen.value) { detailMoreOpen.value = false; event.preventDefault(); return }
   if (selectedSubStopId.value) { navigateBackFromSubStop(); event.preventDefault(); return }
   if (selectedStopId.value) { navigateBackFromStop(); event.preventDefault(); return }
   if (tripView.value === 'detail') { navigateBackToList(); event.preventDefault() }
@@ -621,6 +641,7 @@ function deleteSelectedTrip() { if (selected.value) void deleteTrip(selected.val
 async function loadDetail(trip: TripSummary) {
   selected.value = trip
   restoreShareState(trip.id)
+  detailMoreOpen.value = false
   selectedStopId.value = ''
   detailLoading.value = true
   try {
@@ -1050,7 +1071,12 @@ function applyMapType() {
   const type = mapType.value === 'satellite' ? mapAPI.BMAP_SATELLITE_MAP || (window as any).BMAP_SATELLITE_MAP : mapAPI.BMAP_NORMAL_MAP || (window as any).BMAP_NORMAL_MAP
   if (type) mapInstance.setMapType(type)
 }
-function toggleMapType() { mapType.value = mapType.value === 'normal' ? 'satellite' : 'normal'; localStorage.setItem('journeyin.mapType', mapType.value); applyMapType() }
+function setMapType(type: 'normal' | 'satellite') {
+  if (mapType.value === type) return
+  mapType.value = type
+  localStorage.setItem('journeyin.mapType', mapType.value)
+  applyMapType()
+}
 function toggleMapLabels() { showMapLabels.value = !showMapLabels.value; localStorage.setItem('journeyin.mapLabels', String(showMapLabels.value)); void renderMap() }
 function toggleMapPick() { if (!mapReady.value || !tripDocument.value) { error.value = '地图加载完成后才能使用地图选点'; return }; mapPickMode.value = !mapPickMode.value; error.value = '' }
 function handleMapClick(event: any) { if (!mapPickMode.value || !event?.point || !tripDocument.value) return; mapPickLocation.value = { lat: Number(event.point.lat), lng: Number(event.point.lng), crs: selectedMapProvider.value === 'amap' ? 'gcj02' : 'bd09ll' }; mapPickTitle.value = ''; mapPickAddress.value = ''; const day = selectedDay.value === 'all' ? tripDocument.value.days[0] : tripDocument.value.days[selectedDay.value - 1]; mapPickDayID.value = day?.id || tripDocument.value.days[0]?.id || ''; mapPickMode.value = false; mapPickOpen.value = true }
@@ -1174,7 +1200,7 @@ function shareStorageKey(tripID: string) { return 'journeyin.share.' + tripID }
 function shareTokenFromURL(url: string) { try { const parsed = new URL(url, window.location.origin); const match = parsed.pathname.match(/^\/s\/([^/]+)$/); return match?.[1] || '' } catch { return '' } }
 function saveShareState(tripID: string) { if (shareURL.value) localStorage.setItem(shareStorageKey(tripID), JSON.stringify({ id: shareID.value, url: shareURL.value, expires_at: shareExpiresAt.value })) }
 function restoreShareState(tripID: string) {
-  shareURL.value = ''; shareID.value = ''; shareExpiresAt.value = ''; shareCopyMessage.value = ''
+  shareURL.value = ''; shareID.value = ''; shareExpiresAt.value = ''; shareCopyMessage.value = ''; shareNoticeVisible.value = false
   try {
     const saved = JSON.parse(localStorage.getItem(shareStorageKey(tripID)) || 'null') as { id?: string; url?: string; expires_at?: string } | null
     if (!saved?.url || (saved.expires_at && Date.parse(saved.expires_at) <= Date.now())) { localStorage.removeItem(shareStorageKey(tripID)); return }
@@ -1189,7 +1215,7 @@ async function createShare() {
     const response = await apiFetch('/api/v1/shares', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trip_id: tripID, existing_token: existingToken || undefined }) })
     const payload = await response.json() as { id?: string; url?: string; expires_at?: string; error?: { message?: string } }
     if (!response.ok || !payload.url) throw new Error(payload.error?.message || '分享链接创建失败')
-    shareID.value = payload.id || ''; shareURL.value = payload.url; shareExpiresAt.value = payload.expires_at || ''; saveShareState(tripID)
+    shareID.value = payload.id || ''; shareURL.value = payload.url; shareExpiresAt.value = payload.expires_at || ''; shareNoticeVisible.value = true; saveShareState(tripID)
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '分享链接创建失败' } finally { actionLoading.value = false }
 }
 async function copyText(value: string) {
@@ -1220,13 +1246,16 @@ async function copyShareURL() {
   error.value = ''
   try { await copyText(shareURL.value); shareCopyMessage.value = '分享链接已复制' } catch { error.value = '当前浏览器禁止自动复制，请长按或手动复制分享链接' }
 }
+function dismissShareNotice() {
+  shareNoticeVisible.value = false
+}
 async function revokeShare() {
   if (!shareID.value || !window.confirm('确认撤销当前在线分享吗？撤销后链接将无法访问。')) return
   actionLoading.value = true
   try {
     const response = await apiFetch('/api/v1/shares/' + encodeURIComponent(shareID.value) + '/revoke', { method: 'POST' })
     if (!response.ok) { const payload = await response.json() as { error?: { message?: string } }; throw new Error(payload.error?.message || '撤销分享失败') }
-    shareURL.value = ''; shareID.value = ''; shareExpiresAt.value = ''; shareCopyMessage.value = ''; if (selected.value) localStorage.removeItem(shareStorageKey(selected.value.id)); settingsMessage.value = '在线分享已撤销'
+    shareURL.value = ''; shareID.value = ''; shareExpiresAt.value = ''; shareCopyMessage.value = ''; shareNoticeVisible.value = false; if (selected.value) localStorage.removeItem(shareStorageKey(selected.value.id)); settingsMessage.value = '在线分享已撤销'
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '撤销分享失败' } finally { actionLoading.value = false }
 }
 function safeURL(raw: string) { try { const parsed = new URL(raw); return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.toString() : '#' } catch { return '#' } }
@@ -1567,21 +1596,21 @@ onUnmounted(() => {
               <div v-if="mobileMapToolsOpen" class="map-tools-card" role="dialog" aria-label="地图选项">
                 <div class="map-tools-heading"><div><span class="eyebrow">MAP OPTIONS</span><strong>地图选项</strong></div><button type="button" aria-label="关闭地图选项" @click="toggleMobileMapTools"><IonIcon :icon="closeOutline" /></button></div>
                 <div class="map-tool-row"><span>底图 Provider</span><div class="provider-segment"><button type="button" :class="{ active: selectedMapProvider === 'baidu' }" @click="setMapProvider('baidu')">百度</button><button type="button" :class="{ active: selectedMapProvider === 'amap' }" @click="setMapProvider('amap')">高德</button></div></div>
-                <div class="map-tool-row"><span>图层</span><button class="tool-value-button" type="button" :class="{ active: mapType === 'satellite' }" @click="toggleMapType">{{ mapType === 'satellite' ? '卫星图' : '标准图' }}</button></div>
+                <div class="map-tool-row"><span>图层</span><div class="provider-segment layer-segment" role="group" aria-label="地图图层"><button type="button" :class="{ active: mapType === 'normal' }" :aria-pressed="mapType === 'normal'" @click="setMapType('normal')">标准图</button><button type="button" :class="{ active: mapType === 'satellite' }" :aria-pressed="mapType === 'satellite'" @click="setMapType('satellite')">卫星图</button></div></div>
                 <div class="map-tool-row"><span>地图标签</span><button class="tool-value-button" type="button" :class="{ active: showMapLabels }" @click="toggleMapLabels">{{ showMapLabels ? '已显示' : '已隐藏' }}</button></div>
                 <button class="map-pick-action" type="button" :disabled="!mapReady || !tripDocument" @click="toggleMapPick"><IonIcon :icon="mapOutline" /> {{ mapPickMode ? '取消地图选点' : '地图选点' }}</button>
               </div>
 
-              <section v-if="error || shareURL" class="map-notices redesign-notices">
+              <section v-if="error || (shareNoticeVisible && shareURL)" class="map-notices redesign-notices">
                 <div v-if="error" class="global-error"><IonIcon :icon="cloudOfflineOutline" /><span>{{ error }}</span><button aria-label="关闭错误" @click="error = ''">×</button></div>
-                <div v-if="shareURL" class="share-banner"><span><strong>只读分享已创建</strong><a :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><small v-if="shareExpiresAt">有效期至 {{ new Date(shareExpiresAt).toLocaleString() }}</small><small v-if="shareCopyMessage" class="share-copy-feedback">{{ shareCopyMessage }}</small></span><div class="share-actions"><button type="button" @click="copyShareURL">复制链接</button><button v-if="shareID" type="button" @click="revokeShare">撤销</button><button aria-label="关闭分享提示" @click="shareURL = ''">×</button></div></div>
+                <div v-if="shareNoticeVisible && shareURL" class="share-banner"><span><strong>只读分享已创建</strong><a :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><small v-if="shareExpiresAt">有效期至 {{ new Date(shareExpiresAt).toLocaleString() }}</small><small v-if="shareCopyMessage" class="share-copy-feedback">{{ shareCopyMessage }}</small></span><div class="share-actions"><button type="button" @click="copyShareURL">复制链接</button><button v-if="shareID" type="button" @click="revokeShare">撤销</button><button type="button" aria-label="关闭分享提示" @click="dismissShareNotice">×</button></div></div>
               </section>
             </div>
 
             <aside v-if="tripDocument" class="floating-panel workspace-panel itinerary-panel" :class="['sheet-' + sheetBreakpoint, { 'panel-search-mode': panelMode === 'search' }]" aria-label="行程时间线">
               <button class="sheet-handle" type="button" :aria-label="sheetBreakpoint === 'peek' ? '展开行程' : '收起行程'" @pointerdown="startSheetDrag" @click="cycleSheetBreakpoint"><span></span></button>
               <header class="workspace-panel-head">
-                <div><p class="eyebrow">{{ shareMode ? 'SHARED JOURNEY' : 'CURRENT JOURNEY' }}</p><h1>{{ selected?.title || tripDocument.title }}</h1><p>{{ selected ? selected.start_date + ' — ' + selected.end_date : '选择一条行程查看详情' }}</p></div>
+                <div><div class="workspace-panel-kicker"><p class="eyebrow">{{ shareMode ? 'SHARED JOURNEY' : 'CURRENT JOURNEY' }}</p><span v-if="shareURL" class="share-status-tag">已分享</span></div><h1>{{ selected?.title || tripDocument.title }}</h1><p>{{ selected ? selected.start_date + ' — ' + selected.end_date : '选择一条行程查看详情' }}</p></div>
                 <div class="panel-head-actions"><button v-if="!shareMode" class="panel-action-button" type="button" aria-label="返回行程列表" @click="navigateBackToList"><span>‹</span><small>行程</small></button><button class="panel-action-button collapse-action" type="button" :aria-label="sheetBreakpoint === 'peek' ? '展开行程' : '收起到 Peek'" @click="setSheetBreakpoint(sheetBreakpoint === 'peek' ? 'half' : 'peek')"><IonIcon :icon="sheetBreakpoint === 'peek' ? chevronUpOutline : chevronDownOutline" /></button></div>
               </header>
               <nav v-if="panelMode === 'journey'" class="journey-view-tabs" aria-label="行程内容"><button type="button" :class="{ selected: journeySection === 'itinerary' }" @click="journeySection = 'itinerary'">规划点 <small>{{ visibleStops.length }}</small></button><button type="button" :class="{ selected: journeySection === 'overview' }" @click="journeySection = 'overview'">说明</button></nav>
@@ -1611,11 +1640,11 @@ onUnmounted(() => {
             <aside v-if="selectedStop" class="details-drawer stop-detail-panel" :class="['sheet-' + sheetBreakpoint, { 'is-child-detail': Boolean(selectedSubStop) }]" aria-label="规划点详情">
               <div class="detail-sheet-handle"><button type="button" :aria-label="sheetBreakpoint === 'expanded' ? '收起规划点详情到半屏' : '展开规划点详情'" @click="toggleDetailSheet"><span></span></button></div>
               <div class="detail-scroll redesign-detail-scroll">
-                <header class="detail-topbar"><button type="button" class="detail-back-button" @click="selectedSubStop ? navigateBackFromSubStop() : navigateBackFromStop()"><span>‹</span>{{ selectedSubStop ? '主规划点' : selectedDay === 'all' ? '行程' : 'D' + selectedDay + ' 行程' }}</button><div class="detail-topbar-actions"><button class="detail-sheet-toggle" type="button" :aria-label="sheetBreakpoint === 'expanded' ? '收起到半屏' : '展开规划点详情'" @click="toggleDetailSheet"><IonIcon :icon="sheetBreakpoint === 'expanded' ? chevronDownOutline : chevronUpOutline" /></button><button type="button" class="detail-more-button" aria-label="规划点更多操作">⋯</button></div></header>
+                <header class="detail-topbar"><button type="button" class="detail-back-button" @click="selectedSubStop ? navigateBackFromSubStop() : navigateBackFromStop()"><span>‹</span>{{ selectedSubStop ? '主规划点' : selectedDay === 'all' ? '行程' : 'D' + selectedDay + ' 行程' }}</button><div class="detail-topbar-actions"><button class="detail-sheet-toggle" type="button" :aria-label="sheetBreakpoint === 'expanded' ? '收起到半屏' : '展开规划点详情'" @click="toggleDetailSheet"><IonIcon :icon="sheetBreakpoint === 'expanded' ? chevronDownOutline : chevronUpOutline" /></button><div v-if="!shareMode" class="detail-more-wrap"><button type="button" class="detail-more-button" :aria-expanded="detailMoreOpen" aria-label="规划点更多操作" @click.stop="toggleDetailMore">⋯</button><div v-if="detailMoreOpen" class="detail-more-menu" role="menu"><button type="button" role="menuitem" @click="editSelectedDescriptionFromMenu">编辑地点说明</button><button type="button" role="menuitem" class="danger-menu-item" @click="deleteSelectedPointFromMenu">删除{{ selectedSubStop ? '子规划点' : '规划点' }}</button></div></div></div></header>
                 <p class="detail-kicker"><span>{{ selectedSubStop ? 'SUB-STOP ' + selectedSubStop.sequence : 'STOP ' + selectedStop.sequence }}</span><span>{{ selectedTarget?.kind || '规划点' }}</span></p>
                 <h1>{{ selectedTarget?.title }}</h1><p class="detail-address">{{ selectedTarget?.address || '地址待解析' }}</p><p class="detail-date">{{ stopDate(selectedTarget || selectedStop) }} · {{ selectedTarget?.time_window?.arrival || '时间待定' }}{{ selectedTarget?.time_window?.departure ? ' — ' + selectedTarget.time_window.departure : '' }}</p>
                 <div class="detail-location"><span>坐标已保存</span><small>{{ pointFor(selectedTarget || selectedStop)?.crs || '未知 CRS' }} · {{ pointFor(selectedTarget || selectedStop)?.lat.toFixed(6) }}, {{ pointFor(selectedTarget || selectedStop)?.lng.toFixed(6) }}</small></div>
-                <div class="detail-primary-actions"><button class="primary-action" type="button" @click="openNavigation('amap')"><IonIcon :icon="navigateOutline" /> 高德导航</button><button class="secondary-action" type="button" @click="openNavigation('baidu')">百度</button><button v-if="!shareMode" class="secondary-action icon-action" type="button" @click="beginEditDescription">编辑</button></div>
+                <div class="detail-primary-actions"><button class="detail-navigation-button" type="button" @click="openNavigation('amap')"><IonIcon :icon="navigateOutline" /> 高德导航</button><button class="detail-navigation-button" type="button" @click="openNavigation('baidu')"><IonIcon :icon="navigateOutline" /> 百度导航</button></div>
                 <div class="detail-weather"><IonIcon :icon="sunnyOutline" /><span><strong>{{ weatherText(selectedTarget || selectedStop) }}</strong><small v-if="weatherUpdatedAt(selectedTarget || selectedStop)">更新于 {{ weatherUpdatedAt(selectedTarget || selectedStop) }}</small></span><button v-if="!shareMode" type="button" :disabled="weatherLoading" @click="refreshWeather">{{ weatherLoading ? '查询中…' : '刷新' }}</button></div>
                 <section v-if="!selectedSubStop" class="detail-section"><div class="section-title-row"><h2>子规划点 <span>{{ selectedStop.children?.length || 0 }}</span></h2><button v-if="!shareMode" class="text-action" type="button" @click="openChildSearch(selectedStop)">添加</button></div><p v-if="selectedStop.children?.length" class="detail-section-help">点击子点进入下一层，返回箭头会回到主规划点。</p><div v-if="selectedStop.children?.length" class="detail-child-list"><button v-for="child in selectedStop.children" :key="child.id" type="button" class="detail-child-row" @click="selectSubStop(child, selectedStop)"><span class="child-number">{{ child.sequence }}</span><span><strong>{{ child.title }}</strong><small>{{ stopDate(child) }} · {{ child.address || '地址已保存' }}</small></span><span>›</span></button></div><button v-if="!shareMode" class="add-place-action" type="button" @click="openChildSearch(selectedStop)"><IonIcon :icon="searchOutline" /> 添加子规划点</button></section>
                 <button v-else class="detail-parent-button" type="button" @click="navigateBackFromSubStop">‹ 返回主规划点：{{ selectedStop.title }}</button>
@@ -1649,6 +1678,7 @@ onUnmounted(() => {
               <button type="button" :class="{ active: settingsSection === 'connection' }" @click="settingsSection = 'connection'"><span class="settings-nav-icon">↗</span><span>连接</span><small>服务与令牌</small></button>
               <button type="button" :class="{ active: settingsSection === 'maps' }" @click="settingsSection = 'maps'"><span class="settings-nav-icon">⌖</span><span>地图</span><small>Provider 与 Key</small></button>
               <button type="button" :class="{ active: settingsSection === 'search' }" @click="settingsSection = 'search'"><span class="settings-nav-icon">⌕</span><span>地点检索</span><small>搜索优先级</small></button>
+              <button type="button" :class="{ active: settingsSection === 'sharing' }" @click="settingsSection = 'sharing'"><span class="settings-nav-icon">↗</span><span>分享</span><small>链接与权限</small></button>
               <button type="button" :class="{ active: settingsSection === 'mcp' }" @click="settingsSection = 'mcp'"><span class="settings-nav-icon">◇</span><span>MCP</span><small>Agent 连接</small></button>
             </nav>
             <div class="settings-body">
@@ -1674,6 +1704,12 @@ onUnmounted(() => {
               <section v-else-if="settingsSection === 'search'" class="settings-page-section">
                 <div class="settings-section-heading"><span class="eyebrow">PLACE SEARCH</span><h3>地点检索</h3><p>调整搜索 Provider 优先级，管理本地地点目录缓存。</p></div>
                 <div class="settings-card"><div class="settings-card-heading"><div><strong>搜索优先级</strong><small>未命中本地目录后使用所选 Provider</small></div><span class="provider-status">{{ poiProviderPriority === 'amap' ? '高德优先' : '百度优先' }}</span></div><label class="select-field">优先 Provider<UiSelect v-model="poiProviderPriority" aria-label="地点检索优先 Provider" :options="poiPriorityOptions" /></label><p class="settings-help">Provider 不可用时会自动尝试另一家；新搜索结果只保留 7 天。</p><div class="settings-cache-row"><span>本地地点记录</span><strong>{{ localDirectoryCount }} 条</strong></div><div class="settings-actions"><button class="primary-action" type="button" @click="savePOIPreferences">保存检索优先级</button><button class="secondary-action" type="button" @click="clearLocalDirectory">清除本地记录</button></div></div><p v-if="settingsMessage" class="settings-feedback">{{ settingsMessage }}</p>
+              </section>
+
+              <section v-else-if="settingsSection === 'sharing'" class="settings-page-section">
+                <div class="settings-section-heading"><span class="eyebrow">ONLINE SHARING</span><h3>在线分享</h3><p>集中管理当前行程的只读分享链接；分享状态不会遮挡地图。</p></div>
+                <div class="settings-card settings-share-card"><div class="settings-card-heading"><div><strong>{{ selected?.title || '当前行程' }}</strong><small>持有链接即可查看当前行程快照</small></div><span class="provider-status">{{ shareURL ? '已分享' : '未分享' }}</span></div><template v-if="selected"><a v-if="shareURL" class="settings-share-url" :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><p v-if="shareExpiresAt" class="settings-share-expiry">有效期至 {{ new Date(shareExpiresAt).toLocaleString() }}</p><p v-if="!shareURL" class="settings-help">当前行程还没有在线分享；点击下方按钮创建一个只读链接。</p><div class="settings-actions"><button v-if="shareURL" class="primary-action" type="button" @click="copyShareURL">复制链接</button><button v-if="shareURL && shareID" class="secondary-action" type="button" :disabled="actionLoading" @click="revokeShare">撤销分享</button><button v-else class="primary-action" type="button" :disabled="actionLoading" @click="createShare">{{ actionLoading ? '创建中…' : '在线分享' }}</button></div><p v-if="shareCopyMessage" class="settings-feedback">{{ shareCopyMessage }}</p></template><p v-else class="settings-help">请先选择一条行程，再管理它的在线分享链接。</p></div>
+                <div class="settings-note"><span class="settings-note-mark">i</span><span>分享链接是只读快照，默认有效期为 7 天。撤销后，持有链接的人将无法继续查看。</span></div>
               </section>
 
               <section v-else class="settings-page-section">

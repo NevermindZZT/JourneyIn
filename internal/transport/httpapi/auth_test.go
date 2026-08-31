@@ -37,7 +37,7 @@ func TestAuthenticatorLoginAndSession(t *testing.T) {
 
 func TestLoginEndpointSetsHttpOnlySessionCookie(t *testing.T) {
 	auth := NewAuthenticator("admin", "secret", "")
-	server := NewServer(nil, nil, nil, "0.2.5", nil)
+	server := NewServer(nil, nil, nil, "0.3.0", nil)
 	server.SetAuthenticator(auth)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader("{\"username\":\"admin\",\"password\":\"secret\"}"))
 	request.Header.Set("Content-Type", "application/json")
