@@ -135,12 +135,30 @@ const amapKey = computed(() => capabilities.value?.map_providers?.amap?.browser_
 const key = computed(() => selectedMapProvider.value === 'amap' ? amapKey.value : baiduKey.value)
 const keyConfigured = computed(() => Boolean(key.value))
 const mapProviderLabel = computed(() => selectedMapProvider.value === 'amap' ? '高德地图' : '百度地图')
+function hasUsableRoute(document: TripDocument | null, provider: 'baidu' | 'amap', mode?: TravelMode) {
+  return Boolean(document?.days.some(day => (day.legs || []).some(leg => (leg.snapshots || []).some(snapshot => snapshot.provider === provider && (!mode || !snapshot.mode || snapshot.mode === mode) && (snapshot.geometry?.length || 0) > 1))))
+}
+function firstRouteMode(document: TripDocument | null, provider: 'baidu' | 'amap'): TravelMode | null {
+  for (const day of document?.days || []) for (const leg of day.legs || []) for (const snapshot of leg.snapshots || []) {
+    if (snapshot.provider !== provider || (snapshot.geometry?.length || 0) < 2) continue
+    if (snapshot.mode === 'driving' || snapshot.mode === 'walking' || snapshot.mode === 'cycling' || snapshot.mode === 'transit') return snapshot.mode
+  }
+  return null
+}
 function syncProviderFromDocument(document: TripDocument | null) {
   const preferred = document?.map?.preferred_provider
-  const provider = preferred === 'baidu' || preferred === 'amap' ? preferred : defaultMapProvider.value
+  let provider = preferred === 'baidu' || preferred === 'amap' ? preferred : defaultMapProvider.value
+  if (!hasUsableRoute(document, provider)) {
+    const alternate = provider === 'amap' ? 'baidu' : 'amap'
+    if (hasUsableRoute(document, alternate)) provider = alternate
+  }
+  const configuredMode = document?.map?.default_mode
+  let mode: TravelMode = configuredMode === 'driving' || configuredMode === 'walking' || configuredMode === 'cycling' || configuredMode === 'transit' ? configuredMode : planningMode.value
+  if (!hasUsableRoute(document, provider, mode)) mode = firstRouteMode(document, provider) || mode
   const changed = selectedMapProvider.value !== provider
   selectedMapProvider.value = provider
   planningProvider.value = provider
+  planningMode.value = mode
   if (changed) resetMapSDK()
 }
 const visibleDays = computed(() => {
@@ -329,7 +347,11 @@ function routePoint(value: [number, number] | Coord, crs: string) { if (Array.is
 function mapRoutePointFor(value: [number, number] | Coord, crs: string, provider: 'baidu' | 'amap'): (Coord & { crs: string }) | null { const point = routePoint(value, crs); return pointForProvider({ location: { preferred: point.crs, coordinates: { [point.crs]: point } } } as unknown as Stop, provider) }
 function mapRoutePoint(value: [number, number] | Coord, crs: string): (Coord & { crs: string }) | null { return mapRoutePointFor(value, crs, 'baidu') }
 const SELECTED_STOP_ZOOM = 16
-function chooseSnapshotMetadata(leg: Leg, provider: 'baidu' | 'amap' = selectedMapProvider.value, mode: TravelMode = planningMode.value, strategy: string = mode === 'driving' ? planningStrategy.value : '') { return (leg.snapshots || []).find(snapshot => snapshot.provider === provider && (!snapshot.mode || snapshot.mode === mode) && (!strategy || !snapshot.strategy || snapshot.strategy === strategy)) || null }
+function chooseSnapshotMetadata(leg: Leg, provider: 'baidu' | 'amap' = selectedMapProvider.value, mode: TravelMode = planningMode.value, strategy: string = mode === 'driving' ? planningStrategy.value : '') {
+  const candidates = (leg.snapshots || []).filter(snapshot => snapshot.provider === provider && (!snapshot.mode || snapshot.mode === mode))
+  if (!strategy) return candidates[0] || null
+  return candidates.find(snapshot => !snapshot.strategy || snapshot.strategy === strategy) || candidates[0] || null
+}
 function chooseSnapshot(leg: Leg, provider: 'baidu' | 'amap' = selectedMapProvider.value, mode: TravelMode = planningMode.value, strategy: string = mode === 'driving' ? planningStrategy.value : '') { return chooseSnapshotMetadata(leg, provider, mode, strategy)?.geometry && chooseSnapshotMetadata(leg, provider, mode, strategy)!.geometry!.length > 1 ? chooseSnapshotMetadata(leg, provider, mode, strategy) : null }
 function mapFocusViewport(): { width: number; height: number; x: number; y: number } | null {
   const container = mapContainer.value

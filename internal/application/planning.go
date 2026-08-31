@@ -162,6 +162,13 @@ func (s *TripService) PlanTrip(ctx context.Context, tripID string, expectedRevis
 	if !validTravelMode(mode) {
 		return store.TripRecord{}, fmt.Errorf("unsupported planning mode %q", mode)
 	}
+	// A successful planning operation establishes the Provider and mode that
+	// should be restored when this Trip is opened again. Route snapshots remain
+	// provider-specific, so this does not replace snapshots from other Providers.
+	if providerID == journeymaps.ProviderAMap || providerID == journeymaps.ProviderBaidu {
+		trip.Map.PreferredProvider = string(providerID)
+	}
+	trip.Map.DefaultMode = string(mode)
 	segments := make([]routePlanSegment, 0)
 	targetDays := make(map[int]bool)
 	foundDay := input.DayID == ""

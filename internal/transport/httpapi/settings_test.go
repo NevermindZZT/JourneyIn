@@ -89,4 +89,39 @@ func TestDefaultMapProviderSettingControlsCapabilitiesAndPlanning(t *testing.T) 
 	if planResponse.StatusCode != http.StatusOK {
 		t.Fatalf("plan status=%d, want %d", planResponse.StatusCode, http.StatusOK)
 	}
+	var planned struct {
+		Document struct {
+			Map struct {
+				PreferredProvider string `json:"preferred_provider"`
+				DefaultMode       string `json:"default_mode"`
+			} `json:"map"`
+			Days []struct {
+				Legs []struct {
+					Snapshots []struct {
+						Provider string `json:"provider"`
+					} `json:"snapshots"`
+				} `json:"legs"`
+			} `json:"days"`
+		} `json:"document"`
+	}
+	if err := json.NewDecoder(planResponse.Body).Decode(&planned); err != nil {
+		t.Fatal(err)
+	}
+	if planned.Document.Map.PreferredProvider != "amap" || planned.Document.Map.DefaultMode != "walking" || len(planned.Document.Days) != 1 || len(planned.Document.Days[0].Legs) != 1 || len(planned.Document.Days[0].Legs[0].Snapshots) != 1 || planned.Document.Days[0].Legs[0].Snapshots[0].Provider != "amap" {
+		t.Fatalf("planned document did not persist AMap selection: %+v", planned.Document)
+	}
+	reloadResponse, err := http.Get(server.URL + "/api/v1/trips/" + created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reloadResponse.Body.Close()
+	if reloadResponse.StatusCode != http.StatusOK {
+		t.Fatalf("reload status=%d, want %d", reloadResponse.StatusCode, http.StatusOK)
+	}
+	if err := json.NewDecoder(reloadResponse.Body).Decode(&planned); err != nil {
+		t.Fatal(err)
+	}
+	if planned.Document.Map.PreferredProvider != "amap" || planned.Document.Map.DefaultMode != "walking" || len(planned.Document.Days) != 1 || len(planned.Document.Days[0].Legs) != 1 || len(planned.Document.Days[0].Legs[0].Snapshots) != 1 || planned.Document.Days[0].Legs[0].Snapshots[0].Provider != "amap" {
+		t.Fatalf("reloaded document lost AMap selection: %+v", planned.Document)
+	}
 }
