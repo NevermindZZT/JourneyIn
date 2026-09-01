@@ -171,6 +171,7 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .journey-redesign button, .journey-redesign a, .journey-redesign input, .journey-redesign textarea, .journey-redesign select { font: inherit; }
 .journey-redesign button { cursor: pointer; }
 .journey-redesign button:focus-visible, .journey-redesign a:focus-visible, .journey-redesign input:focus-visible, .journey-redesign textarea:focus-visible, .journey-redesign select:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 72%, transparent); outline-offset: 2px; }
+html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-gesture .journey-redesign a:focus { outline: none; }
 .journey-redesign ion-icon { pointer-events: none; }
 
 .journey-rail { position: relative; z-index: 45; display: flex; width: 78px; min-width: 78px; flex-direction: column; align-items: center; gap: 10px; padding: 18px 9px; border-right: 1px solid color-mix(in srgb, var(--line) 58%, transparent); background: var(--md-surface-container-low); }
@@ -180,20 +181,22 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .rail-nav { display: grid; width: 100%; gap: 5px; }
 .rail-nav-item { display: grid; width: 100%; min-height: 58px; place-items: center; gap: 4px; padding: 7px 3px; border: 1px solid transparent; border-radius: 16px; color: var(--muted); background: transparent; font-size: 10px; font-weight: 800; text-decoration: none; }
 .rail-nav-item ion-icon { font-size: 21px; }
-.rail-nav-item:hover:not(:disabled), .rail-nav-item.selected { border-color: color-mix(in srgb, var(--p) 25%, transparent); color: var(--p); background: color-mix(in srgb, var(--p) 12%, var(--surface)); }
+.rail-nav-item.selected { border-color: color-mix(in srgb, var(--p) 25%, transparent); color: var(--p); background: color-mix(in srgb, var(--p) 12%, var(--surface)); }
+@media (hover: hover) and (pointer: fine) { .rail-nav-item:hover:not(:disabled) { border-color: color-mix(in srgb, var(--p) 25%, transparent); color: var(--p); background: color-mix(in srgb, var(--p) 12%, var(--surface)); } }
 .rail-nav-item:disabled { cursor: not-allowed; opacity: .38; }
 .rail-spacer { flex: 1; }
 .rail-link { min-height: 50px; }
 
-.trip-list-view { min-width: 0; flex: 1 1 auto; overflow: auto; padding: clamp(28px, 5vw, 66px) clamp(22px, 5vw, 72px); background: radial-gradient(circle at 94% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 25%), var(--surface); }
+.trip-list-view { min-width: 0; min-height: 0; height: 100%; flex: 1 1 auto; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch; touch-action: pan-y; padding: clamp(28px, 5vw, 66px) clamp(22px, 5vw, 72px); background: radial-gradient(circle at 94% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 25%), var(--surface); }
+.trip-list-view button, .trip-list-view a { touch-action: pan-y; }
 .list-page-header { display: flex; max-width: 1120px; align-items: flex-end; justify-content: space-between; gap: 24px; margin: 0 auto 28px; }
 .list-page-header h1 { margin: 5px 0 0; color: var(--ink); font-size: clamp(32px, 4vw, 52px); letter-spacing: -.065em; }
 .list-page-subtitle { margin: 9px 0 0; color: var(--muted); font-size: 14px; }
 .list-page-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .primary-action, .secondary-action { display: inline-flex; min-height: 42px; align-items: center; justify-content: center; gap: 7px; padding: 9px 14px; border: 1px solid var(--line); border-radius: 13px; color: var(--p); background: var(--surface); font-size: 12px; font-weight: 800; }
 .primary-action { border-color: var(--p); color: var(--md-on-primary); background: var(--p); box-shadow: 0 7px 18px color-mix(in srgb, var(--p) 20%, transparent); }
-.primary-action:hover { background: color-mix(in srgb, var(--p) 84%, #000); }
-.secondary-action:hover { border-color: var(--p); background: color-mix(in srgb, var(--p) 8%, var(--surface)); }
+@media (hover: hover) and (pointer: fine) { .primary-action:hover { background: color-mix(in srgb, var(--p) 84%, #000); } }
+@media (hover: hover) and (pointer: fine) { .secondary-action:hover { border-color: var(--p); background: color-mix(in srgb, var(--p) 8%, var(--surface)); } }
 .primary-action ion-icon, .secondary-action ion-icon { font-size: 16px; }
 .compact-action { min-height: 35px; padding: 7px 10px; font-size: 11px; box-shadow: none; }
 .list-summary-bar { display: flex; max-width: 1120px; align-items: center; justify-content: space-between; gap: 16px; margin: 0 auto 18px; padding: 12px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; font-weight: 800; }
@@ -214,7 +217,8 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .empty-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; justify-content: center; }
 .trip-list-grid { display: grid; max-width: 1120px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin: 0 auto; }
 .trip-list-card { position: relative; overflow: visible; border: 1px solid var(--line); border-radius: 18px; background: color-mix(in srgb, var(--surface) 92%, transparent); box-shadow: 0 7px 20px color-mix(in srgb, var(--ink) 5%, transparent); }
-.trip-list-card:hover, .trip-list-card.active { border-color: color-mix(in srgb, var(--p) 48%, var(--line)); box-shadow: 0 12px 28px color-mix(in srgb, var(--p) 11%, transparent); }
+.trip-list-card.active { border-color: color-mix(in srgb, var(--p) 48%, var(--line)); box-shadow: 0 12px 28px color-mix(in srgb, var(--p) 11%, transparent); }
+@media (hover: hover) and (pointer: fine) { .trip-list-card:hover { border-color: color-mix(in srgb, var(--p) 48%, var(--line)); box-shadow: 0 12px 28px color-mix(in srgb, var(--p) 11%, transparent); } }
 .trip-card-main { display: flex; width: 100%; min-width: 0; min-height: 116px; align-items: center; gap: 13px; padding: 17px 15px; border: 0; border-radius: 18px; text-align: left; color: var(--ink); background: transparent; }
 .trip-card-visual { position: relative; display: grid; flex: 0 0 74px; width: 74px; height: 74px; place-items: end start; overflow: hidden; padding: 9px; border-radius: 18px; color: #fff; background: linear-gradient(145deg, #23695d, #8fbd9c 58%, #e98b69); box-shadow: inset 0 0 0 1px #ffffff44; }
 .trip-card-visual::before, .trip-card-visual::after { position: absolute; border: 1px solid #ffffff66; border-radius: 50%; content: ""; }
@@ -230,10 +234,11 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .trip-card-copy small { font-size: 11px; }
 .trip-card-arrow { color: var(--muted); font-size: 26px; }
 .trip-card-menu-button { position: absolute; z-index: 2; top: 10px; right: 10px; display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid transparent; border-radius: 10px; color: var(--muted); background: transparent; font-size: 20px; }
-.trip-card-menu-button:hover, .trip-card-menu-button[aria-expanded="true"] { border-color: var(--line); color: var(--p); background: var(--surface); }
+.trip-card-menu-button[aria-expanded="true"] { border-color: var(--line); color: var(--p); background: var(--surface); }
+@media (hover: hover) and (pointer: fine) { .trip-card-menu-button:hover { border-color: var(--line); color: var(--p); background: var(--surface); } }
 .trip-card-menu { position: absolute; z-index: 8; top: 46px; right: 10px; min-width: 132px; padding: 5px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 15px 34px color-mix(in srgb, var(--ink) 18%, transparent); }
 .trip-card-menu button { display: flex; width: 100%; min-height: 36px; align-items: center; gap: 7px; padding: 7px 9px; border: 0; border-radius: 8px; text-align: left; color: var(--md-error); background: transparent; font-size: 11px; font-weight: 800; }
-.trip-card-menu button:hover { background: color-mix(in srgb, var(--md-error) 10%, transparent); }
+@media (hover: hover) and (pointer: fine) { .trip-card-menu button:hover { background: color-mix(in srgb, var(--md-error) 10%, transparent); } }
 .trip-card-menu ion-icon { font-size: 15px; }
 
 .journey-workspace { position: relative; min-width: 0; min-height: 0; flex: 1 1 auto; overflow: hidden; }
@@ -291,20 +296,22 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .workspace-panel-head p { overflow: hidden; margin: 5px 0 0; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .panel-head-actions { display: flex; flex: 0 0 auto; gap: 5px; }
 .panel-action-button { display: inline-flex; min-width: 36px; min-height: 36px; align-items: center; justify-content: center; gap: 2px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); background: transparent; }
-.panel-action-button:hover { border-color: var(--p); color: var(--p); background: color-mix(in srgb, var(--p) 8%, transparent); }
+@media (hover: hover) and (pointer: fine) { .panel-action-button:hover { border-color: var(--p); color: var(--p); background: color-mix(in srgb, var(--p) 8%, transparent); } }
 .panel-action-button span { font-size: 22px; line-height: 15px; }
 .panel-action-button small { font-size: 9px; font-weight: 800; }
 .panel-action-button ion-icon { font-size: 17px; }
 
 .journey-view-tabs { display: flex; gap: 4px; padding: 9px 17px 0; border-bottom: 1px solid var(--line); }
 .journey-view-tabs button { min-height: 35px; padding: 6px 10px; border: 0; border-radius: 10px 10px 0 0; color: var(--muted); background: transparent; font-size: 11px; font-weight: 900; }
-.journey-view-tabs button:hover, .journey-view-tabs button.selected { color: var(--p); background: color-mix(in srgb, var(--p) 9%, transparent); box-shadow: inset 0 -2px 0 var(--p); }
+.journey-view-tabs button.selected { color: var(--p); background: color-mix(in srgb, var(--p) 9%, transparent); box-shadow: inset 0 -2px 0 var(--p); }
+@media (hover: hover) and (pointer: fine) { .journey-view-tabs button:hover { color: var(--p); background: color-mix(in srgb, var(--p) 9%, transparent); box-shadow: inset 0 -2px 0 var(--p); } }
 .journey-view-tabs button small { padding-left: 3px; color: inherit; font-size: 9px; }
 .journey-day-tabs { display: flex; gap: 5px; min-height: 48px; align-items: center; overflow-x: auto; padding: 7px 17px 8px; border-bottom: 1px solid var(--line); scrollbar-width: none; }
 .journey-day-tabs::-webkit-scrollbar { display: none; }
 .journey-day-tabs button { display: inline-flex; flex: 0 0 auto; min-height: 32px; align-items: center; gap: 4px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 9px; color: var(--muted); background: transparent; font-size: 10px; font-weight: 900; white-space: nowrap; }
 .journey-day-tabs button small { font-size: 9px; font-weight: 700; }
-.journey-day-tabs button:hover, .journey-day-tabs button.selected { border-color: var(--p); color: var(--md-on-primary); background: var(--p); }
+.journey-day-tabs button.selected { border-color: var(--p); color: var(--md-on-primary); background: var(--p); }
+@media (hover: hover) and (pointer: fine) { .journey-day-tabs button:hover { border-color: var(--p); color: var(--md-on-primary); background: var(--p); } }
 .workspace-panel.sheet-peek .journey-view-tabs { display: none; }
 .workspace-panel.sheet-peek .journey-day-tabs { display: none; }
 .sheet-handle { display: none; width: 100%; height: 25px; place-items: center; padding: 0; border: 0; background: transparent; touch-action: none; }
@@ -321,7 +328,8 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .section-title-row h2 { margin: 3px 0 0; color: var(--ink); font-size: 16px; letter-spacing: -.025em; }
 .section-title-row > h2 { margin: 0; }
 .text-action { min-height: 32px; padding: 5px 7px; border: 0; border-radius: 8px; color: var(--p); background: transparent; font-size: 11px; font-weight: 900; }
-.text-action:hover, .text-action.selected { background: color-mix(in srgb, var(--p) 10%, transparent); }
+.text-action.selected { background: color-mix(in srgb, var(--p) 10%, transparent); }
+@media (hover: hover) and (pointer: fine) { .text-action:hover { background: color-mix(in srgb, var(--p) 10%, transparent); } }
 .redesign-overview .markdown, .redesign-overview > p { margin-top: 10px; font-size: 12px; line-height: 1.65; }
 .itinerary-section { margin-top: 4px; }
 .section-actions { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; font-weight: 700; }
@@ -339,7 +347,8 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .redesign-stop-list { position: relative; display: grid; gap: 3px; margin-top: 10px; }
 .redesign-stop-list::before { position: absolute; top: 23px; bottom: 23px; left: 18px; width: 1px; background: color-mix(in srgb, var(--p) 33%, var(--line)); content: ""; }
 .redesign-stop-row { position: relative; z-index: 1; display: flex; min-width: 0; align-items: center; gap: 5px; border: 1px solid transparent; border-radius: 13px; }
-.redesign-stop-row:hover, .redesign-stop-row.selected { border-color: color-mix(in srgb, var(--p) 40%, var(--line)); background: color-mix(in srgb, var(--p) 9%, var(--surface)); }
+.redesign-stop-row.selected { border-color: color-mix(in srgb, var(--p) 40%, var(--line)); background: color-mix(in srgb, var(--p) 9%, var(--surface)); }
+@media (hover: hover) and (pointer: fine) { .redesign-stop-row:hover { border-color: color-mix(in srgb, var(--p) 40%, var(--line)); background: color-mix(in srgb, var(--p) 9%, var(--surface)); } }
 .redesign-stop-main { display: flex; min-width: 0; flex: 1; align-items: center; gap: 9px; padding: 8px 5px; border: 0; text-align: left; color: var(--ink); background: transparent; }
 .redesign-stop-main > span:nth-child(2) { display: grid; min-width: 0; flex: 1; gap: 3px; }
 .redesign-stop-main strong, .redesign-stop-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -349,12 +358,12 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .redesign-stop-row.selected .stop-number { background: var(--accent); }
 .row-chevron { flex: 0 0 auto; color: var(--muted); font-size: 20px; }
 .stop-delete-button { display: grid; flex: 0 0 30px; width: 30px; height: 30px; place-items: center; margin-right: 3px; border: 0; border-radius: 9px; color: var(--muted); background: transparent; font-size: 17px; }
-.stop-delete-button:hover { color: var(--md-error); background: color-mix(in srgb, var(--md-error) 10%, transparent); }
+@media (hover: hover) and (pointer: fine) { .stop-delete-button:hover { color: var(--md-error); background: color-mix(in srgb, var(--md-error) 10%, transparent); } }
 .add-place-action { display: inline-flex; width: 100%; min-height: 39px; align-items: center; justify-content: center; gap: 6px; margin-top: 11px; border: 1px dashed var(--line); border-radius: 11px; color: var(--p); background: transparent; font-size: 11px; font-weight: 900; }
-.add-place-action:hover { border-color: var(--p); background: color-mix(in srgb, var(--p) 8%, transparent); }
+@media (hover: hover) and (pointer: fine) { .add-place-action:hover { border-color: var(--p); background: color-mix(in srgb, var(--p) 8%, transparent); } }
 .panel-data-actions { display: flex; gap: 6px; margin-top: 18px; padding-top: 13px; border-top: 1px solid var(--line); flex-wrap: wrap; }
 .panel-data-actions button { min-height: 34px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 9px; color: var(--p); background: transparent; font-size: 10px; font-weight: 800; }
-.panel-data-actions button:hover { border-color: var(--p); background: color-mix(in srgb, var(--p) 8%, transparent); }
+@media (hover: hover) and (pointer: fine) { .panel-data-actions button:hover { border-color: var(--p); background: color-mix(in srgb, var(--p) 8%, transparent); } }
 
 /* Search is a contextual page inside the same workspace surface. */
 .panel-search-scroll { padding-top: 13px; }
@@ -384,9 +393,9 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .detail-more-wrap { position: relative; }
 .detail-more-menu { position: absolute; z-index: 80; top: calc(100% + 6px); right: 0; display: grid; min-width: 142px; gap: 3px; padding: 5px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); box-shadow: 0 14px 32px color-mix(in srgb, var(--ink) 22%, transparent); }
 .detail-more-menu button { min-height: 38px; padding: 8px 10px; border: 0; border-radius: 9px; text-align: left; color: var(--ink); background: transparent; font-size: 11px; font-weight: 800; }
-.detail-more-menu button:hover { color: var(--p); background: color-mix(in srgb, var(--p) 9%, var(--surface)); }
+@media (hover: hover) and (pointer: fine) { .detail-more-menu button:hover { color: var(--p); background: color-mix(in srgb, var(--p) 9%, var(--surface)); } }
 .detail-more-menu .danger-menu-item { color: var(--md-error); }
-.detail-more-menu .danger-menu-item:hover { background: color-mix(in srgb, var(--md-error) 9%, transparent); }
+@media (hover: hover) and (pointer: fine) { .detail-more-menu .danger-menu-item:hover { background: color-mix(in srgb, var(--md-error) 9%, transparent); } }
 .detail-back-button, .detail-more-button { display: inline-flex; min-height: 37px; align-items: center; gap: 3px; border: 1px solid var(--line); border-radius: 10px; color: var(--p); background: transparent; font-size: 11px; font-weight: 900; }
 .detail-back-button { padding: 5px 9px 5px 5px; }
 .detail-back-button span { font-size: 23px; line-height: 14px; }
@@ -394,7 +403,7 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .detail-topbar-actions { display: flex; align-items: center; gap: 5px; }
 .detail-sheet-toggle { display: none; width: 37px; height: 37px; place-items: center; border: 1px solid var(--line); border-radius: 10px; color: var(--p); background: transparent; }
 .detail-sheet-toggle ion-icon { font-size: 17px; }
-.detail-back-button:hover, .detail-more-button:hover, .detail-sheet-toggle:hover { border-color: var(--p); background: color-mix(in srgb, var(--p) 8%, transparent); }
+@media (hover: hover) and (pointer: fine) { .detail-back-button:hover, .detail-more-button:hover, .detail-sheet-toggle:hover { border-color: var(--p); background: color-mix(in srgb, var(--p) 8%, transparent); } }
 .detail-kicker { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 19px 0 0; color: var(--p); font-size: 10px; font-weight: 900; letter-spacing: .1em; text-transform: uppercase; }
 .detail-kicker span:last-child { padding: 5px 7px; border-radius: 999px; letter-spacing: 0; color: var(--muted); background: var(--surface); font-size: 10px; text-transform: none; }
 .redesign-detail-scroll > h1 { margin: 7px 0 0; color: var(--ink); font-size: 30px; letter-spacing: -.06em; }
@@ -406,7 +415,7 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .detail-primary-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin-top: 13px; }
 .detail-navigation-button { display: inline-flex; min-width: 0; min-height: 48px; align-items: center; justify-content: center; gap: 7px; padding: 10px 11px; border: 1px solid var(--p); border-radius: 14px; color: var(--p); background: transparent; font-size: 12px; font-weight: 900; }
 .detail-navigation-button ion-icon { flex: 0 0 auto; font-size: 17px; }
-.detail-navigation-button:hover { color: var(--md-on-primary); background: var(--p); }
+@media (hover: hover) and (pointer: fine) { .detail-navigation-button:hover { color: var(--md-on-primary); background: var(--p); } }
 .detail-weather { display: flex; min-height: 54px; align-items: center; gap: 9px; margin-top: 16px; padding: 10px 11px; border-radius: 14px; color: var(--p); background: color-mix(in srgb, #4f7fa3 12%, var(--surface)); }
 .detail-weather > ion-icon { flex: 0 0 auto; font-size: 20px; }
 .detail-weather > span { display: grid; min-width: 0; flex: 1; gap: 3px; }
@@ -419,7 +428,7 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .detail-section-help { margin: 8px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .detail-child-list { display: grid; gap: 3px; margin-top: 9px; }
 .detail-child-row { display: flex; width: 100%; min-width: 0; align-items: center; gap: 8px; padding: 9px 2px; border: 0; border-bottom: 1px solid color-mix(in srgb, var(--line) 62%, transparent); text-align: left; color: var(--ink); background: transparent; }
-.detail-child-row:hover { color: var(--p); }
+@media (hover: hover) and (pointer: fine) { .detail-child-row:hover { color: var(--p); } }
 .detail-child-row > span:nth-child(2) { display: grid; min-width: 0; flex: 1; gap: 3px; }
 .detail-child-row strong, .detail-child-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .detail-child-row strong { font-size: 11px; }
@@ -429,7 +438,7 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .detail-parent-button { width: 100%; min-height: 40px; margin-top: 18px; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 11px; text-align: left; color: var(--p); background: transparent; font-size: 10px; font-weight: 900; }
 .detail-section .markdown, .detail-section > p { margin-top: 9px; color: var(--muted); font-size: 12px; line-height: 1.7; }
 .detail-danger-button { width: 100%; min-height: 38px; margin-top: 22px; border: 1px solid color-mix(in srgb, var(--md-error) 58%, var(--line)); border-radius: 11px; color: var(--md-error); background: transparent; font-size: 11px; font-weight: 900; }
-.detail-danger-button:hover { background: color-mix(in srgb, var(--md-error) 9%, transparent); }
+@media (hover: hover) and (pointer: fine) { .detail-danger-button:hover { background: color-mix(in srgb, var(--md-error) 9%, transparent); } }
 .redesign-editor { width: 100%; min-height: 110px; margin-top: 9px; padding: 10px; border: 1px solid var(--line); border-radius: 11px; outline: none; resize: vertical; color: var(--ink); background: var(--surface); font-size: 12px; line-height: 1.6; }
 .redesign-editor:focus, .redesign-search-form input:focus, .redesign-search-form select:focus, .redesign-plan-controls select:focus { border-color: var(--p); box-shadow: 0 0 0 3px color-mix(in srgb, var(--p) 16%, transparent); }
 .editor-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
@@ -542,11 +551,12 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .settings-header h2 { margin: 4px 0 0; color: var(--ink); font-size: 31px; letter-spacing: -.05em; }
 .settings-header p { max-width: 620px; margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
 .settings-close { display: grid; flex: 0 0 auto; width: 40px; height: 40px; place-items: center; border: 1px solid var(--line); border-radius: 12px; color: var(--muted); background: var(--surface); font-size: 24px; }
-.settings-close:hover { border-color: var(--p); color: var(--p); }
+@media (hover: hover) and (pointer: fine) { .settings-close:hover { border-color: var(--p); color: var(--p); } }
 .settings-layout { display: grid; min-height: 0; flex: 1; overflow: hidden; grid-template-columns: 210px minmax(0, 1fr); }
 .settings-nav { display: grid; align-content: start; gap: 5px; padding: 20px 13px; border-right: 1px solid var(--line); background: var(--md-surface-container-low); }
 .settings-nav button { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 0 8px; min-height: 58px; align-items: center; padding: 9px 10px; border: 1px solid transparent; border-radius: 14px; text-align: left; color: var(--muted); background: transparent; }
-.settings-nav button:hover, .settings-nav button.active { border-color: color-mix(in srgb, var(--p) 34%, var(--line)); color: var(--p); background: color-mix(in srgb, var(--p) 11%, var(--surface)); }
+.settings-nav button.active { border-color: color-mix(in srgb, var(--p) 34%, var(--line)); color: var(--p); background: color-mix(in srgb, var(--p) 11%, var(--surface)); }
+@media (hover: hover) and (pointer: fine) { .settings-nav button:hover { border-color: color-mix(in srgb, var(--p) 34%, var(--line)); color: var(--p); background: color-mix(in srgb, var(--p) 11%, var(--surface)); } }
 .settings-nav-icon { display: grid; grid-row: 1 / 3; width: 28px; height: 28px; place-items: center; border-radius: 9px; color: var(--p); background: color-mix(in srgb, var(--p) 12%, var(--surface)); font-size: 16px; font-weight: 900; }
 .settings-nav button > span:nth-child(2) { font-size: 12px; font-weight: 900; }
 .settings-nav small { color: var(--muted); font-size: 10px; }
@@ -559,7 +569,8 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .settings-section-heading p { margin: 2px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
 .settings-choice-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
 .settings-choice-grid button { display: grid; min-height: 115px; align-content: start; gap: 8px; padding: 13px; border: 1px solid var(--line); border-radius: 15px; text-align: left; color: var(--ink); background: var(--surface); }
-.settings-choice-grid button:hover, .settings-choice-grid button.selected { border-color: var(--p); box-shadow: 0 0 0 2px color-mix(in srgb, var(--p) 13%, transparent); background: color-mix(in srgb, var(--p) 8%, var(--surface)); }
+.settings-choice-grid button.selected { border-color: var(--p); box-shadow: 0 0 0 2px color-mix(in srgb, var(--p) 13%, transparent); background: color-mix(in srgb, var(--p) 8%, var(--surface)); }
+@media (hover: hover) and (pointer: fine) { .settings-choice-grid button:hover { border-color: var(--p); box-shadow: 0 0 0 2px color-mix(in srgb, var(--p) 13%, transparent); background: color-mix(in srgb, var(--p) 8%, var(--surface)); } }
 .settings-choice-grid strong { font-size: 13px; }
 .settings-choice-grid small { color: var(--muted); font-size: 10px; line-height: 1.5; }
 .settings-note { display: flex; gap: 8px; margin-top: 16px; padding: 12px; border-radius: 13px; color: var(--muted); background: var(--md-surface-container-low); font-size: 11px; line-height: 1.55; }
@@ -616,7 +627,8 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 /* Unified custom select: closed controls and option menus use the same semantic surfaces. */
 .ui-select { position: relative; width: 100%; min-width: 0; }
 .ui-select-trigger { display: flex; width: 100%; min-height: 42px; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px 8px 11px; border: 1px solid var(--line); border-radius: 11px; color: var(--ink); background: var(--surface); font-size: 12px; font-weight: 800; text-align: left; }
-.ui-select-trigger:hover, .ui-select.open .ui-select-trigger { border-color: var(--p); box-shadow: 0 0 0 3px color-mix(in srgb, var(--p) 12%, transparent); }
+.ui-select.open .ui-select-trigger { border-color: var(--p); box-shadow: 0 0 0 3px color-mix(in srgb, var(--p) 12%, transparent); }
+@media (hover: hover) and (pointer: fine) { .ui-select-trigger:hover { border-color: var(--p); box-shadow: 0 0 0 3px color-mix(in srgb, var(--p) 12%, transparent); } }
 .ui-select.disabled .ui-select-trigger { cursor: not-allowed; opacity: .48; }
 .ui-select-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ui-select-chevron { display: grid; flex: 0 0 20px; width: 20px; height: 20px; place-items: center; color: var(--p); font-size: 17px; line-height: 1; transition: transform .16s ease; }
@@ -626,7 +638,8 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .ui-select-option > span:first-child { display: grid; min-width: 0; gap: 2px; }
 .ui-select-option strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .ui-select-option small { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
-.ui-select-option:hover, .ui-select-option.active, .ui-select-option.selected { color: var(--p); background: color-mix(in srgb, var(--p) 10%, var(--surface)); }
+.ui-select-option.active, .ui-select-option.selected { color: var(--p); background: color-mix(in srgb, var(--p) 10%, var(--surface)); }
+@media (hover: hover) and (pointer: fine) { .ui-select-option:hover { color: var(--p); background: color-mix(in srgb, var(--p) 10%, var(--surface)); } }
 .ui-select-option:disabled { cursor: not-allowed; opacity: .45; }
 .ui-select-check { display: grid; flex: 0 0 20px; width: 20px; height: 20px; place-items: center; border-radius: 50%; color: var(--md-on-primary); background: var(--p); font-size: 11px; font-weight: 900; }
 

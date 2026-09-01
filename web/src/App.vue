@@ -395,6 +395,42 @@ let sheetDragCleanup: (() => void) | null = null
 let sheetDragReleaseTimer: number | null = null
 let suppressSheetClick = false
 
+type TouchGestureState = { pointerId: number; startX: number; startY: number; moved: boolean; target: EventTarget | null }
+let touchGesture: TouchGestureState | null = null
+
+function isEditableTouchTarget(target: EventTarget | null) {
+  const element = target instanceof Element ? target : null
+  return Boolean(element?.closest('input, textarea, select, [contenteditable="true"], [contenteditable=""]'))
+}
+
+function blurNonEditableTouchFocus() {
+  const active = document.activeElement
+  if (active instanceof HTMLElement && !isEditableTouchTarget(active)) active.blur()
+}
+
+function handleTouchPointerDown(event: PointerEvent) {
+  if (event.pointerType === 'mouse') return
+  document.documentElement.classList.add('journey-touch-gesture')
+  touchGesture = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, moved: false, target: event.target }
+}
+
+function handleTouchPointerMove(event: PointerEvent) {
+  if (!touchGesture || touchGesture.pointerId !== event.pointerId || touchGesture.moved) return
+  if (Math.hypot(event.clientX - touchGesture.startX, event.clientY - touchGesture.startY) < 8) return
+  touchGesture.moved = true
+  if (!isEditableTouchTarget(touchGesture.target)) blurNonEditableTouchFocus()
+}
+
+function finishTouchPointer(event: PointerEvent) {
+  if (!touchGesture || touchGesture.pointerId !== event.pointerId) return
+  const gesture = touchGesture
+  touchGesture = null
+  document.documentElement.classList.remove('journey-touch-gesture')
+  if (isEditableTouchTarget(gesture.target)) return
+  if (gesture.moved) blurNonEditableTouchFocus()
+  else window.setTimeout(blurNonEditableTouchFocus, 0)
+}
+
 function cycleSheetBreakpoint(event: MouseEvent) {
   if (suppressSheetClick) {
     suppressSheetClick = false
@@ -1586,6 +1622,10 @@ onMounted(() => {
   window.addEventListener('popstate', handleNavigationPopState)
   window.addEventListener('keydown', handleGlobalKeyDown)
   window.addEventListener('resize', handleViewportResize)
+  window.addEventListener('pointerdown', handleTouchPointerDown, true)
+  window.addEventListener('pointermove', handleTouchPointerMove, true)
+  window.addEventListener('pointerup', finishTouchPointer, true)
+  window.addEventListener('pointercancel', finishTouchPointer, true)
   applyTheme(); mediaQuery = window.matchMedia('(prefers-color-scheme: dark)'); mediaQuery.addEventListener?.('change', systemThemeChanged); if (shareMode) void loadSharedTrip(); else loadTrips()
 })
 onUnmounted(() => {
@@ -1593,6 +1633,12 @@ onUnmounted(() => {
   window.removeEventListener('popstate', handleNavigationPopState)
   window.removeEventListener('keydown', handleGlobalKeyDown)
   window.removeEventListener('resize', handleViewportResize)
+  window.removeEventListener('pointerdown', handleTouchPointerDown, true)
+  window.removeEventListener('pointermove', handleTouchPointerMove, true)
+  window.removeEventListener('pointerup', finishTouchPointer, true)
+  window.removeEventListener('pointercancel', finishTouchPointer, true)
+  touchGesture = null
+  document.documentElement.classList.remove('journey-touch-gesture')
   sheetDragCleanup?.()
   if (sheetDragReleaseTimer !== null) { window.clearTimeout(sheetDragReleaseTimer); sheetDragReleaseTimer = null }
   sheetDragActive.value = false
