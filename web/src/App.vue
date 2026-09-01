@@ -660,8 +660,24 @@ function navigateBackFromSubStop() {
   navigateBackTo({ layer: 'stop', tripID: selected.value.id, stopID: selectedStopId.value, day: selectedDay.value, sheet: 'half' })
 }
 
+function closeDesktopStopDetail() {
+  selectedStopId.value = ''
+  selectedSubStopId.value = ''
+  detailMoreOpen.value = false
+  descriptionEditing.value = false
+  descriptionFullscreen.value = false
+  descriptionDraft.value = ''
+  descriptionEditorMode.value = 'edit'
+  syncNavigationURL('replace')
+  void renderMap()
+}
+
 function navigateBackFromStop() {
   if (!selected.value) return
+  if (window.matchMedia('(min-width: 901px)').matches) {
+    closeDesktopStopDetail()
+    return
+  }
   navigateBackTo({ layer: 'trip', tripID: selected.value.id, day: selectedDay.value, sheet: 'half' })
 }
 
