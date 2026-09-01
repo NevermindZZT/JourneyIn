@@ -118,7 +118,7 @@ const shareCopyMessage = ref('')
 const shareNoticeVisible = ref(false)
 const actionLoading = ref(false)
 const settingsOpen = ref(false)
-type SettingsSection = 'appearance' | 'connection' | 'maps' | 'search' | 'sharing' | 'mcp'
+type SettingsSection = 'appearance' | 'connection' | 'maps' | 'search' | 'sharing' | 'mcp' | 'about'
 type MarkdownEditorMode = 'edit' | 'preview'
 const settingsSection = ref<SettingsSection>('appearance')
 const newTripOpen = ref(false)
@@ -287,6 +287,7 @@ const selectedTarget = computed<Stop | SubStop | null>(() => selectedSubStop.val
 function stopDate(stop: Stop | SubStop) { return tripDocument.value?.days.find(day => day.stops.some(item => item.id === stop.id || item.children?.some(child => child.id === stop.id)))?.date || '日期待定' }
 function dayForStop(stop: Stop | SubStop) { return tripDocument.value?.days.find(day => day.stops.some(item => item.id === stop.id || item.children?.some(child => child.id === stop.id))) || null }
 const themeLabel = computed(() => theme.value === 'system' ? '跟随系统' : theme.value === 'dark' ? '深色' : '浅色')
+const displayVersion = computed(() => capabilities.value?.version || APP_VERSION)
 
 function apiFetch(input: RequestInfo | URL, init: RequestInit = {}) {
   const headers = new Headers(init.headers)
@@ -1807,6 +1808,7 @@ onUnmounted(() => {
               <button type="button" :class="{ active: settingsSection === 'search' }" @click="settingsSection = 'search'"><span class="settings-nav-icon">⌕</span><span>地点检索</span><small>搜索优先级</small></button>
               <button type="button" :class="{ active: settingsSection === 'sharing' }" @click="settingsSection = 'sharing'"><span class="settings-nav-icon">↗</span><span>分享</span><small>链接与权限</small></button>
               <button type="button" :class="{ active: settingsSection === 'mcp' }" @click="settingsSection = 'mcp'"><span class="settings-nav-icon">◇</span><span>MCP</span><small>Agent 连接</small></button>
+              <button type="button" :class="{ active: settingsSection === 'about' }" @click="settingsSection = 'about'"><span class="settings-nav-icon">ⓘ</span><span>关于</span><small>版本与项目</small></button>
             </nav>
             <div class="settings-body">
               <section v-if="settingsSection === 'appearance'" class="settings-page-section">
@@ -1837,6 +1839,13 @@ onUnmounted(() => {
                 <div class="settings-section-heading"><span class="eyebrow">ONLINE SHARING</span><h3>在线分享</h3><p>集中管理当前行程的只读分享链接；分享状态不会遮挡地图。</p></div>
                 <div class="settings-card settings-share-card"><div class="settings-card-heading"><div><strong>{{ selected?.title || '当前行程' }}</strong><small>持有链接即可查看当前行程快照</small></div><span class="provider-status">{{ shareURL ? '已分享' : '未分享' }}</span></div><template v-if="selected"><a v-if="shareURL" class="settings-share-url" :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><p v-if="shareExpiresAt" class="settings-share-expiry">有效期至 {{ new Date(shareExpiresAt).toLocaleString() }}</p><p v-if="!shareURL" class="settings-help">当前行程还没有在线分享；点击下方按钮创建一个只读链接。</p><div class="settings-actions"><button v-if="shareURL" class="primary-action" type="button" @click="copyShareURL">复制链接</button><button v-if="shareURL && shareID" class="secondary-action" type="button" :disabled="actionLoading" @click="revokeShare">撤销分享</button><button v-else class="primary-action" type="button" :disabled="actionLoading" @click="createShare">{{ actionLoading ? '创建中…' : '在线分享' }}</button></div><p v-if="shareCopyMessage" class="settings-feedback">{{ shareCopyMessage }}</p></template><p v-else class="settings-help">请先选择一条行程，再管理它的在线分享链接。</p></div>
                 <div class="settings-note"><span class="settings-note-mark">i</span><span>分享链接是只读快照，默认有效期为 7 天。撤销后，持有链接的人将无法继续查看。</span></div>
+              </section>
+
+              <section v-else-if="settingsSection === 'about'" class="settings-page-section settings-about-section">
+                <div class="settings-section-heading"><span class="eyebrow">ABOUT JOURNEYIN</span><h3>关于 JourneyIn</h3><p>了解当前版本、项目作者和 JourneyIn 的开源项目信息。</p></div>
+                <div class="settings-card settings-about-hero"><span class="settings-about-mark">✦</span><div><strong>JourneyIn</strong><p>{{ APP_SLOGAN }}</p><a :href="GITHUB_URL" target="_blank" rel="noopener noreferrer">访问项目主页 ↗</a></div></div>
+                <div class="settings-about-meta"><div class="settings-about-meta-item"><span>版本</span><strong>v{{ displayVersion }}</strong></div><div class="settings-about-meta-item"><span>作者</span><strong>NevermindZZT</strong></div><div class="settings-about-meta-item"><span>开源协议</span><strong>MIT License</strong></div></div>
+                <div class="settings-card settings-about-description"><span class="eyebrow">PROJECT INTRODUCTION</span><p>JourneyIn 是一款地图优先的旅行规划工具，将地点、顺序、路线、天气和 Markdown 说明组织在同一份可保存的行程中。</p><p>项目提供百度地图与高德地图 Provider、Trip JSON、只读分享、同步、MCP 和 Docker 部署能力，帮助你把下一段旅程清晰地放到地图上。</p></div>
               </section>
 
               <section v-else class="settings-page-section">

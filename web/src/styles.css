@@ -553,7 +553,7 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .settings-close { display: grid; flex: 0 0 auto; width: 40px; height: 40px; place-items: center; border: 1px solid var(--line); border-radius: 12px; color: var(--muted); background: var(--surface); font-size: 24px; }
 @media (hover: hover) and (pointer: fine) { .settings-close:hover { border-color: var(--p); color: var(--p); } }
 .settings-layout { display: grid; min-height: 0; flex: 1; overflow: hidden; grid-template-columns: 210px minmax(0, 1fr); }
-.settings-nav { display: grid; align-content: start; gap: 5px; padding: 20px 13px; border-right: 1px solid var(--line); background: var(--md-surface-container-low); }
+.settings-nav { display: grid; align-content: start; gap: 5px; overflow-y: auto; padding: 20px 13px; border-right: 1px solid var(--line); background: var(--md-surface-container-low); scrollbar-color: var(--line) transparent; scrollbar-width: thin; }
 .settings-nav button { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 0 8px; min-height: 58px; align-items: center; padding: 9px 10px; border: 1px solid transparent; border-radius: 14px; text-align: left; color: var(--muted); background: transparent; }
 .settings-nav button.active { border-color: color-mix(in srgb, var(--p) 34%, var(--line)); color: var(--p); background: color-mix(in srgb, var(--p) 11%, var(--surface)); }
 @media (hover: hover) and (pointer: fine) { .settings-nav button:hover { border-color: color-mix(in srgb, var(--p) 34%, var(--line)); color: var(--p); background: color-mix(in srgb, var(--p) 11%, var(--surface)); } }
@@ -604,6 +604,22 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .settings-mcp-card > div:last-child { min-width: 0; }
 .settings-mcp-card code { display: block; margin-top: 5px; color: var(--p); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
 .settings-mcp-card p { margin: 11px 0 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.settings-about-hero { display: flex; align-items: center; gap: 15px; padding: 18px; }
+.settings-about-mark { display: grid; flex: 0 0 52px; width: 52px; height: 52px; place-items: center; border-radius: 17px; color: var(--md-on-primary); background: var(--p); box-shadow: 0 9px 20px color-mix(in srgb, var(--p) 22%, transparent); font-size: 25px; font-weight: 900; }
+.settings-about-hero > div { min-width: 0; }
+.settings-about-hero strong { display: block; color: var(--ink); font-size: 20px; letter-spacing: -.04em; }
+.settings-about-hero p { margin: 5px 0 0; color: var(--muted); font-size: 11px; }
+.settings-about-hero a { margin-top: 10px; font-size: 11px; }
+.settings-about-meta { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; margin-top: 12px; }
+.settings-about-meta-item { display: grid; min-width: 0; gap: 7px; padding: 13px; border: 1px solid var(--line); border-radius: 14px; background: var(--md-surface-container-low); }
+.settings-about-meta-item span { color: var(--muted); font-size: 10px; font-weight: 800; }
+.settings-about-meta-item strong { overflow: hidden; color: var(--ink); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.settings-about-description { display: grid; gap: 9px; margin-top: 12px; }
+.settings-about-description p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.7; }
+@media (max-width: 720px) {
+  .settings-about-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .settings-about-meta-item:last-child { grid-column: 1 / -1; }
+}
 
 @media (max-width: 720px) {
   .settings-backdrop { place-items: end center; padding: 8px; }
@@ -611,7 +627,7 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
   .settings-header { flex: 0 0 auto; padding: 22px 20px 18px; }
   .settings-header h2 { font-size: 26px; }
   .settings-layout { display: flex; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; }
-  .settings-nav { flex: 0 0 auto; display: flex; gap: 6px; overflow-x: auto; padding: 10px 12px; border-right: 0; border-bottom: 1px solid var(--line); scrollbar-width: none; }
+  .settings-nav { flex: 0 0 auto; display: flex; gap: 6px; overflow-x: auto; overflow-y: hidden; padding: 10px 12px; border-right: 0; border-bottom: 1px solid var(--line); scrollbar-width: none; }
   .settings-nav::-webkit-scrollbar { display: none; }
   .settings-nav button { display: inline-flex; flex: 0 0 auto; min-height: 40px; align-items: center; gap: 6px; padding: 6px 9px; border-radius: 11px; }
   .settings-nav-icon { width: 23px; height: 23px; font-size: 13px; }
