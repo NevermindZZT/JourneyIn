@@ -51,6 +51,7 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
 
 .map-canvas { position: absolute; inset: 0; overflow: hidden; background: var(--md-map); }
+.amap-marker-label { padding: 0 !important; border: 0 !important; background: transparent !important; }
 #map { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 100%; }
 .map-fallback { position: absolute; inset: 0; display: grid; place-items: center; align-content: center; gap: 12px; padding: 40px; text-align: center; color: var(--p); background: radial-gradient(circle at 25% 22%, color-mix(in srgb, var(--p) 13%, transparent), transparent 28%), repeating-linear-gradient(30deg, color-mix(in srgb, var(--p) 10%, var(--md-map)) 0 2px, transparent 2px 40px), var(--md-map); }
 .map-fallback ion-icon { font-size: 64px; }
@@ -227,7 +228,8 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .redesign-notices .global-error, .redesign-notices .share-banner { color: var(--ink); background: color-mix(in srgb, var(--panel) 92%, transparent); }
 .redesign-notices .global-error { color: var(--md-error); }
 
-.workspace-panel, .stop-detail-panel { border: 1px solid color-mix(in srgb, var(--line) 78%, transparent); color: var(--ink); background: color-mix(in srgb, var(--panel) 95%, transparent); box-shadow: 0 18px 60px color-mix(in srgb, var(--ink) 23%, transparent); backdrop-filter: blur(22px); }
+.workspace-panel, .stop-detail-panel { border: 1px solid color-mix(in srgb, var(--line) 78%, transparent); color: var(--ink); background: color-mix(in srgb, var(--panel) 95%, transparent); box-shadow: 0 18px 60px color-mix(in srgb, var(--ink) 23%, transparent); backdrop-filter: blur(22px); transition: height .2s ease, top .2s ease; }
+.workspace-panel.is-sheet-dragging, .stop-detail-panel.is-sheet-dragging { transition: none !important; }
 .workspace-panel { position: absolute; z-index: 30; top: 18px; bottom: 18px; left: 18px; display: flex; width: min(392px, calc(100vw - 36px)); flex-direction: column; overflow: hidden; border-radius: 24px; }
 .workspace-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 19px 18px 14px; border-bottom: 1px solid var(--line); }
 .workspace-panel-kicker { display: flex; min-width: 0; align-items: center; gap: 7px; }
@@ -252,7 +254,8 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .journey-day-tabs button { display: inline-flex; flex: 0 0 auto; min-height: 32px; align-items: center; gap: 4px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 9px; color: var(--muted); background: transparent; font-size: 10px; font-weight: 900; white-space: nowrap; }
 .journey-day-tabs button small { font-size: 9px; font-weight: 700; }
 .journey-day-tabs button:hover, .journey-day-tabs button.selected { border-color: var(--p); color: var(--md-on-primary); background: var(--p); }
-.workspace-panel.sheet-peek .journey-view-tabs, .workspace-panel.sheet-peek .journey-day-tabs { display: none; }
+.workspace-panel.sheet-peek .journey-view-tabs { display: none; }
+.workspace-panel.sheet-peek .journey-day-tabs { display: none; }
 .sheet-handle { display: none; width: 100%; height: 25px; place-items: center; padding: 0; border: 0; background: transparent; touch-action: none; }
 .sheet-handle span { display: block; width: 40px; height: 4px; border-radius: 999px; background: color-mix(in srgb, var(--muted) 45%, transparent); }
 .panel-scroll { min-height: 0; flex: 1; overflow-x: hidden; overflow-y: auto; padding: 15px 17px 20px; scrollbar-color: var(--line) transparent; scrollbar-width: thin; }
@@ -414,7 +417,8 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
   .redesign-notices { top: 106px; right: 10px; left: 10px; width: auto; }
   .workspace-panel { top: auto; right: 8px; bottom: max(8px, env(safe-area-inset-bottom)); left: 8px; width: auto; height: 53%; max-height: 53%; border-radius: 24px; }
   .workspace-panel.sheet-peek { height: 154px; max-height: 154px; }
-  .workspace-panel.sheet-expanded { top: 60px; bottom: max(8px, env(safe-area-inset-bottom)); height: auto; max-height: none; }
+   .workspace-panel.sheet-peek .journey-day-tabs { display: flex; padding: 7px 15px 8px; border-bottom: 0; }
+  .workspace-panel.sheet-expanded { top: 60px; bottom: max(8px, env(safe-area-inset-bottom)); height: calc(100% - 68px); max-height: none; }
   .workspace-panel .sheet-handle { display: grid; }
   .workspace-panel.sheet-peek .itinerary-scroll { display: none; }
   .workspace-panel.sheet-peek .peek-summary { display: flex; }
@@ -430,11 +434,17 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
   .plan-button { flex: 1 1 100%; }
   .redesign-stop-main { padding-block: 7px; }
   .stop-detail-panel { top: 60px; right: 8px; bottom: max(8px, env(safe-area-inset-bottom)); left: 8px; width: auto; max-height: none; border-radius: 24px; }
-  .stop-detail-panel.sheet-half { top: auto; height: 53%; max-height: 53%; }
-  .stop-detail-panel.sheet-expanded { top: 60px; height: auto; max-height: none; }
+  .stop-detail-panel.sheet-peek { top: auto; height: 154px; max-height: 154px; }
+   .stop-detail-panel.sheet-half { top: auto; height: 53%; max-height: 53%; }
+  .stop-detail-panel.sheet-expanded { top: 60px; height: calc(100% - 68px); max-height: none; }
+   .stop-detail-panel.sheet-peek .redesign-detail-scroll { overflow: hidden; padding: 0 16px 12px; }
+   .stop-detail-panel.sheet-peek .detail-kicker { margin-top: 6px; }
+   .stop-detail-panel.sheet-peek .redesign-detail-scroll > h1 { margin-top: 2px; font-size: 22px; }
+   .stop-detail-panel.sheet-peek .detail-address { margin-top: 2px; }
+   .stop-detail-panel.sheet-peek .detail-date, .stop-detail-panel.sheet-peek .detail-location, .stop-detail-panel.sheet-peek .detail-primary-actions, .stop-detail-panel.sheet-peek .detail-weather, .stop-detail-panel.sheet-peek .detail-section, .stop-detail-panel.sheet-peek .detail-parent-button, .stop-detail-panel.sheet-peek .detail-danger-button { display: none; }
   .detail-sheet-toggle { display: grid; }
   .detail-sheet-handle { display: grid; height: 25px; place-items: center; }
-  .detail-sheet-handle button { display: grid; width: 100%; height: 25px; place-items: center; border: 0; background: transparent; }
+  .detail-sheet-handle button { display: grid; width: 100%; height: 25px; place-items: center; border: 0; background: transparent; touch-action: none; }
   .detail-sheet-handle span { display: block; width: 40px; height: 4px; border-radius: 999px; background: color-mix(in srgb, var(--muted) 45%, transparent); }
   .redesign-detail-scroll { padding: 8px 16px 22px; }
   .redesign-detail-scroll > h1 { font-size: 26px; }

@@ -134,6 +134,16 @@ type JourneySection = 'overview' | 'itinerary'
 const journeySection = ref<JourneySection>('itinerary')
 const tripMenuID = ref('')
 const detailMoreOpen = ref(false)
+const sheetDragActive = ref(false)
+const sheetDragHeight = ref<number | null>(null)
+const sheetDragStyle = computed<Record<string, string> | undefined>(() => {
+  if (sheetDragHeight.value === null) return undefined
+  return {
+    height: sheetDragHeight.value + 'px',
+    maxHeight: 'none',
+    top: sheetDragActive.value ? 'auto' : sheetBreakpoint.value === 'expanded' ? '60px' : 'auto',
+  }
+})
 const navigationApplying = ref(false)
 let navigationSequence = 0
 const mapType = ref<'normal' | 'satellite'>((localStorage.getItem('journeyin.mapType') as 'normal' | 'satellite') || 'normal')
@@ -326,6 +336,26 @@ function ensureNavigationHistory() {
   syncNavigationURL('replace', readNavigationURL())
 }
 
+const SHEET_PEEK_HEIGHT = 154
+const SHEET_TOP_OFFSET = 60
+const SHEET_BOTTOM_OFFSET = 8
+function sheetViewportHeight() { return window.visualViewport?.height || window.innerHeight }
+function sheetHeightBounds() {
+  const viewportHeight = sheetViewportHeight()
+  const max = Math.max(SHEET_PEEK_HEIGHT, viewportHeight - SHEET_TOP_OFFSET - SHEET_BOTTOM_OFFSET)
+  const half = Math.min(max, Math.max(SHEET_PEEK_HEIGHT, Math.round(viewportHeight * 0.53)))
+  return { min: SHEET_PEEK_HEIGHT, half, max }
+}
+function sheetHeightForBreakpoint(breakpoint: SheetBreakpoint) {
+  const bounds = sheetHeightBounds()
+  return breakpoint === 'peek' ? bounds.min : breakpoint === 'half' ? bounds.half : bounds.max
+}
+function nearestSheetBreakpoint(height: number) {
+  const bounds = sheetHeightBounds()
+  const options: Array<[SheetBreakpoint, number]> = [['peek', bounds.min], ['half', bounds.half], ['expanded', bounds.max]]
+  return options.reduce((closest, option) => Math.abs(option[1] - height) < Math.abs(closest[1] - height) ? option : closest)[0]
+}
+
 function setSheetBreakpoint(next: SheetBreakpoint, mode: 'push' | 'replace' = 'replace', sync = true) {
   sheetBreakpoint.value = next
   panelCollapsed.value = next === 'peek'
@@ -338,6 +368,7 @@ function setSheetBreakpoint(next: SheetBreakpoint, mode: 'push' | 'replace' = 'r
 }
 
 let sheetDragCleanup: (() => void) | null = null
+let sheetDragReleaseTimer: number | null = null
 let suppressSheetClick = false
 
 function cycleSheetBreakpoint(event: MouseEvent) {
@@ -350,7 +381,8 @@ function cycleSheetBreakpoint(event: MouseEvent) {
 }
 
 function toggleDetailSheet() {
-  setSheetBreakpoint(sheetBreakpoint.value === 'expanded' ? 'half' : 'expanded')
+  const next = sheetBreakpoint.value === 'peek' ? 'half' : sheetBreakpoint.value === 'half' ? 'expanded' : 'half'
+  setSheetBreakpoint(next)
 }
 
 function toggleDetailMore() {
@@ -369,34 +401,58 @@ function deleteSelectedPointFromMenu() {
 function startSheetDrag(event: PointerEvent) {
   if (window.matchMedia('(min-width: 901px)').matches) return
   sheetDragCleanup?.()
+  if (sheetDragReleaseTimer !== null) {
+    window.clearTimeout(sheetDragReleaseTimer)
+    sheetDragReleaseTimer = null
+  }
+  const panel = (event.currentTarget as HTMLElement | null)?.closest<HTMLElement>('.workspace-panel, .stop-detail-panel')
+  const startHeight = panel?.getBoundingClientRect().height || sheetHeightForBreakpoint(sheetBreakpoint.value)
   const startY = event.clientY
   let moved = false
+  sheetDragHeight.value = startHeight
+  sheetDragActive.value = true
   const onMove = (moveEvent: PointerEvent) => {
-    if (Math.abs(moveEvent.clientY - startY) > 8) moved = true
-    if (moved) moveEvent.preventDefault()
+    const delta = startY - moveEvent.clientY
+    if (Math.abs(delta) > 8) moved = true
+    if (!moved) return
+    moveEvent.preventDefault()
+    const bounds = sheetHeightBounds()
+    sheetDragHeight.value = Math.min(bounds.max, Math.max(bounds.min, startHeight + delta))
   }
-  const onUp = (upEvent: PointerEvent) => {
-    const delta = startY - upEvent.clientY
-    if (moved && Math.abs(delta) > 42) {
-      const next = delta > 0
-        ? sheetBreakpoint.value === 'peek' ? 'half' : 'expanded'
-        : sheetBreakpoint.value === 'expanded' ? 'half' : 'peek'
+  const onUp = () => {
+    if (moved) {
+      const currentHeight = sheetDragHeight.value ?? startHeight
+      const next = nearestSheetBreakpoint(currentHeight)
       suppressSheetClick = true
+      sheetDragActive.value = false
       setSheetBreakpoint(next)
+      sheetDragHeight.value = sheetHeightForBreakpoint(next)
+      sheetDragReleaseTimer = window.setTimeout(() => {
+        sheetDragHeight.value = null
+        sheetDragReleaseTimer = null
+      }, 220)
       window.setTimeout(() => { suppressSheetClick = false }, 0)
+    } else {
+      sheetDragActive.value = false
+      sheetDragHeight.value = null
     }
+    cleanup()
+  }
+  const onCancel = () => {
+    sheetDragActive.value = false
+    sheetDragHeight.value = null
     cleanup()
   }
   const cleanup = () => {
     window.removeEventListener('pointermove', onMove)
     window.removeEventListener('pointerup', onUp)
-    window.removeEventListener('pointercancel', cleanup)
+    window.removeEventListener('pointercancel', onCancel)
     sheetDragCleanup = null
   }
   sheetDragCleanup = cleanup
   window.addEventListener('pointermove', onMove, { passive: false })
   window.addEventListener('pointerup', onUp)
-  window.addEventListener('pointercancel', cleanup)
+  window.addEventListener('pointercancel', onCancel)
 }
 
 function navigateToList(mode: 'push' | 'replace' = 'push') {
@@ -1516,6 +1572,9 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleGlobalKeyDown)
   window.removeEventListener('resize', handleViewportResize)
   sheetDragCleanup?.()
+  if (sheetDragReleaseTimer !== null) { window.clearTimeout(sheetDragReleaseTimer); sheetDragReleaseTimer = null }
+  sheetDragActive.value = false
+  sheetDragHeight.value = null
 })
 </script>
 
@@ -1607,7 +1666,7 @@ onUnmounted(() => {
               </section>
             </div>
 
-            <aside v-if="tripDocument" class="floating-panel workspace-panel itinerary-panel" :class="['sheet-' + sheetBreakpoint, { 'panel-search-mode': panelMode === 'search' }]" aria-label="行程时间线">
+            <aside v-if="tripDocument" class="floating-panel workspace-panel itinerary-panel" :class="['sheet-' + sheetBreakpoint, { 'panel-search-mode': panelMode === 'search', 'is-sheet-dragging': sheetDragActive }]" :style="sheetDragStyle" aria-label="行程时间线">
               <button class="sheet-handle" type="button" :aria-label="sheetBreakpoint === 'peek' ? '展开行程' : '收起行程'" @pointerdown="startSheetDrag" @click="cycleSheetBreakpoint"><span></span></button>
               <header class="workspace-panel-head">
                 <div><div class="workspace-panel-kicker"><p class="eyebrow">{{ shareMode ? 'SHARED JOURNEY' : 'CURRENT JOURNEY' }}</p><span v-if="shareURL" class="share-status-tag">已分享</span></div><h1>{{ selected?.title || tripDocument.title }}</h1><p>{{ selected ? selected.start_date + ' — ' + selected.end_date : '选择一条行程查看详情' }}</p></div>
@@ -1637,10 +1696,10 @@ onUnmounted(() => {
               </div>
             </aside>
 
-            <aside v-if="selectedStop" class="details-drawer stop-detail-panel" :class="['sheet-' + sheetBreakpoint, { 'is-child-detail': Boolean(selectedSubStop) }]" aria-label="规划点详情">
-              <div class="detail-sheet-handle"><button type="button" :aria-label="sheetBreakpoint === 'expanded' ? '收起规划点详情到半屏' : '展开规划点详情'" @click="toggleDetailSheet"><span></span></button></div>
+            <aside v-if="selectedStop" class="details-drawer stop-detail-panel" :class="['sheet-' + sheetBreakpoint, { 'is-child-detail': Boolean(selectedSubStop), 'is-sheet-dragging': sheetDragActive }]" :style="sheetDragStyle" aria-label="规划点详情">
+              <div class="detail-sheet-handle"><button type="button" :aria-label="sheetBreakpoint === 'expanded' ? '收起规划点详情到最低' : sheetBreakpoint === 'peek' ? '展开规划点详情到半屏' : '收起规划点详情到最低'" @pointerdown="startSheetDrag" @click="cycleSheetBreakpoint"><span></span></button></div>
               <div class="detail-scroll redesign-detail-scroll">
-                <header class="detail-topbar"><button type="button" class="detail-back-button" @click="selectedSubStop ? navigateBackFromSubStop() : navigateBackFromStop()"><span>‹</span>{{ selectedSubStop ? '主规划点' : selectedDay === 'all' ? '行程' : 'D' + selectedDay + ' 行程' }}</button><div class="detail-topbar-actions"><button class="detail-sheet-toggle" type="button" :aria-label="sheetBreakpoint === 'expanded' ? '收起到半屏' : '展开规划点详情'" @click="toggleDetailSheet"><IonIcon :icon="sheetBreakpoint === 'expanded' ? chevronDownOutline : chevronUpOutline" /></button><div v-if="!shareMode" class="detail-more-wrap"><button type="button" class="detail-more-button" :aria-expanded="detailMoreOpen" aria-label="规划点更多操作" @click.stop="toggleDetailMore">⋯</button><div v-if="detailMoreOpen" class="detail-more-menu" role="menu"><button type="button" role="menuitem" @click="editSelectedDescriptionFromMenu">编辑地点说明</button><button type="button" role="menuitem" class="danger-menu-item" @click="deleteSelectedPointFromMenu">删除{{ selectedSubStop ? '子规划点' : '规划点' }}</button></div></div></div></header>
+                <header class="detail-topbar"><button type="button" class="detail-back-button" @click="selectedSubStop ? navigateBackFromSubStop() : navigateBackFromStop()"><span>‹</span>{{ selectedSubStop ? '主规划点' : selectedDay === 'all' ? '行程' : 'D' + selectedDay + ' 行程' }}</button><div class="detail-topbar-actions"><button class="detail-sheet-toggle" type="button" :aria-label="sheetBreakpoint === 'expanded' ? '收起到半屏' : sheetBreakpoint === 'peek' ? '展开到半屏' : '展开规划点详情'" @click="toggleDetailSheet"><IonIcon :icon="sheetBreakpoint === 'expanded' ? chevronDownOutline : chevronUpOutline" /></button><div v-if="!shareMode" class="detail-more-wrap"><button type="button" class="detail-more-button" :aria-expanded="detailMoreOpen" aria-label="规划点更多操作" @click.stop="toggleDetailMore">⋯</button><div v-if="detailMoreOpen" class="detail-more-menu" role="menu"><button type="button" role="menuitem" @click="editSelectedDescriptionFromMenu">编辑地点说明</button><button type="button" role="menuitem" class="danger-menu-item" @click="deleteSelectedPointFromMenu">删除{{ selectedSubStop ? '子规划点' : '规划点' }}</button></div></div></div></header>
                 <p class="detail-kicker"><span>{{ selectedSubStop ? 'SUB-STOP ' + selectedSubStop.sequence : 'STOP ' + selectedStop.sequence }}</span><span>{{ selectedTarget?.kind || '规划点' }}</span></p>
                 <h1>{{ selectedTarget?.title }}</h1><p class="detail-address">{{ selectedTarget?.address || '地址待解析' }}</p><p class="detail-date">{{ stopDate(selectedTarget || selectedStop) }} · {{ selectedTarget?.time_window?.arrival || '时间待定' }}{{ selectedTarget?.time_window?.departure ? ' — ' + selectedTarget.time_window.departure : '' }}</p>
                 <div class="detail-location"><span>坐标已保存</span><small>{{ pointFor(selectedTarget || selectedStop)?.crs || '未知 CRS' }} · {{ pointFor(selectedTarget || selectedStop)?.lat.toFixed(6) }}, {{ pointFor(selectedTarget || selectedStop)?.lng.toFixed(6) }}</small></div>
