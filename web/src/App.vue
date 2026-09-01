@@ -189,11 +189,22 @@ const planningMode = ref<TravelMode>('walking')
 const planningStrategy = ref('32')
 const planningProvider = ref<'baidu' | 'amap'>(localStorage.getItem('journeyin.planningProvider') === 'amap' ? 'amap' : 'baidu')
 const selectedMapProvider = ref<'baidu' | 'amap'>(localStorage.getItem('journeyin.mapProvider') === 'amap' ? 'amap' : 'baidu')
+const supportsDrivingStrategy = computed(() => planningProvider.value === 'amap')
+const availableDrivingStrategyOptions = computed(() => supportsDrivingStrategy.value ? drivingStrategyOptions : [])
 const planningLoading = ref(false)
+watch([planningProvider, planningMode], () => {
+  if (planningMode.value !== 'driving' || !supportsDrivingStrategy.value) planningStrategy.value = ''
+  else if (!drivingStrategyOptions.some(option => option.value === planningStrategy.value)) planningStrategy.value = drivingStrategyOptions[0]?.value || ''
+})
 const reorderMessage = ref('')
 const reorderMode = ref(false)
 const draggedStopID = ref('')
 const dragOverStopID = ref('')
+type PlanningPointPointerDragState = { pointerId: number; sourceID: string; startX: number; startY: number; moved: boolean; targetID: string }
+let planningPointPointerDrag: PlanningPointPointerDragState | null = null
+let planningPointPointerDragCleanup: (() => void) | null = null
+let suppressPlanningPointClick = false
+let suppressPlanningPointClickTimer: number | null = null
 let mapInstance: any = null
 let mapAPI: any = null
 let mapScriptPromise: Promise<void> | null = null
@@ -826,12 +837,15 @@ function routePoint(value: [number, number] | Coord, crs: string) { if (Array.is
 function mapRoutePointFor(value: [number, number] | Coord, crs: string, provider: 'baidu' | 'amap'): (Coord & { crs: string }) | null { const point = routePoint(value, crs); return pointForProvider({ location: { preferred: point.crs, coordinates: { [point.crs]: point } } } as unknown as Stop, provider) }
 function mapRoutePoint(value: [number, number] | Coord, crs: string): (Coord & { crs: string }) | null { return mapRoutePointFor(value, crs, 'baidu') }
 const SELECTED_STOP_ZOOM = 16
-function chooseSnapshotMetadata(leg: Leg, provider: 'baidu' | 'amap' = selectedMapProvider.value, mode: TravelMode = planningMode.value, strategy: string = mode === 'driving' ? planningStrategy.value : '') {
+function defaultRouteStrategy(provider: 'baidu' | 'amap', mode: TravelMode) {
+  return provider === 'amap' && mode === 'driving' ? planningStrategy.value : ''
+}
+function chooseSnapshotMetadata(leg: Leg, provider: 'baidu' | 'amap' = selectedMapProvider.value, mode: TravelMode = planningMode.value, strategy: string = defaultRouteStrategy(provider, mode)) {
   const candidates = (leg.snapshots || []).filter(snapshot => snapshot.provider === provider && (!snapshot.mode || snapshot.mode === mode))
   if (!strategy) return candidates[0] || null
   return candidates.find(snapshot => !snapshot.strategy || snapshot.strategy === strategy) || candidates[0] || null
 }
-function chooseSnapshot(leg: Leg, provider: 'baidu' | 'amap' = selectedMapProvider.value, mode: TravelMode = planningMode.value, strategy: string = mode === 'driving' ? planningStrategy.value : '') { return chooseSnapshotMetadata(leg, provider, mode, strategy)?.geometry && chooseSnapshotMetadata(leg, provider, mode, strategy)!.geometry!.length > 1 ? chooseSnapshotMetadata(leg, provider, mode, strategy) : null }
+function chooseSnapshot(leg: Leg, provider: 'baidu' | 'amap' = selectedMapProvider.value, mode: TravelMode = planningMode.value, strategy: string = defaultRouteStrategy(provider, mode)) { return chooseSnapshotMetadata(leg, provider, mode, strategy)?.geometry && chooseSnapshotMetadata(leg, provider, mode, strategy)!.geometry!.length > 1 ? chooseSnapshotMetadata(leg, provider, mode, strategy) : null }
 function mapFocusViewport(): { width: number; height: number; x: number; y: number } | null {
   const container = mapContainer.value
   if (!container) return null
@@ -1275,7 +1289,7 @@ async function planRoutes() {
     const day = selectedDay.value === 'all' ? undefined : tripDocument.value.days[selectedDay.value - 1]?.id
     const provider = planningProvider.value
     localStorage.setItem('journeyin.planningProvider', provider)
-    const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/plan', { method: 'POST', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision }, body: JSON.stringify({ provider, mode: planningMode.value, strategy: planningMode.value === 'driving' ? planningStrategy.value : undefined, day_id: day }) })
+    const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/plan', { method: 'POST', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision }, body: JSON.stringify({ provider, mode: planningMode.value, strategy: planningMode.value === 'driving' && supportsDrivingStrategy.value ? planningStrategy.value : undefined, day_id: day }) })
     const payload = await response.json() as { document?: TripDocument; revision?: number; stops?: number; days?: number; error?: { message?: string } }
     if (!response.ok) throw new Error(payload.error?.message || '路线生成失败')
     applyTripPayload(payload)
@@ -1423,11 +1437,65 @@ function isChildStop(stop: Stop | SubStop) {
   const parent = parentForStop(stop)
   return Boolean(parent && parent.id !== stop.id)
 }
-function toggleReorderMode() {
-  reorderMode.value = !reorderMode.value
+function clearPlanningPointClickSuppression() {
+  suppressPlanningPointClick = false
+  if (suppressPlanningPointClickTimer !== null) {
+    window.clearTimeout(suppressPlanningPointClickTimer)
+    suppressPlanningPointClickTimer = null
+  }
+}
+
+function suppressNextPlanningPointClick() {
+  suppressPlanningPointClick = true
+  if (suppressPlanningPointClickTimer !== null) window.clearTimeout(suppressPlanningPointClickTimer)
+  suppressPlanningPointClickTimer = window.setTimeout(() => {
+    suppressPlanningPointClick = false
+    suppressPlanningPointClickTimer = null
+  }, 1000)
+}
+
+function selectPlanningPointFromList(event: MouseEvent, stop: Stop | SubStop) {
+  if (suppressPlanningPointClick) {
+    event.preventDefault()
+    event.stopPropagation()
+    clearPlanningPointClickSuppression()
+    return
+  }
+  selectStop(stop)
+}
+
+function cleanupPlanningPointPointerDrag() {
+  planningPointPointerDragCleanup?.()
+  planningPointPointerDragCleanup = null
+  planningPointPointerDrag = null
+}
+
+function resetPlanningPointDragState() {
+  cleanupPlanningPointPointerDrag()
   draggedStopID.value = ''
   dragOverStopID.value = ''
-  reorderMessage.value = reorderMode.value ? '请拖动规划点到目标位置；松开鼠标后立即保存。' : ''
+}
+
+function planningPointIDAtPointer(clientX: number, clientY: number, sourceID: string) {
+  const row = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>('.redesign-stop-row[data-stop-id]')
+  const targetID = row?.dataset.stopId || ''
+  return targetID && targetID !== sourceID ? targetID : ''
+}
+
+function scrollPlanningPointListAtPointer(clientY: number) {
+  const container = document.querySelector<HTMLElement>('.itinerary-scroll')
+  if (!container) return
+  const rect = container.getBoundingClientRect()
+  const edge = 48
+  if (clientY < rect.top + edge) container.scrollTop -= Math.min(18, Math.max(5, (rect.top + edge - clientY) / 2))
+  else if (clientY > rect.bottom - edge) container.scrollTop += Math.min(18, Math.max(5, (clientY - rect.bottom + edge) / 2))
+}
+
+function toggleReorderMode() {
+  resetPlanningPointDragState()
+  clearPlanningPointClickSuppression()
+  reorderMode.value = !reorderMode.value
+  reorderMessage.value = reorderMode.value ? '拖动左侧手柄排序；电脑端拖动手柄，手机端按住手柄移动，松开后立即保存。' : ''
 }
 function findPlanningPoint(id: string): Stop | SubStop | null {
   if (!tripDocument.value) return null
@@ -1438,56 +1506,69 @@ function findPlanningPoint(id: string): Stop | SubStop | null {
   }
   return null
 }
-function startPlanningPointDrag(event: DragEvent, stop: Stop | SubStop) {
-  if (!reorderMode.value) { event.preventDefault(); return }
-  draggedStopID.value = stop.id
-  dragOverStopID.value = ''
-  if (event.dataTransfer) { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', stop.id) }
-}
-function dragOverPlanningPoint(event: DragEvent, stop: Stop | SubStop) {
-  if (!reorderMode.value || !draggedStopID.value || draggedStopID.value === stop.id) return
-  event.preventDefault()
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
-  dragOverStopID.value = stop.id
-}
-function dragLeavePlanningPoint(event: DragEvent, stop: Stop | SubStop) {
-  const current = event.currentTarget as HTMLElement | null
-  const related = event.relatedTarget as Node | null
-  if (current && related && current.contains(related)) return
-  if (dragOverStopID.value === stop.id) dragOverStopID.value = ''
-}
-function endPlanningPointDrag() {
-  draggedStopID.value = ''
-  dragOverStopID.value = ''
-}
 function startPlanningPointPointer(event: PointerEvent, stop: Stop | SubStop) {
-  if (!reorderMode.value || event.pointerType === 'mouse') return
-  event.preventDefault()
+  if (!reorderMode.value) return
+  const eventTarget = event.target instanceof Element ? event.target : null
+  if (eventTarget?.closest('.stop-delete-button')) return
+  const row = (event.currentTarget as HTMLElement | null)?.closest<HTMLElement>('.redesign-stop-row')
+  if (!row) return
+  event.stopPropagation()
+  clearPlanningPointClickSuppression()
+  cleanupPlanningPointPointerDrag()
+  try { row.setPointerCapture?.(event.pointerId) } catch { /* Pointer capture is optional on older WebViews. */ }
+  planningPointPointerDrag = { pointerId: event.pointerId, sourceID: stop.id, startX: event.clientX, startY: event.clientY, moved: false, targetID: '' }
   draggedStopID.value = stop.id
   dragOverStopID.value = ''
+  const onMove = (moveEvent: PointerEvent) => {
+    const drag = planningPointPointerDrag
+    if (!drag || drag.pointerId !== moveEvent.pointerId) return
+    if (!drag.moved && Math.hypot(moveEvent.clientX - drag.startX, moveEvent.clientY - drag.startY) < 8) return
+    drag.moved = true
+    try { row.setPointerCapture?.(moveEvent.pointerId) } catch { /* Pointer capture is optional on older WebViews. */ }
+    moveEvent.preventDefault()
+    scrollPlanningPointListAtPointer(moveEvent.clientY)
+    drag.targetID = planningPointIDAtPointer(moveEvent.clientX, moveEvent.clientY, drag.sourceID)
+    dragOverStopID.value = drag.targetID
+  }
+  const onUp = async (upEvent: PointerEvent) => {
+    const drag = planningPointPointerDrag
+    if (!drag || drag.pointerId !== upEvent.pointerId) return
+    const sourceID = drag.sourceID
+    const targetID = drag.targetID
+    const moved = drag.moved
+    if (moved) {
+      upEvent.preventDefault()
+      suppressNextPlanningPointClick()
+    }
+    try { row.releasePointerCapture?.(upEvent.pointerId) } catch { /* Pointer capture may already be released. */ }
+    cleanupPlanningPointPointerDrag()
+    draggedStopID.value = ''
+    dragOverStopID.value = ''
+    if (!moved || !targetID) return
+    const source = findPlanningPoint(sourceID)
+    const target = findPlanningPoint(targetID)
+    if (source && target) await commitPlanningPointDrop(source, target)
+  }
+  const onCancel = (cancelEvent: PointerEvent) => {
+    const drag = planningPointPointerDrag
+    if (!drag || drag.pointerId !== cancelEvent.pointerId) return
+    if (drag.moved) suppressNextPlanningPointClick()
+    cleanupPlanningPointPointerDrag()
+    draggedStopID.value = ''
+    dragOverStopID.value = ''
+  }
+  const cleanup = () => {
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onUp)
+    window.removeEventListener('pointercancel', onCancel)
+    planningPointPointerDragCleanup = null
+  }
+  planningPointPointerDragCleanup = cleanup
+  window.addEventListener('pointermove', onMove, { passive: false })
+  window.addEventListener('pointerup', onUp)
+  window.addEventListener('pointercancel', onCancel)
 }
-function enterPlanningPointPointer(event: PointerEvent, stop: Stop | SubStop) {
-  if (!reorderMode.value || event.pointerType === 'mouse' || !draggedStopID.value || draggedStopID.value === stop.id) return
-  event.preventDefault()
-  dragOverStopID.value = stop.id
-}
-async function dropPlanningPointPointer(event: PointerEvent, target: Stop | SubStop) {
-  if (!reorderMode.value || event.pointerType === 'mouse' || !draggedStopID.value) return
-  event.preventDefault()
-  const source = findPlanningPoint(draggedStopID.value)
-  draggedStopID.value = ''
-  dragOverStopID.value = ''
-  if (source) await commitPlanningPointDrop(source, target)
-}
-async function dropPlanningPoint(event: DragEvent, target: Stop | SubStop) {
-  if (!reorderMode.value) return
-  event.preventDefault()
-  const sourceID = draggedStopID.value || event.dataTransfer?.getData('text/plain') || ''
-  const source = findPlanningPoint(sourceID)
-  draggedStopID.value = ''
-  dragOverStopID.value = ''
-  if (source) await commitPlanningPointDrop(source, target)
-}
+
 async function commitPlanningPointDrop(source: Stop | SubStop, target: Stop | SubStop) {
   if (source.id === target.id) return
   const sourceDay = dayForStop(source); const targetDay = dayForStop(target)
@@ -1501,7 +1582,7 @@ async function commitPlanningPointDrop(source: Stop | SubStop, target: Stop | Su
 async function reorderPlanningPointTo(stop: Stop | SubStop, targetSequence: number) {
   if (!selected.value) return
   const day = dayForStop(stop); const parent = parentForStop(stop, day); if (!day || !parent) return
-  const child = isChildStop(stop); const parentID = parent.id; const stopID = stop.id; const revision = selected.value.revision
+  const child = isChildStop(stop); const stopID = stop.id; const revision = selected.value.revision
   actionLoading.value = true; error.value = ''; reorderMessage.value = ''
   try {
     const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(day.id) + '/stops/' + encodeURIComponent(stopID) + '/move', { method: 'POST', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + revision }, body: JSON.stringify({ target_sequence: targetSequence }) })
@@ -1511,7 +1592,6 @@ async function reorderPlanningPointTo(stop: Stop | SubStop, targetSequence: numb
       throw new Error(payload.error?.message || '调整规划点顺序失败')
     }
     applyTripPayload(payload)
-    selectedStopId.value = child ? parentID : stopID; selectedSubStopId.value = child ? stopID : ''
     reorderMessage.value = child ? '子规划点顺序已更新' : '规划点顺序已更新，路线已清除，请点击“生成路线”重新规划'
     await renderMap()
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '调整规划点顺序失败' } finally { actionLoading.value = false }
@@ -1640,6 +1720,8 @@ onUnmounted(() => {
   window.removeEventListener('pointercancel', finishTouchPointer, true)
   touchGesture = null
   document.documentElement.classList.remove('journey-touch-gesture')
+  resetPlanningPointDragState()
+  clearPlanningPointClickSuppression()
   sheetDragCleanup?.()
   if (sheetDragReleaseTimer !== null) { window.clearTimeout(sheetDragReleaseTimer); sheetDragReleaseTimer = null }
   sheetDragActive.value = false
@@ -1755,10 +1837,10 @@ onUnmounted(() => {
                 <div class="peek-summary"><div><span class="eyebrow">{{ selectedDay === 'all' ? 'FULL JOURNEY' : 'DAY ' + selectedDay }}</span><strong>{{ visibleStops.length }} 个规划点</strong></div><span>{{ formatDistance(visibleRouteSummary.distanceM) || '距离待生成' }} · {{ formatDuration(visibleRouteSummary.durationS) || '时间待生成' }}</span></div>
                 <div v-if="journeySection === 'overview'" class="trip-overview redesign-overview"><div class="section-title-row"><div><span class="eyebrow">JOURNEY NOTE</span><h2>行程说明</h2></div><div v-if="!shareMode" class="section-actions"><button class="text-action" type="button" @click="beginEditTripDescription">{{ tripDescriptionEditing ? '编辑中' : '编辑' }}</button><button v-if="tripDescriptionEditing" class="text-action" type="button" @click="openTripDescriptionFullscreen">全屏</button></div></div><template v-if="tripDescriptionEditing"><MarkdownEditor v-model="tripDescriptionDraft" v-model:mode="tripDescriptionEditorMode" :preview-html="renderMarkdown(tripDescriptionDraft)" :rows="4" editor-label="MARKDOWN" preview-label="行程说明预览" editor-aria-label="行程说明 Markdown 原始文本" placeholder="补充整个行程的背景、节奏和注意事项" /><div class="editor-actions"><button class="secondary-action compact-action" type="button" @click="cancelEditTripDescription">取消</button><button class="primary-action compact-action" type="button" :disabled="tripDescriptionSaving" @click="saveTripDescription">{{ tripDescriptionSaving ? '保存中…' : '保存说明' }}</button></div></template><div v-else-if="tripDocument.description_markdown" class="markdown" v-html="renderMarkdown(tripDocument.description_markdown)"></div><p v-else class="muted">{{ shareMode ? '暂无行程总体说明。' : '暂无行程总体说明，点击“编辑”添加。' }}</p></div>
                 <div v-else class="itinerary-section"><div class="section-title-row"><div><span class="eyebrow">ITINERARY</span><h2>规划点</h2></div><div class="section-actions"><span>{{ visibleStops.length }} 个</span><button v-if="!shareMode" class="text-action" type="button" :class="{ selected: reorderMode }" @click="toggleReorderMode">{{ reorderMode ? '完成排序' : '调整顺序' }}</button></div></div>
-                  <div v-if="!shareMode" class="redesign-plan-controls"><label class="select-field">路线 Provider<UiSelect v-model="planningProvider" aria-label="路线 Provider" :options="mapProviderOptions" /></label><label class="select-field">出行方式<UiSelect v-model="planningMode" aria-label="出行方式" :options="travelModeOptions" /></label><label v-if="planningMode === 'driving'" class="select-field">驾车策略<UiSelect v-model="planningStrategy" aria-label="驾车策略" :options="drivingStrategyOptions" /></label><button class="primary-action compact-action plan-button" type="button" :disabled="planningLoading || !plannableDays.length" @click="planRoutes"><IonIcon :icon="navigateOutline" /> {{ planningLoading ? '规划中…' : '生成路线' }}</button></div>
+                  <div v-if="!shareMode" class="redesign-plan-controls"><label class="select-field">路线 Provider<UiSelect v-model="planningProvider" aria-label="路线 Provider" :options="mapProviderOptions" /></label><label class="select-field">出行方式<UiSelect v-model="planningMode" aria-label="出行方式" :options="travelModeOptions" /></label><label v-if="planningMode === 'driving' && supportsDrivingStrategy" class="select-field">驾车策略<UiSelect v-model="planningStrategy" aria-label="驾车策略" :options="availableDrivingStrategyOptions" /></label><button class="primary-action compact-action plan-button" type="button" :disabled="planningLoading || !plannableDays.length" @click="planRoutes"><IonIcon :icon="navigateOutline" /> {{ planningLoading ? '规划中…' : '生成路线' }}</button></div>
                   <div class="redesign-route-summary"><div><span>{{ selectedDay === 'all' ? '全程路线' : 'D' + selectedDay + ' 当天路线' }}</span><strong v-if="visibleRouteSummary.segments">{{ formatDistance(visibleRouteSummary.distanceM) || '距离未知' }} · {{ formatDuration(visibleRouteSummary.durationS) || '时间未知' }}</strong><em v-else-if="visibleRouteSummary.zeroSegments">有 {{ visibleRouteSummary.zeroSegments }} 段为同一地点</em><em v-else>尚未生成路线</em></div><small v-if="visibleRouteSummary.segments">{{ visibleRouteSummary.segments }} 段 · {{ mapProviderLabel }}</small></div>
                   <p v-if="hasCarryOverRoute" class="route-hint">路线从前一天最后一个规划点“{{ carryOverStop?.title }}”开始。</p><p v-if="reorderMessage" class="inline-message">{{ reorderMessage }}</p><p v-if="!plannableDays.length" class="muted">{{ shareMode ? '当前选择范围暂无可生成的路线。' : '添加至少两个相邻的带坐标规划点后，可以生成路线。' }}</p>
-                  <div v-if="visibleStops.length" class="redesign-stop-list"><article v-for="stop in visibleStops" :key="stop.id" class="redesign-stop-row" :class="{ selected: selectedStopId === stop.id, 'reorder-dragging': draggedStopID === stop.id, 'reorder-drop-target': dragOverStopID === stop.id }" :draggable="reorderMode" @dragstart="startPlanningPointDrag($event, stop)" @dragover="dragOverPlanningPoint($event, stop)" @dragleave="dragLeavePlanningPoint($event, stop)" @drop="dropPlanningPoint($event, stop)" @dragend="endPlanningPointDrag" @pointerenter="enterPlanningPointPointer($event, stop)" @pointerup="dropPlanningPointPointer($event, stop)"><span v-if="reorderMode" class="drag-handle" aria-hidden="true" @pointerdown.stop="startPlanningPointPointer($event, stop)">⋮⋮</span><button class="redesign-stop-main" type="button" @click="selectStop(stop)"><span class="stop-number">{{ stop.sequence }}</span><span><strong>{{ stop.title }}</strong><small>{{ stopDate(stop) }} · {{ stop.address || '地址已保存' }}</small></span><span class="row-chevron">›</span></button><button v-if="!shareMode" class="stop-delete-button" type="button" :aria-label="'删除规划点 ' + stop.title" @click.stop="deletePlanningPoint(stop)">×</button></article></div><p v-else class="muted compact-empty">当前日期还没有规划点。</p>
+                  <div v-if="visibleStops.length" class="redesign-stop-list"><article v-for="stop in visibleStops" :key="stop.id" class="redesign-stop-row" :data-stop-id="stop.id" :class="{ selected: selectedStopId === stop.id, 'reorder-active': reorderMode, 'reorder-dragging': draggedStopID === stop.id, 'reorder-drop-target': dragOverStopID === stop.id }" @pointerdown="startPlanningPointPointer($event, stop)"><span v-if="reorderMode" class="drag-handle" aria-hidden="true" @pointerdown.stop="startPlanningPointPointer($event, stop)">⋮⋮</span><button class="redesign-stop-main" type="button" @click="selectPlanningPointFromList($event, stop)"><span class="stop-number">{{ stop.sequence }}</span><span><strong>{{ stop.title }}</strong><small>{{ stopDate(stop) }} · {{ stop.address || '地址已保存' }}</small></span><span class="row-chevron">›</span></button><button v-if="!shareMode" class="stop-delete-button" type="button" :aria-label="'删除规划点 ' + stop.title" @click.stop="deletePlanningPoint(stop)">×</button></article></div><p v-else class="muted compact-empty">当前日期还没有规划点。</p>
                   <button v-if="!shareMode" class="add-place-action" type="button" @click="openJourneySearch()"><IonIcon :icon="searchOutline" /> 搜索并添加规划点</button>
                 </div>
                 <div v-if="!shareMode" class="panel-data-actions"><button type="button" @click="openImportPicker">导入</button><button type="button" :disabled="actionLoading" @click="downloadTrip">导出 JSON</button><button type="button" :disabled="actionLoading" @click="createShare">在线分享</button></div>

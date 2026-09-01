@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { IonIcon } from '@ionic/vue'
+import { chevronDownOutline } from 'ionicons/icons'
 
 type SelectOption = { value: string; label: string; description?: string; disabled?: boolean }
 
@@ -105,7 +107,7 @@ onUnmounted(() => {
       @click="toggleMenu"
     >
       <span class="ui-select-value">{{ selectedOption?.label || placeholder }}</span>
-      <span class="ui-select-chevron" aria-hidden="true">⌄</span>
+      <IonIcon class="ui-select-chevron" :icon="chevronDownOutline" aria-hidden="true" />
     </button>
     <div v-if="open" :id="listboxID" class="ui-select-menu" role="listbox" :aria-label="ariaLabel">
       <button
