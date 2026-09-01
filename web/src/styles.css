@@ -355,14 +355,14 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .redesign-stop-list { position: relative; display: grid; gap: 3px; margin-top: 10px; }
 .redesign-stop-list::before { position: absolute; top: 23px; bottom: 23px; left: 18px; width: 1px; background: color-mix(in srgb, var(--p) 33%, var(--line)); content: ""; }
 .redesign-stop-row { position: relative; z-index: 1; display: flex; min-width: 0; align-items: center; gap: 5px; border: 1px solid transparent; border-radius: 13px; }
-.redesign-stop-row.reorder-active { touch-action: none; user-select: none; -webkit-user-select: none; }
+.redesign-stop-row.reorder-active { user-select: none; -webkit-user-select: none; }
 .redesign-stop-row.selected { border-color: color-mix(in srgb, var(--p) 40%, var(--line)); background: color-mix(in srgb, var(--p) 9%, var(--surface)); }
 @media (hover: hover) and (pointer: fine) { .redesign-stop-row:hover { border-color: color-mix(in srgb, var(--p) 40%, var(--line)); background: color-mix(in srgb, var(--p) 9%, var(--surface)); } }
-.drag-handle { display: grid; flex: 0 0 40px; width: 40px; min-height: 44px; place-items: center; user-select: none; -webkit-user-select: none; touch-action: none; cursor: grab; color: var(--muted); font-size: 17px; font-weight: 900; letter-spacing: -.24em; }
-.drag-handle:active, .reorder-dragging .drag-handle { cursor: grabbing; }
-.reorder-dragging { opacity: .62; }
-.reorder-dragging .drag-handle { color: var(--p); }
-.reorder-drop-target { border-color: var(--p); background: color-mix(in srgb, var(--p) 12%, var(--surface)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--p) 16%, transparent); }
+.reorder-actions { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 3px; }
+.reorder-move-button { display: grid; flex: 0 0 44px; width: 44px; min-height: 44px; place-items: center; border: 1px solid var(--line); border-radius: 10px; color: var(--p); background: var(--surface); }
+.reorder-move-button ion-icon { font-size: 18px; }
+.reorder-move-button:disabled { color: var(--muted); background: color-mix(in srgb, var(--surface) 75%, var(--line)); opacity: .42; }
+@media (hover: hover) and (pointer: fine) { .reorder-move-button:not(:disabled):hover { border-color: var(--p); background: color-mix(in srgb, var(--p) 10%, var(--surface)); } }
 .redesign-stop-main { display: flex; min-width: 0; flex: 1; align-items: center; gap: 9px; padding: 8px 5px; border: 0; text-align: left; color: var(--ink); background: transparent; }
 .redesign-stop-main > span:nth-child(2) { display: grid; min-width: 0; flex: 1; gap: 3px; }
 .redesign-stop-main strong, .redesign-stop-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
