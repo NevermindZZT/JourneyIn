@@ -696,6 +696,100 @@ func (s *TripService) ReorderStop(ctx context.Context, tripID string, expectedRe
 	}
 	return s.Replace(ctx, tripID, expectedRevision, normalized, source)
 }
+func (s *TripService) MoveStopToDay(ctx context.Context, tripID string, expectedRevision int, sourceDayID, stopID, targetDayID string, targetSequence int, source string) (store.TripRecord, error) {
+	sourceDayID = strings.TrimSpace(sourceDayID)
+	targetDayID = strings.TrimSpace(targetDayID)
+	stopID = strings.TrimSpace(stopID)
+	if sourceDayID == "" || targetDayID == "" {
+		return store.TripRecord{}, errors.New("source and target day are required")
+	}
+	if sourceDayID == targetDayID {
+		return store.TripRecord{}, errors.New("source and target day must differ")
+	}
+	if targetSequence < 0 {
+		return store.TripRecord{}, errors.New("target sequence cannot be negative")
+	}
+	record, err := s.store.GetTrip(ctx, tripID)
+	if err != nil {
+		return store.TripRecord{}, err
+	}
+	if record.Revision != expectedRevision {
+		return store.TripRecord{}, store.ErrRevisionConflict
+	}
+	var trip domain.Trip
+	if err := json.Unmarshal(record.Document, &trip); err != nil {
+		return store.TripRecord{}, fmt.Errorf("decode trip: %w", err)
+	}
+
+	sourceDayIndex, targetDayIndex := -1, -1
+	sourceStopIndex := -1
+	var moving domain.Stop
+	childFound := false
+	for dayIndex := range trip.Days {
+		if trip.Days[dayIndex].ID == sourceDayID {
+			sourceDayIndex = dayIndex
+			for stopIndex := range trip.Days[dayIndex].Stops {
+				stop := trip.Days[dayIndex].Stops[stopIndex]
+				if stop.ID == stopID {
+					sourceStopIndex = stopIndex
+					moving = stop
+					break
+				}
+				for _, child := range stop.Children {
+					if child.ID == stopID {
+						childFound = true
+						break
+					}
+				}
+				if childFound {
+					break
+				}
+			}
+		}
+		if trip.Days[dayIndex].ID == targetDayID {
+			targetDayIndex = dayIndex
+		}
+	}
+	if sourceDayIndex < 0 {
+		return store.TripRecord{}, fmt.Errorf("source day %s not found", sourceDayID)
+	}
+	if targetDayIndex < 0 {
+		return store.TripRecord{}, fmt.Errorf("target day %s not found", targetDayID)
+	}
+	if sourceStopIndex < 0 {
+		if childFound {
+			return store.TripRecord{}, errors.New("changing a child planning point's day is not supported; move its parent instead")
+		}
+		return store.TripRecord{}, fmt.Errorf("stop %s not found in source day %s", stopID, sourceDayID)
+	}
+
+	clearRouteLegsAroundDay(&trip, sourceDayIndex)
+	clearRouteLegsAroundDay(&trip, targetDayIndex)
+	sourceDay := &trip.Days[sourceDayIndex]
+	sourceDay.Stops = append(sourceDay.Stops[:sourceStopIndex], sourceDay.Stops[sourceStopIndex+1:]...)
+	for index := range sourceDay.Stops {
+		sourceDay.Stops[index].Sequence = index + 1
+	}
+	targetDay := &trip.Days[targetDayIndex]
+	position := len(targetDay.Stops)
+	if targetSequence > 0 {
+		if targetSequence > len(targetDay.Stops)+1 {
+			return store.TripRecord{}, fmt.Errorf("target sequence must be between 1 and %d", len(targetDay.Stops)+1)
+		}
+		position = targetSequence - 1
+	}
+	targetDay.Stops = append(targetDay.Stops, domain.Stop{})
+	copy(targetDay.Stops[position+1:], targetDay.Stops[position:])
+	targetDay.Stops[position] = moving
+	for index := range targetDay.Stops {
+		targetDay.Stops[index].Sequence = index + 1
+	}
+	normalized, err := json.Marshal(trip)
+	if err != nil {
+		return store.TripRecord{}, err
+	}
+	return s.Replace(ctx, tripID, expectedRevision, normalized, source)
+}
 func (s *TripService) RefreshWeather(ctx context.Context, tripID string, expectedRevision int, dayID, stopID string, input WeatherInput, source string) (store.TripRecord, error) {
 	if s.mapService == nil {
 		return store.TripRecord{}, errors.New("map service is not configured")

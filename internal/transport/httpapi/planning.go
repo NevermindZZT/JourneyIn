@@ -80,7 +80,8 @@ func (s *Server) addSubStop(w http.ResponseWriter, r *http.Request) {
 }
 
 type moveStopBody struct {
-	Direction      string `json:"direction"`
+	Direction      string `json:"direction,omitempty"`
+	TargetDayID    string `json:"target_day_id,omitempty"`
 	TargetSequence int    `json:"target_sequence,omitempty"`
 }
 
@@ -96,7 +97,9 @@ func (s *Server) moveStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var record store.TripRecord
-	if body.TargetSequence > 0 {
+	if strings.TrimSpace(body.TargetDayID) != "" {
+		record, err = s.trips.MoveStopToDay(r.Context(), r.PathValue("id"), expected, r.PathValue("dayID"), r.PathValue("stopID"), body.TargetDayID, body.TargetSequence, "rest:move_stop_day")
+	} else if body.TargetSequence > 0 {
 		record, err = s.trips.ReorderStop(r.Context(), r.PathValue("id"), expected, r.PathValue("dayID"), r.PathValue("stopID"), body.TargetSequence, "rest:reorder_stop")
 	} else {
 		record, err = s.trips.MoveStop(r.Context(), r.PathValue("id"), expected, r.PathValue("dayID"), r.PathValue("stopID"), body.Direction, "rest:move_stop")

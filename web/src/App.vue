@@ -22,7 +22,8 @@ type Leg = { id: string; from_stop_id: string; to_stop_id: string; mode?: string
 type Day = { id: string; date: string; title?: string; notes_markdown?: string; stops: Stop[]; legs?: Leg[] }
 type TripDocument = { title: string; timezone: string; description_markdown?: string; links?: LinkData[]; map?: { preferred_provider?: 'baidu' | 'amap'; enabled_providers?: Array<'baidu' | 'amap'>; default_mode?: TravelMode }; days: Day[] }
 type SharedBootstrap = { trip: TripDocument & { id?: string; status?: string }; browser_key?: string; amap_browser_key?: string; amap_security_proxy_path?: string; amap_security_js_code_configured?: boolean; default_map_provider?: 'baidu' | 'amap'; revision?: number }
-type TripSummary = { id: string; title: string; status: string; start_date: string; end_date: string; timezone: string; revision: number; days?: number; stops?: number }
+type TripSummary = { id: string; title: string; status: string; start_date: string; end_date: string; timezone: string; revision: number; days?: number; stops?: number; updated_at?: string }
+type TripSortMode = 'updated' | 'date'
 type Capabilities = { version?: string; default_map_provider?: 'baidu' | 'amap'; map_providers?: { baidu?: { browser_key_configured?: boolean; browser_key?: string }; amap?: { browser_key_configured?: boolean; browser_key?: string; security_proxy_path?: string; security_js_code_configured?: boolean } }; mcp?: { http_endpoint?: string } }
 type KeySettings = { map?: { default_provider?: 'baidu' | 'amap'; baidu?: { browser_key_configured?: boolean; server_key_configured?: boolean }; amap?: { js_key_configured?: boolean; server_key_configured?: boolean; security_js_code_configured?: boolean } }; poi?: { provider_priority?: 'amap' | 'baidu'; local_directory_count?: number } }
 type PlaceCandidate = { id?: string; name: string; address?: string; location: Coord & { crs?: string }; provider?: string; citycode?: string; adcode?: string; typecode?: string }
@@ -55,10 +56,31 @@ const poiPriorityOptions = [
   { value: 'amap', label: '高德优先' },
   { value: 'baidu', label: '百度优先' },
 ]
+const tripSortOptions = [
+  { value: 'updated', label: '最后修改' },
+  { value: 'date', label: '行程日期' },
+]
 
 const APP_VERSION = import.meta.env.VITE_JOURNEYIN_VERSION
 const APP_SLOGAN = '在地图上规划每一段旅程'
 const GITHUB_URL = 'https://github.com/NevermindZZT/JourneyIn'
+function formatDate(value?: string) {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw)
+  return match ? match[1] + '/' + match[2] + '/' + match[3] : raw.replaceAll('-', '/')
+}
+function formatDateTime(value?: string) {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  const date = new Date(raw)
+  if (Number.isNaN(date.getTime())) return formatDate(raw)
+  const pad = (part: number) => String(part).padStart(2, '0')
+  return date.getFullYear() + '/' + pad(date.getMonth() + 1) + '/' + pad(date.getDate()) + ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes())
+}
+function formatDateRange(start?: string, end?: string) {
+  return [formatDate(start), formatDate(end)].filter(Boolean).join(' — ')
+}
 const markdownRenderer = new MarkdownIt({ html: false, breaks: true, linkify: false, typographer: false })
 markdownRenderer.validateLink = (url: string) => /^https?:\/\//i.test(url.trim())
 const markdownRendererConfig = {
@@ -84,6 +106,21 @@ const redesignMode = true
 declare global { interface Window { BMap?: any; BMapGL?: any; BMAP_NORMAL_MAP?: any; BMAP_SATELLITE_MAP?: any; _AMapSecurityConfig?: { securityJsCode?: string; serviceHost?: string } } }
 
 const trips = ref<TripSummary[]>([])
+const savedTripSortMode = localStorage.getItem('journeyin.tripSort')
+const tripSortMode = ref<TripSortMode>(savedTripSortMode === 'date' ? 'date' : 'updated')
+const sortedTrips = computed(() => {
+  const items = [...trips.value]
+  return items.sort((a, b) => {
+    if (tripSortMode.value === 'date') {
+      const dateOrder = a.start_date.localeCompare(b.start_date) || a.end_date.localeCompare(b.end_date)
+      if (dateOrder) return dateOrder
+    }
+    const updatedA = Date.parse(a.updated_at || '') || 0
+    const updatedB = Date.parse(b.updated_at || '') || 0
+    return updatedB - updatedA || a.title.localeCompare(b.title)
+  })
+})
+watch(tripSortMode, value => localStorage.setItem('journeyin.tripSort', value))
 const selected = ref<TripSummary | null>(null)
 const tripDocument = ref<TripDocument | null>(null)
 const capabilities = ref<Capabilities | null>(null)
@@ -94,6 +131,8 @@ const searchParentStopId = ref('')
 const weatherLoading = ref(false)
 const descriptionEditing = ref(false)
 const descriptionDraft = ref('')
+const arrivalTimeDraft = ref('')
+const departureTimeDraft = ref('')
 const descriptionEditorMode = ref<MarkdownEditorMode>('edit')
 const descriptionSaving = ref(false)
 const descriptionFullscreen = ref(false)
@@ -102,6 +141,9 @@ const tripDescriptionFullscreen = ref(false)
 const tripDescriptionDraft = ref('')
 const tripDescriptionEditorMode = ref<MarkdownEditorMode>('edit')
 const tripDescriptionSaving = ref(false)
+const stopDateEditing = ref(false)
+const stopDateDraftDayID = ref('')
+const stopDateSaving = ref(false)
 const selectedDay = ref<number | 'all'>('all')
 const loading = ref(false)
 const detailLoading = ref(false)
@@ -110,6 +152,7 @@ const mapError = ref('')
 const mapWarning = ref('')
 const mapReady = ref(false)
 const mapContainer = ref<HTMLElement | null>(null)
+const tripListScroll = ref<HTMLElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const shareURL = ref('')
 const shareID = ref('')
@@ -253,7 +296,7 @@ const visibleDays = computed(() => {
   if (!tripDocument.value) return []
   return selectedDay.value === 'all' ? tripDocument.value.days : tripDocument.value.days.filter((_, index) => index + 1 === selectedDay.value)
 })
-const tripDayOptions = computed(() => (tripDocument.value?.days || []).map((day, index) => ({ value: day.id, label: 'D' + (index + 1) + ' · ' + day.date, description: day.title || '第 ' + (index + 1) + ' 天' })))
+const tripDayOptions = computed(() => (tripDocument.value?.days || []).map((day, index) => ({ value: day.id, label: 'D' + (index + 1) + ' · ' + formatDate(day.date), description: day.title || '第 ' + (index + 1) + ' 天' })))
 function orderedStops(stops: Stop[]) { return [...stops].sort((a, b) => a.sequence - b.sequence) }
 const visibleStops = computed(() => visibleDays.value.flatMap(day => orderedStops(day.stops || [])))
 const carryOverStop = computed<Stop | null>(() => {
@@ -295,8 +338,54 @@ const plannableDays = computed(() => visibleDays.value.filter(canPlanDay))
 const selectedStop = computed(() => visibleStops.value.find(stop => stop.id === selectedStopId.value) || null)
 const selectedSubStop = computed(() => selectedStop.value?.children?.find(child => child.id === selectedSubStopId.value) || null)
 const selectedTarget = computed<Stop | SubStop | null>(() => selectedSubStop.value || selectedStop.value || null)
-function stopDate(stop: Stop | SubStop) { return tripDocument.value?.days.find(day => day.stops.some(item => item.id === stop.id || item.children?.some(child => child.id === stop.id)))?.date || '日期待定' }
+function stopDate(stop: Stop | SubStop) {
+  const day = tripDocument.value?.days.find(item => item.stops.some(stopItem => stopItem.id === stop.id || stopItem.children?.some(child => child.id === stop.id)))
+  return formatDate(day?.date) || '日期待定'
+}
 function dayForStop(stop: Stop | SubStop) { return tripDocument.value?.days.find(day => day.stops.some(item => item.id === stop.id || item.children?.some(child => child.id === stop.id))) || null }
+function stopTime(stop: Stop | SubStop) {
+  const arrival = stop.time_window?.arrival?.trim() || ''
+  const departure = stop.time_window?.departure?.trim() || ''
+  if (!arrival && !departure) return ''
+  if (arrival && departure) return arrival + ' — ' + departure
+  return arrival || departure
+}
+
+function beginEditStopDate() {
+  if (shareMode || selectedSubStop.value || !selectedStop.value) return
+  stopDateDraftDayID.value = dayForStop(selectedStop.value)?.id || ''
+  stopDateEditing.value = Boolean(stopDateDraftDayID.value)
+}
+function cancelEditStopDate() {
+  stopDateEditing.value = false
+  stopDateDraftDayID.value = ''
+}
+async function saveStopDate() {
+  if (!selected.value || !tripDocument.value || !selectedStop.value) return
+  const stop = selectedStop.value
+  const sourceDay = dayForStop(stop)
+  const targetDay = tripDocument.value.days.find(day => day.id === stopDateDraftDayID.value)
+  if (!sourceDay || !targetDay) { error.value = '无法确定规划点日期'; return }
+  if (sourceDay.id === targetDay.id) { cancelEditStopDate(); return }
+  const stopID = stop.id
+  const previousDay = selectedDay.value
+  const targetDayIndex = tripDocument.value.days.indexOf(targetDay)
+  stopDateSaving.value = true
+  error.value = ''
+  try {
+    const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(sourceDay.id) + '/stops/' + encodeURIComponent(stopID) + '/move', { method: 'POST', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision }, body: JSON.stringify({ target_day_id: targetDay.id }) })
+    const payload = await response.json() as { document?: TripDocument; revision?: number; stops?: number; days?: number; error?: { message?: string } }
+    if (!response.ok) throw new Error(payload.error?.message || '修改规划点日期失败')
+    applyTripPayload(payload)
+    selectedStopId.value = stopID
+    selectedSubStopId.value = ''
+    if (previousDay !== 'all' && targetDayIndex >= 0) selectedDay.value = targetDayIndex + 1
+    cancelEditStopDate()
+    reorderMessage.value = '规划点已移动到 D' + (targetDayIndex + 1)
+    syncNavigationURL('replace')
+    await renderMap()
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '修改规划点日期失败' } finally { stopDateSaving.value = false }
+}
 const themeLabel = computed(() => theme.value === 'system' ? '跟随系统' : theme.value === 'dark' ? '深色' : '浅色')
 const displayVersion = computed(() => capabilities.value?.version || APP_VERSION)
 
@@ -539,6 +628,7 @@ function navigateToList(mode: 'push' | 'replace' = 'push') {
   mobileMapToolsOpen.value = false
   tripMenuID.value = ''
   detailMoreOpen.value = false
+  cancelEditStopDate()
   resetMapSDK()
   syncNavigationURL(mode, { layer: 'list' })
 }
@@ -554,6 +644,7 @@ function navigateToTrip(trip: TripSummary, mode: 'push' | 'replace' = 'push') {
   mobileMapToolsOpen.value = false
   tripMenuID.value = ''
   detailMoreOpen.value = false
+  cancelEditStopDate()
   setSheetBreakpoint('half', 'replace', false)
   syncNavigationURL(mode, { layer: 'trip', tripID: trip.id, day: 'all', sheet: 'half' })
   void loadDetail(trip)
@@ -568,6 +659,7 @@ function navigateToStop(stop: Stop | SubStop, parent: Stop | null = null, mode: 
   panelOpen.value = true
   mobileMapToolsOpen.value = false
   detailMoreOpen.value = false
+  cancelEditStopDate()
   setSheetBreakpoint('half', 'replace', false)
   syncNavigationURL(mode)
   void renderMap()
@@ -710,6 +802,11 @@ function closeJourneySearch() {
   searchMessage.value = ''
   searchResults.value = []
   setSheetBreakpoint('half', 'replace')
+}
+
+function focusTripListScroll() {
+  if (!window.matchMedia('(max-width: 900px)').matches) return
+  tripListScroll.value?.focus({ preventScroll: true })
 }
 
 function toggleTripMenu(tripID: string) {
@@ -916,8 +1013,22 @@ function focusMapOnPoint(stop: Stop | SubStop) {
 function selectStop(stop: Stop) { navigateToStop(stop) }
 function selectSubStop(child: SubStop, parent: Stop) { navigateToStop(child, parent) }
 function openChildSearch(parent: Stop) { selectedStopId.value = parent.id; selectedSubStopId.value = ''; openJourneySearch(parent.id); searchMessage.value = '为“' + parent.title + '”添加子规划点' }
-function beginEditDescription() { descriptionDraft.value = selectedTarget.value?.description_markdown || ''; descriptionEditorMode.value = 'edit'; descriptionEditing.value = true }
-function cancelEditDescription() { descriptionEditing.value = false; descriptionDraft.value = ''; descriptionEditorMode.value = 'edit'; descriptionFullscreen.value = false }
+function beginEditDescription() {
+  const target = selectedTarget.value
+  descriptionDraft.value = target?.description_markdown || ''
+  arrivalTimeDraft.value = target?.time_window?.arrival || ''
+  departureTimeDraft.value = target?.time_window?.departure || ''
+  descriptionEditorMode.value = 'edit'
+  descriptionEditing.value = true
+}
+function cancelEditDescription() {
+  descriptionEditing.value = false
+  descriptionDraft.value = ''
+  arrivalTimeDraft.value = ''
+  departureTimeDraft.value = ''
+  descriptionEditorMode.value = 'edit'
+  descriptionFullscreen.value = false
+}
 function openDescriptionFullscreen() { descriptionFullscreen.value = true }
 function closeDescriptionFullscreen() { descriptionFullscreen.value = false }
 function beginEditTripDescription() { tripDescriptionDraft.value = tripDocument.value?.description_markdown || ''; tripDescriptionEditorMode.value = 'edit'; tripDescriptionEditing.value = true }
@@ -936,14 +1047,34 @@ async function saveTripDescription() {
 }
 async function saveDescription() {
   if (!selected.value || !tripDocument.value || !selectedTarget.value) return
-  const target = selectedTarget.value; const previous = target.description_markdown || ''; target.description_markdown = descriptionDraft.value.trim(); descriptionSaving.value = true; error.value = ''
-  const parentID = selectedStop.value?.id || ''; const childID = selectedSubStop.value?.id || ''
+  const target = selectedTarget.value
+  const previousDescription = target.description_markdown || ''
+  const previousTimeWindow = target.time_window ? { ...target.time_window } : undefined
+  const arrival = arrivalTimeDraft.value.trim()
+  const departure = departureTimeDraft.value.trim()
+  if (arrival && departure && arrival > departure) {
+    error.value = '到达时间不能晚于离开时间'
+    return
+  }
+  target.description_markdown = descriptionDraft.value.trim()
+  target.time_window = arrival || departure ? { ...(arrival ? { arrival } : {}), ...(departure ? { departure } : {}) } : undefined
+  descriptionSaving.value = true
+  error.value = ''
+  const parentID = selectedStop.value?.id || ''
+  const childID = selectedSubStop.value?.id || ''
   try {
     const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id), { method: 'PUT', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision }, body: JSON.stringify(tripDocument.value) })
-    const payload = await response.json() as { document?: TripDocument; revision?: number; stops?: number; days?: number; error?: { message?: string } }
-    if (!response.ok) throw new Error(payload.error?.message || '保存地点说明失败')
-    applyTripPayload(payload); selectedStopId.value = parentID; selectedSubStopId.value = childID; descriptionEditing.value = false; descriptionFullscreen.value = false; descriptionEditorMode.value = 'edit'; descriptionDraft.value = ''
-  } catch (cause) { target.description_markdown = previous; error.value = cause instanceof Error ? cause.message : '保存地点说明失败' } finally { descriptionSaving.value = false }
+    const payload = await response.json() as { document?: TripDocument; revision?: number; stops?: number; days?: number; updated_at?: string; error?: { message?: string } }
+    if (!response.ok) throw new Error(payload.error?.message || '保存规划点信息失败')
+    applyTripPayload(payload)
+    selectedStopId.value = parentID
+    selectedSubStopId.value = childID
+    cancelEditDescription()
+  } catch (cause) {
+    target.description_markdown = previousDescription
+    target.time_window = previousTimeWindow
+    error.value = cause instanceof Error ? cause.message : '保存规划点信息失败'
+  } finally { descriptionSaving.value = false }
 }
 
 
@@ -1252,14 +1383,14 @@ function attachRouteLabel(snapshot: { geometry?: Array<[number, number]> | Array
   label.setStyle?.({ color: '#ffffff', backgroundColor: '#24695cdd', border: '0', borderRadius: '999px', padding: '4px 8px', fontSize: '12px', lineHeight: '16px', whiteSpace: 'nowrap', boxShadow: '0 3px 10px #0003' })
   label.setPosition?.(new mapAPI.Point(middle.lng, middle.lat)); mapInstance.addOverlay(label)
 }
-function applyTripPayload(payload: { document?: TripDocument; revision?: number; stops?: number; days?: number }) {
+function applyTripPayload(payload: { document?: TripDocument; revision?: number; stops?: number; days?: number; updated_at?: string }) {
   const previousStopID = selectedStopId.value
   const previousSubStopID = selectedSubStopId.value
   if (payload.document) tripDocument.value = payload.document
   if (selected.value) {
-    selected.value = { ...selected.value, revision: payload.revision ?? selected.value.revision, stops: payload.stops ?? selected.value.stops, days: payload.days ?? selected.value.days }
+    selected.value = { ...selected.value, revision: payload.revision ?? selected.value.revision, stops: payload.stops ?? selected.value.stops, days: payload.days ?? selected.value.days, updated_at: payload.updated_at ?? selected.value.updated_at }
     const index = trips.value.findIndex(trip => trip.id === selected.value?.id)
-    if (index >= 0) trips.value[index] = { ...trips.value[index], revision: selected.value.revision, stops: selected.value.stops, days: selected.value.days }
+    if (index >= 0) trips.value[index] = { ...trips.value[index], revision: selected.value.revision, stops: selected.value.stops, days: selected.value.days, updated_at: payload.updated_at ?? trips.value[index].updated_at }
   }
   const previousStop = previousStopID ? findPlanningPoint(previousStopID) : null
   selectedStopId.value = previousStop && !isChildStop(previousStop) ? previousStop.id : previousStop ? parentForStop(previousStop)?.id || '' : ''
@@ -1427,7 +1558,7 @@ async function openNavigation(provider: 'baidu' | 'amap') {
   }
 }
 function weatherText(stop: Stop | SubStop) { const weather = stop.weather || {}; const condition = weather.condition || weather.text_day || weather.text || '暂无天气快照'; const temperature = weather.temperature_c ?? weather.temp; return temperature === undefined ? String(condition) : String(condition) + ' · ' + String(temperature) + '°C' }
-function weatherUpdatedAt(stop: Stop | SubStop) { const value = stop.weather?.fetched_at; return value ? new Date(String(value)).toLocaleString() : '' }
+function weatherUpdatedAt(stop: Stop | SubStop) { const value = stop.weather?.fetched_at; return value ? formatDateTime(String(value)) : '' }
 async function refreshWeather() {
   if (!selected.value || !tripDocument.value || !selectedTarget.value) { error.value = '请先选择一个有坐标的规划点'; return }
   const day = dayForStop(selectedTarget.value); const parent = selectedStop.value; if (!day || !parent) { error.value = '无法确定天气对应日期'; return }
@@ -1764,6 +1895,7 @@ onUnmounted(() => {
           </aside>
 
           <section v-if="tripView === 'list'" class="trip-list-view" aria-labelledby="trip-list-title">
+            <div ref="tripListScroll" class="trip-list-scroll" tabindex="0" role="region" aria-label="行程列表" @pointerdown="focusTripListScroll">
             <header class="list-page-header">
               <div>
                 <p class="eyebrow">JOURNEYIN WORKSPACE</p>
@@ -1778,22 +1910,23 @@ onUnmounted(() => {
 
             <section class="list-summary-bar" aria-label="行程筛选">
               <span>全部行程 <strong>{{ trips.length }}</strong></span>
-              <span class="list-summary-note">{{ loading ? '正在同步…' : '按最近更新排序' }}</span>
+              <div class="list-summary-controls"><span class="list-summary-note">{{ loading ? '正在同步…' : tripSortMode === 'date' ? '按行程开始日期排序' : '按最后修改时间排序' }}</span><label class="list-sort-control"><span>排序</span><UiSelect v-model="tripSortMode" aria-label="行程列表排序方式" :options="tripSortOptions" /></label></div>
             </section>
 
             <div v-if="error" class="inline-error"><IonIcon :icon="cloudOfflineOutline" /><span>{{ error }}</span><button type="button" aria-label="关闭错误" @click="error = ''">×</button></div>
             <div v-if="loading" class="list-loading"><span class="loading-dot"></span><span>正在加载行程…</span></div>
             <div v-else-if="!trips.length" class="list-empty-state"><div class="empty-mark"><IonIcon :icon="mapOutline" /></div><h2>还没有旅行规划</h2><p>创建一条行程，开始把地点和路线整理到地图上。</p><div class="empty-actions"><button class="primary-action" type="button" @click="newTripOpen = true"><IonIcon :icon="addOutline" /> 新建规划</button><button class="secondary-action" type="button" @click="openImportPicker">导入 Trip JSON</button></div></div>
             <div v-else class="trip-list-grid">
-              <article v-for="(trip, index) in trips" :key="trip.id" class="trip-list-card" :class="{ active: selected?.id === trip.id }">
+              <article v-for="(trip, index) in sortedTrips" :key="trip.id" class="trip-list-card" :class="{ active: selected?.id === trip.id }">
                 <button class="trip-card-main" type="button" @click="selectTrip(trip)">
                   <span class="trip-card-visual" :class="'trip-card-visual-' + (index % 4)" aria-hidden="true"><span>{{ trip.title.slice(0, 2) }}</span></span>
-                  <span class="trip-card-copy"><strong>{{ trip.title }}</strong><span>{{ trip.start_date }} — {{ trip.end_date }}</span><small>{{ trip.days ?? '—' }} 天 · {{ trip.stops ?? '—' }} 个规划点 · revision {{ trip.revision }}</small></span>
+                  <span class="trip-card-copy"><strong>{{ trip.title }}</strong><span>{{ formatDateRange(trip.start_date, trip.end_date) }}</span><small>{{ trip.days ?? '—' }} 天 · {{ trip.stops ?? '—' }} 个规划点 · revision {{ trip.revision }}</small><small v-if="trip.updated_at" class="trip-card-updated">最后修改 {{ formatDateTime(trip.updated_at) }}</small></span>
                   <span class="trip-card-arrow">›</span>
                 </button>
                 <button class="trip-card-menu-button" type="button" :aria-expanded="tripMenuID === trip.id" :aria-label="'打开 ' + trip.title + ' 更多操作'" @click.stop="toggleTripMenu(trip.id)">⋯</button>
                 <div v-if="tripMenuID === trip.id" class="trip-card-menu" role="menu"><button type="button" role="menuitem" @click="tripMenuID = ''; deleteTrip(trip)"><IonIcon :icon="closeOutline" /> 删除行程</button></div>
               </article>
+            </div>
             </div>
           </section>
 
@@ -1811,7 +1944,7 @@ onUnmounted(() => {
 
               <header class="workspace-topbar">
                 <button v-if="!shareMode" class="workspace-back" type="button" aria-label="返回行程列表" @click="navigateBackToList"><span>‹</span><small>行程</small></button>
-                <div class="workspace-title"><strong>{{ selected?.title || tripDocument?.title || '行程地图' }}</strong><span>{{ selected ? selected.start_date + ' — ' + selected.end_date : '地图工作区' }}</span></div>
+                <div class="workspace-title"><strong>{{ selected?.title || tripDocument?.title || '行程地图' }}</strong><span>{{ selected ? formatDateRange(selected.start_date, selected.end_date) : '地图工作区' }}</span></div>
                 <div class="workspace-top-actions">
                   <button class="workspace-tool-trigger" type="button" :aria-expanded="mobileMapToolsOpen" aria-label="打开地图选项" @click="toggleMobileMapTools"><IonIcon :icon="mapOutline" /><span>地图选项</span></button>
                   <button v-if="!shareMode" class="workspace-more" type="button" aria-label="打开更多操作" @click="openSettings"><span>⋯</span></button>
@@ -1829,18 +1962,18 @@ onUnmounted(() => {
 
               <section v-if="error || (shareNoticeVisible && shareURL)" class="map-notices redesign-notices">
                 <div v-if="error" class="global-error"><IonIcon :icon="cloudOfflineOutline" /><span>{{ error }}</span><button aria-label="关闭错误" @click="error = ''">×</button></div>
-                <div v-if="shareNoticeVisible && shareURL" class="share-banner"><span><strong>只读分享已创建</strong><a :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><small v-if="shareExpiresAt">有效期至 {{ new Date(shareExpiresAt).toLocaleString() }}</small><small v-if="shareCopyMessage" class="share-copy-feedback">{{ shareCopyMessage }}</small></span><div class="share-actions"><button type="button" @click="copyShareURL">复制链接</button><button v-if="shareID" type="button" @click="revokeShare">撤销</button><button type="button" aria-label="关闭分享提示" @click="dismissShareNotice">×</button></div></div>
+                <div v-if="shareNoticeVisible && shareURL" class="share-banner"><span><strong>只读分享已创建</strong><a :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><small v-if="shareExpiresAt">有效期至 {{ formatDateTime(shareExpiresAt) }}</small><small v-if="shareCopyMessage" class="share-copy-feedback">{{ shareCopyMessage }}</small></span><div class="share-actions"><button type="button" @click="copyShareURL">复制链接</button><button v-if="shareID" type="button" @click="revokeShare">撤销</button><button type="button" aria-label="关闭分享提示" @click="dismissShareNotice">×</button></div></div>
               </section>
             </div>
 
             <aside v-if="tripDocument" class="floating-panel workspace-panel itinerary-panel" :class="['sheet-' + sheetBreakpoint, { 'panel-search-mode': panelMode === 'search', 'is-sheet-dragging': sheetDragActive }]" :style="sheetDragStyle" aria-label="行程时间线">
               <button class="sheet-handle" type="button" :aria-label="sheetBreakpoint === 'peek' ? '展开行程' : '收起行程'" @pointerdown="startSheetDrag" @click="cycleSheetBreakpoint"><span></span></button>
               <header class="workspace-panel-head">
-                <div><div class="workspace-panel-kicker"><p class="eyebrow">{{ shareMode ? 'SHARED JOURNEY' : 'CURRENT JOURNEY' }}</p><span v-if="shareURL" class="share-status-tag">已分享</span></div><h1>{{ selected?.title || tripDocument.title }}</h1><p>{{ selected ? selected.start_date + ' — ' + selected.end_date : '选择一条行程查看详情' }}</p></div>
+                <div><div class="workspace-panel-kicker"><p class="eyebrow">{{ shareMode ? 'SHARED JOURNEY' : 'CURRENT JOURNEY' }}</p><span v-if="shareURL" class="share-status-tag">已分享</span></div><h1>{{ selected?.title || tripDocument.title }}</h1><p>{{ selected ? formatDateRange(selected.start_date, selected.end_date) : '选择一条行程查看详情' }}</p></div>
                 <div class="panel-head-actions"><button v-if="!shareMode" class="panel-action-button" type="button" aria-label="返回行程列表" @click="navigateBackToList"><span>‹</span><small>行程</small></button><button class="panel-action-button collapse-action" type="button" :aria-label="sheetBreakpoint === 'peek' ? '展开行程' : '收起到 Peek'" @click="setSheetBreakpoint(sheetBreakpoint === 'peek' ? 'half' : 'peek')"><IonIcon :icon="sheetBreakpoint === 'peek' ? chevronUpOutline : chevronDownOutline" /></button></div>
               </header>
               <nav v-if="panelMode === 'journey'" class="journey-view-tabs" aria-label="行程内容"><button type="button" :class="{ selected: journeySection === 'itinerary' }" @click="journeySection = 'itinerary'">规划点 <small>{{ visibleStops.length }}</small></button><button type="button" :class="{ selected: journeySection === 'overview' }" @click="journeySection = 'overview'">说明</button></nav>
-              <div v-if="panelMode === 'journey'" class="journey-day-tabs" aria-label="行程日期"><button type="button" :class="{ selected: selectedDay === 'all' }" @click="selectJourneyDay('all')">全程</button><button v-for="(day, index) in tripDocument.days" :key="day.id" type="button" :class="{ selected: selectedDay === index + 1 }" @click="selectJourneyDay(index + 1)">D{{ index + 1 }} <small>{{ day.date.slice(5) }}</small></button></div>
+              <div v-if="panelMode === 'journey'" class="journey-day-tabs" aria-label="行程日期"><button type="button" :class="{ selected: selectedDay === 'all' }" @click="selectJourneyDay('all')">全程</button><button v-for="(day, index) in tripDocument.days" :key="day.id" type="button" :class="{ selected: selectedDay === index + 1 }" @click="selectJourneyDay(index + 1)">D{{ index + 1 }} <small>{{ formatDate(day.date).slice(5) }}</small></button></div>
 
               <div v-if="panelMode === 'search'" class="panel-scroll panel-search-scroll">
                 <div class="search-panel-heading"><button class="inline-back-button" type="button" @click="closeJourneySearch"><span>‹</span> 返回行程</button><span class="eyebrow">{{ searchParentStopId ? 'ADD CHILD POINT' : 'ADD A PLACE' }}</span><h2>{{ searchParentStopId ? '添加子规划点' : '搜索地点' }}</h2><p>{{ searchParentStopId && selectedStop ? '添加到：' + selectedStop.title : '搜索结果会保留名称、地址、坐标系和 Provider 引用。' }}</p></div>
@@ -1866,15 +1999,15 @@ onUnmounted(() => {
             <aside v-if="selectedStop" class="details-drawer stop-detail-panel" :class="['sheet-' + sheetBreakpoint, { 'is-child-detail': Boolean(selectedSubStop), 'is-sheet-dragging': sheetDragActive }]" :style="sheetDragStyle" aria-label="规划点详情">
               <div class="detail-sheet-handle"><button type="button" :aria-label="sheetBreakpoint === 'expanded' ? '收起规划点详情到最低' : sheetBreakpoint === 'peek' ? '展开规划点详情到半屏' : '收起规划点详情到最低'" @pointerdown="startSheetDrag" @click="cycleSheetBreakpoint"><span></span></button></div>
               <div class="detail-scroll redesign-detail-scroll">
-                <header class="detail-topbar"><button type="button" class="detail-back-button" @click="selectedSubStop ? navigateBackFromSubStop() : navigateBackFromStop()"><span>‹</span>{{ selectedSubStop ? '主规划点' : selectedDay === 'all' ? '行程' : 'D' + selectedDay + ' 行程' }}</button><div class="detail-topbar-actions"><button class="detail-sheet-toggle" type="button" :aria-label="sheetBreakpoint === 'expanded' ? '收起到半屏' : sheetBreakpoint === 'peek' ? '展开到半屏' : '展开规划点详情'" @click="toggleDetailSheet"><IonIcon :icon="sheetBreakpoint === 'expanded' ? chevronDownOutline : chevronUpOutline" /></button><div v-if="!shareMode" class="detail-more-wrap"><button type="button" class="detail-more-button" :aria-expanded="detailMoreOpen" aria-label="规划点更多操作" @click.stop="toggleDetailMore">⋯</button><div v-if="detailMoreOpen" class="detail-more-menu" role="menu"><button type="button" role="menuitem" @click="editSelectedDescriptionFromMenu">编辑地点说明</button><button type="button" role="menuitem" class="danger-menu-item" @click="deleteSelectedPointFromMenu">删除{{ selectedSubStop ? '子规划点' : '规划点' }}</button></div></div></div></header>
+                <header class="detail-topbar"><button type="button" class="detail-back-button" @click="selectedSubStop ? navigateBackFromSubStop() : navigateBackFromStop()"><span>‹</span>{{ selectedSubStop ? '主规划点' : selectedDay === 'all' ? '行程' : 'D' + selectedDay + ' 行程' }}</button><div class="detail-topbar-actions"><button class="detail-sheet-toggle" type="button" :aria-label="sheetBreakpoint === 'expanded' ? '收起到半屏' : sheetBreakpoint === 'peek' ? '展开到半屏' : '展开规划点详情'" @click="toggleDetailSheet"><IonIcon :icon="sheetBreakpoint === 'expanded' ? chevronDownOutline : chevronUpOutline" /></button><div v-if="!shareMode" class="detail-more-wrap"><button type="button" class="detail-more-button" :aria-expanded="detailMoreOpen" aria-label="规划点更多操作" @click.stop="toggleDetailMore">⋯</button><div v-if="detailMoreOpen" class="detail-more-menu" role="menu"><button type="button" role="menuitem" @click="editSelectedDescriptionFromMenu">编辑规划点信息</button><button type="button" role="menuitem" class="danger-menu-item" @click="deleteSelectedPointFromMenu">删除{{ selectedSubStop ? '子规划点' : '规划点' }}</button></div></div></div></header>
                 <p class="detail-kicker"><span>{{ selectedSubStop ? 'SUB-STOP ' + selectedSubStop.sequence : 'STOP ' + selectedStop.sequence }}</span><span>{{ selectedTarget?.kind || '规划点' }}</span></p>
-                <h1>{{ selectedTarget?.title }}</h1><p class="detail-address">{{ selectedTarget?.address || '地址待解析' }}</p><p class="detail-date">{{ stopDate(selectedTarget || selectedStop) }} · {{ selectedTarget?.time_window?.arrival || '时间待定' }}{{ selectedTarget?.time_window?.departure ? ' — ' + selectedTarget.time_window.departure : '' }}</p>
+                <h1>{{ selectedTarget?.title }}</h1><p class="detail-address">{{ selectedTarget?.address || '地址待解析' }}</p><div class="detail-date-row"><p class="detail-date">{{ stopDate(selectedTarget || selectedStop) }}<span v-if="stopTime(selectedTarget || selectedStop)"> · {{ stopTime(selectedTarget || selectedStop) }}</span></p><button v-if="!shareMode && !selectedSubStop" class="text-action detail-date-edit" type="button" @click="beginEditStopDate">修改日期</button><span v-if="selectedSubStop" class="detail-date-follow-note">跟随主规划点</span></div><div v-if="stopDateEditing && !selectedSubStop" class="detail-date-editor"><label class="select-field">移动到日期<UiSelect v-model="stopDateDraftDayID" aria-label="规划点目标日期" :options="tripDayOptions" /></label><div class="editor-actions"><button class="secondary-action compact-action" type="button" @click="cancelEditStopDate">取消</button><button class="primary-action compact-action" type="button" :disabled="stopDateSaving" @click="saveStopDate">{{ stopDateSaving ? '保存中…' : '保存日期' }}</button></div></div>
                 <div class="detail-location"><span>坐标已保存</span><small>{{ pointFor(selectedTarget || selectedStop)?.crs || '未知 CRS' }} · {{ pointFor(selectedTarget || selectedStop)?.lat.toFixed(6) }}, {{ pointFor(selectedTarget || selectedStop)?.lng.toFixed(6) }}</small></div>
                 <div class="detail-primary-actions"><button class="detail-navigation-button" type="button" @click="openNavigation('amap')"><IonIcon :icon="navigateOutline" /> 高德导航</button><button class="detail-navigation-button" type="button" @click="openNavigation('baidu')"><IonIcon :icon="navigateOutline" /> 百度导航</button></div>
                 <div class="detail-weather"><IonIcon :icon="sunnyOutline" /><span><strong>{{ weatherText(selectedTarget || selectedStop) }}</strong><small v-if="weatherUpdatedAt(selectedTarget || selectedStop)">更新于 {{ weatherUpdatedAt(selectedTarget || selectedStop) }}</small></span><button v-if="!shareMode" type="button" :disabled="weatherLoading" @click="refreshWeather">{{ weatherLoading ? '查询中…' : '刷新' }}</button></div>
                 <section v-if="!selectedSubStop" class="detail-section"><div class="section-title-row"><h2>子规划点 <span>{{ selectedStop.children?.length || 0 }}</span></h2><button v-if="!shareMode" class="text-action" type="button" @click="openChildSearch(selectedStop)">添加</button></div><p v-if="selectedStop.children?.length" class="detail-section-help">点击子点进入下一层，返回箭头会回到主规划点。</p><div v-if="selectedStop.children?.length" class="detail-child-list"><button v-for="child in selectedStop.children" :key="child.id" type="button" class="detail-child-row" @click="selectSubStop(child, selectedStop)"><span class="child-number">{{ child.sequence }}</span><span><strong>{{ child.title }}</strong><small>{{ stopDate(child) }} · {{ child.address || '地址已保存' }}</small></span><span>›</span></button></div><button v-if="!shareMode" class="add-place-action" type="button" @click="openChildSearch(selectedStop)"><IonIcon :icon="searchOutline" /> 添加子规划点</button></section>
                 <button v-else class="detail-parent-button" type="button" @click="navigateBackFromSubStop">‹ 返回主规划点：{{ selectedStop.title }}</button>
-                <section class="detail-section"><div class="section-title-row"><h2>地点说明</h2><div v-if="!shareMode" class="section-actions"><button class="text-action" type="button" @click="beginEditDescription">{{ descriptionEditing ? '编辑中' : '编辑' }}</button><button v-if="descriptionEditing" class="text-action" type="button" @click="openDescriptionFullscreen">全屏</button></div></div><template v-if="descriptionEditing"><MarkdownEditor v-model="descriptionDraft" v-model:mode="descriptionEditorMode" :preview-html="renderMarkdown(descriptionDraft)" :rows="7" editor-label="MARKDOWN" preview-label="地点说明预览" editor-aria-label="地点说明 Markdown 原始文本" placeholder="补充门票、开放时间、行程备注等信息" /><div class="editor-actions"><button class="secondary-action compact-action" type="button" @click="cancelEditDescription">取消</button><button class="primary-action compact-action" type="button" :disabled="descriptionSaving" @click="saveDescription">{{ descriptionSaving ? '保存中…' : '保存说明' }}</button></div></template><div v-else-if="selectedTarget?.description_markdown" class="markdown" v-html="renderMarkdown(selectedTarget.description_markdown)"></div><p v-else class="muted">{{ shareMode ? '暂无地点说明。' : '暂无地点说明，点击“编辑”添加。' }}</p></section>
+                <section class="detail-section"><div class="section-title-row"><h2>地点说明与时间</h2><div v-if="!shareMode" class="section-actions"><button class="text-action" type="button" @click="beginEditDescription">{{ descriptionEditing ? '编辑中' : '编辑规划点' }}</button><button v-if="descriptionEditing" class="text-action" type="button" @click="openDescriptionFullscreen">全屏</button></div></div><template v-if="descriptionEditing"><div class="detail-time-editor"><div class="detail-time-editor-heading"><strong>时间窗口</strong><small>到达和离开时间均为可选，留空表示未设置</small></div><div class="detail-time-fields"><label>到达<input v-model="arrivalTimeDraft" type="time" /></label><label>离开<input v-model="departureTimeDraft" type="time" /></label></div></div><MarkdownEditor v-model="descriptionDraft" v-model:mode="descriptionEditorMode" :preview-html="renderMarkdown(descriptionDraft)" :rows="7" editor-label="MARKDOWN" preview-label="地点说明预览" editor-aria-label="地点说明 Markdown 原始文本" placeholder="补充门票、开放时间、行程备注等信息" /><div class="editor-actions"><button class="secondary-action compact-action" type="button" @click="cancelEditDescription">取消</button><button class="primary-action compact-action" type="button" :disabled="descriptionSaving" @click="saveDescription">{{ descriptionSaving ? '保存中…' : '保存规划点' }}</button></div></template><div v-else-if="selectedTarget?.description_markdown" class="markdown" v-html="renderMarkdown(selectedTarget.description_markdown)"></div><p v-else class="muted">{{ shareMode ? '暂无地点说明。' : '暂无地点说明，点击“编辑规划点”添加。' }}</p></section>
                 <button v-if="!shareMode" class="detail-danger-button" type="button" @click="deletePlanningPoint(selectedTarget || selectedStop)">删除{{ selectedSubStop ? '子规划点' : '规划点' }}</button>
               </div>
             </aside>
@@ -1882,7 +2015,7 @@ onUnmounted(() => {
         </main>
       </div>
 
-      <div v-if="descriptionFullscreen && descriptionEditing" class="fullscreen-editor-backdrop"><section class="fullscreen-editor" role="dialog" aria-modal="true" aria-labelledby="fullscreen-description-title"><header><h2 id="fullscreen-description-title">编辑地点说明</h2><button class="modal-close" type="button" aria-label="退出全屏编辑" @click="closeDescriptionFullscreen">×</button></header><MarkdownEditor class="fullscreen-markdown-editor" v-model="descriptionDraft" v-model:mode="descriptionEditorMode" :preview-html="renderMarkdown(descriptionDraft)" :rows="12" editor-label="MARKDOWN" preview-label="地点说明预览" editor-aria-label="地点说明 Markdown 原始文本" placeholder="补充门票、开放时间、行程备注等信息" /><div class="description-actions"><button class="text-button" type="button" @click="cancelEditDescription">取消</button><button class="primary-text-button" type="button" :disabled="descriptionSaving" @click="saveDescription">{{ descriptionSaving ? '保存中…' : '保存说明' }}</button></div></section></div>
+      <div v-if="descriptionFullscreen && descriptionEditing" class="fullscreen-editor-backdrop"><section class="fullscreen-editor" role="dialog" aria-modal="true" aria-labelledby="fullscreen-description-title"><header><h2 id="fullscreen-description-title">编辑规划点信息</h2><button class="modal-close" type="button" aria-label="退出全屏编辑" @click="closeDescriptionFullscreen">×</button></header><MarkdownEditor class="fullscreen-markdown-editor" v-model="descriptionDraft" v-model:mode="descriptionEditorMode" :preview-html="renderMarkdown(descriptionDraft)" :rows="12" editor-label="MARKDOWN" preview-label="地点说明预览" editor-aria-label="地点说明 Markdown 原始文本" placeholder="补充门票、开放时间、行程备注等信息" /><div class="description-actions"><button class="text-button" type="button" @click="cancelEditDescription">取消</button><button class="primary-text-button" type="button" :disabled="descriptionSaving" @click="saveDescription">{{ descriptionSaving ? '保存中…' : '保存规划点' }}</button></div></section></div>
       <div v-if="tripDescriptionFullscreen && tripDescriptionEditing" class="fullscreen-editor-backdrop"><section class="fullscreen-editor" role="dialog" aria-modal="true" aria-labelledby="fullscreen-trip-description-title"><header><h2 id="fullscreen-trip-description-title">编辑行程总体说明</h2><button class="modal-close" type="button" aria-label="退出全屏编辑" @click="closeTripDescriptionFullscreen">×</button></header><MarkdownEditor class="fullscreen-markdown-editor" v-model="tripDescriptionDraft" v-model:mode="tripDescriptionEditorMode" :preview-html="renderMarkdown(tripDescriptionDraft)" :rows="12" editor-label="MARKDOWN" preview-label="行程说明预览" editor-aria-label="行程说明 Markdown 原始文本" placeholder="补充整个行程的背景、节奏和注意事项" /><div class="description-actions"><button class="text-button" type="button" @click="cancelEditTripDescription">取消</button><button class="primary-text-button" type="button" :disabled="tripDescriptionSaving" @click="saveTripDescription">{{ tripDescriptionSaving ? '保存中…' : '保存说明' }}</button></div></section></div>
       <div v-if="mapPickOpen" class="modal-backdrop" @click.self="cancelMapPick"><section class="modal-panel map-pick-panel" role="dialog" aria-modal="true" aria-labelledby="map-pick-title"><button class="modal-close" aria-label="取消地图选点" @click="cancelMapPick">×</button><p class="eyebrow">MAP PICK</p><h2 id="map-pick-title">保存地图选点</h2><p class="map-pick-coordinate">{{ mapPickLocation?.crs }} · {{ mapPickLocation?.lat.toFixed(6) }}, {{ mapPickLocation?.lng.toFixed(6) }}</p><label>地点名称<input v-model="mapPickTitle" required autofocus placeholder="例如：临时观景点" /></label><label>地址或备注（可选）<input v-model="mapPickAddress" placeholder="补充位置说明" /></label><label class="select-field">加入日期<UiSelect v-model="mapPickDayID" aria-label="加入日期" :options="tripDayOptions" /></label><div class="modal-actions"><button type="button" @click="cancelMapPick">取消</button><button type="button" class="primary" :disabled="actionLoading || !mapPickTitle.trim()" @click="saveMapPick">{{ actionLoading ? '保存中…' : '保存规划点' }}</button></div></section></div>
       <div v-if="newTripOpen" class="new-trip-backdrop" @click.self="newTripOpen = false">
@@ -1935,7 +2068,7 @@ onUnmounted(() => {
 
               <section v-else-if="settingsSection === 'sharing'" class="settings-page-section">
                 <div class="settings-section-heading"><span class="eyebrow">ONLINE SHARING</span><h3>在线分享</h3><p>集中管理当前行程的只读分享链接；分享状态不会遮挡地图。</p></div>
-                <div class="settings-card settings-share-card"><div class="settings-card-heading"><div><strong>{{ selected?.title || '当前行程' }}</strong><small>持有链接即可查看当前行程快照</small></div><span class="provider-status">{{ shareURL ? '已分享' : '未分享' }}</span></div><template v-if="selected"><a v-if="shareURL" class="settings-share-url" :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><p v-if="shareExpiresAt" class="settings-share-expiry">有效期至 {{ new Date(shareExpiresAt).toLocaleString() }}</p><p v-if="!shareURL" class="settings-help">当前行程还没有在线分享；点击下方按钮创建一个只读链接。</p><div class="settings-actions"><button v-if="shareURL" class="primary-action" type="button" @click="copyShareURL">复制链接</button><button v-if="shareURL && shareID" class="secondary-action" type="button" :disabled="actionLoading" @click="revokeShare">撤销分享</button><button v-else class="primary-action" type="button" :disabled="actionLoading" @click="createShare">{{ actionLoading ? '创建中…' : '在线分享' }}</button></div><p v-if="shareCopyMessage" class="settings-feedback">{{ shareCopyMessage }}</p></template><p v-else class="settings-help">请先选择一条行程，再管理它的在线分享链接。</p></div>
+                <div class="settings-card settings-share-card"><div class="settings-card-heading"><div><strong>{{ selected?.title || '当前行程' }}</strong><small>持有链接即可查看当前行程快照</small></div><span class="provider-status">{{ shareURL ? '已分享' : '未分享' }}</span></div><template v-if="selected"><a v-if="shareURL" class="settings-share-url" :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><p v-if="shareExpiresAt" class="settings-share-expiry">有效期至 {{ formatDateTime(shareExpiresAt) }}</p><p v-if="!shareURL" class="settings-help">当前行程还没有在线分享；点击下方按钮创建一个只读链接。</p><div class="settings-actions"><button v-if="shareURL" class="primary-action" type="button" @click="copyShareURL">复制链接</button><button v-if="shareURL && shareID" class="secondary-action" type="button" :disabled="actionLoading" @click="revokeShare">撤销分享</button><button v-else class="primary-action" type="button" :disabled="actionLoading" @click="createShare">{{ actionLoading ? '创建中…' : '在线分享' }}</button></div><p v-if="shareCopyMessage" class="settings-feedback">{{ shareCopyMessage }}</p></template><p v-else class="settings-help">请先选择一条行程，再管理它的在线分享链接。</p></div>
                 <div class="settings-note"><span class="settings-note-mark">i</span><span>分享链接是只读快照，默认有效期为 7 天。撤销后，持有链接的人将无法继续查看。</span></div>
               </section>
 

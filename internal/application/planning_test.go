@@ -307,3 +307,32 @@ func TestReorderStopToTargetSequence(t *testing.T) {
 		t.Fatalf("expected revision conflict, got %v", err)
 	}
 }
+
+func TestMoveStopToDayPreservesChildrenAndClearsRoutes(t *testing.T) {
+	service := testService(t)
+	tripJSON := []byte(`{"schema_version":1,"title":"跨天日期测试","status":"draft","timezone":"Asia/Shanghai","date_range":{"start":"2026-04-18","end":"2026-04-19"},"days":[{"id":"day-1","date":"2026-04-18","stops":[{"id":"stop-a","sequence":1,"title":"A"},{"id":"stop-b","sequence":2,"title":"B","children":[{"id":"child-b","sequence":1,"title":"B-子点"}]}],"legs":[{"id":"leg-1","from_stop_id":"stop-a","to_stop_id":"stop-b"}]},{"id":"day-2","date":"2026-04-19","stops":[{"id":"stop-c","sequence":1,"title":"C"},{"id":"stop-d","sequence":2,"title":"D"}],"legs":[{"id":"leg-2","from_stop_id":"stop-c","to_stop_id":"stop-d"}]}]}`)
+	record, err := service.Create(context.Background(), tripJSON, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err = service.MoveStopToDay(context.Background(), record.ID, record.Revision, "day-1", "stop-b", "day-2", 0, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var trip domain.Trip
+	if err := json.Unmarshal(record.Document, &trip); err != nil {
+		t.Fatal(err)
+	}
+	if got := []string{trip.Days[0].Stops[0].ID, trip.Days[1].Stops[0].ID, trip.Days[1].Stops[1].ID, trip.Days[1].Stops[2].ID}; !reflect.DeepEqual(got, []string{"stop-a", "stop-c", "stop-d", "stop-b"}) {
+		t.Fatalf("day order=%v", got)
+	}
+	if trip.Days[1].Stops[2].Sequence != 3 || len(trip.Days[1].Stops[2].Children) != 1 {
+		t.Fatalf("moved stop was not normalized or children were lost: %+v", trip.Days[1].Stops)
+	}
+	if len(trip.Days[0].Legs) != 0 || len(trip.Days[1].Legs) != 0 {
+		t.Fatal("moving a stop between days must clear affected route legs")
+	}
+	if _, err := service.MoveStopToDay(context.Background(), record.ID, record.Revision-1, "day-2", "stop-b", "day-1", 0, "test"); !errors.Is(err, store.ErrRevisionConflict) {
+		t.Fatalf("expected revision conflict, got %v", err)
+	}
+}

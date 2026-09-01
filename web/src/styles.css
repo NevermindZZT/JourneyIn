@@ -187,8 +187,11 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .rail-spacer { flex: 1; }
 .rail-link { min-height: 50px; }
 
-.trip-list-view { min-width: 0; min-height: 0; height: 100%; flex: 1 1 auto; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch; touch-action: pan-y; padding: clamp(28px, 5vw, 66px) clamp(22px, 5vw, 72px); background: radial-gradient(circle at 94% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 25%), var(--surface); }
-.trip-list-view button, .trip-list-view a { touch-action: pan-y; }
+.trip-list-view { position: relative; min-width: 0; min-height: 0; height: 100%; flex: 1 1 auto; overflow: hidden; touch-action: pan-y; padding: 0; background: radial-gradient(circle at 94% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 25%), var(--surface); }
+.trip-list-scroll { position: absolute; inset: 0; width: auto; height: auto; min-height: 0; overflow-x: hidden; overflow-y: scroll; overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch; touch-action: pan-y; padding: clamp(28px, 5vw, 66px) clamp(22px, 5vw, 72px); scrollbar-color: var(--line) transparent; scrollbar-width: thin; }
+.trip-list-scroll, .trip-list-scroll * { touch-action: pan-y; }
+.trip-list-scroll:focus:not(:focus-visible) { outline: none; }
+.trip-list-scroll:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 72%, transparent); outline-offset: -3px; }
 .list-page-header { display: flex; max-width: 1120px; align-items: flex-end; justify-content: space-between; gap: 24px; margin: 0 auto 28px; }
 .list-page-header h1 { margin: 5px 0 0; color: var(--ink); font-size: clamp(32px, 4vw, 52px); letter-spacing: -.065em; }
 .list-page-subtitle { margin: 9px 0 0; color: var(--muted); font-size: 14px; }
@@ -202,6 +205,10 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .list-summary-bar { display: flex; max-width: 1120px; align-items: center; justify-content: space-between; gap: 16px; margin: 0 auto 18px; padding: 12px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; font-weight: 800; }
 .list-summary-bar strong { color: var(--p); }
 .list-summary-note { font-size: 11px; font-weight: 600; }
+.list-summary-controls { display: flex; min-width: 0; align-items: center; gap: 11px; }
+.list-sort-control { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; font-weight: 800; white-space: nowrap; }
+.list-sort-control .ui-select { width: 136px; }
+.list-sort-control .ui-select-trigger { min-height: 34px; padding-block: 6px; font-size: 10px; }
 .inline-error { display: flex; max-width: 1120px; align-items: center; gap: 9px; margin: 0 auto 16px; padding: 11px 13px; border: 1px solid color-mix(in srgb, var(--md-error) 45%, var(--line)); border-radius: 13px; color: var(--md-error); background: color-mix(in srgb, var(--md-error) 8%, var(--surface)); font-size: 12px; }
 .inline-error ion-icon { flex: 0 0 auto; font-size: 18px; }
 .inline-error span { min-width: 0; flex: 1; }
@@ -232,6 +239,7 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .trip-card-copy strong { overflow: hidden; color: var(--ink); font-size: 17px; text-overflow: ellipsis; white-space: nowrap; }
 .trip-card-copy span, .trip-card-copy small { color: var(--muted); font-size: 12px; }
 .trip-card-copy small { font-size: 11px; }
+.trip-card-copy .trip-card-updated { color: var(--p); font-weight: 800; }
 .trip-card-arrow { color: var(--muted); font-size: 26px; }
 .trip-card-menu-button { position: absolute; z-index: 2; top: 10px; right: 10px; display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid transparent; border-radius: 10px; color: var(--muted); background: transparent; font-size: 20px; }
 .trip-card-menu-button[aria-expanded="true"] { border-color: var(--line); color: var(--p); background: var(--surface); }
@@ -414,7 +422,22 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .detail-kicker span:last-child { padding: 5px 7px; border-radius: 999px; letter-spacing: 0; color: var(--muted); background: var(--surface); font-size: 10px; text-transform: none; }
 .redesign-detail-scroll > h1 { margin: 7px 0 0; color: var(--ink); font-size: 30px; letter-spacing: -.06em; }
 .detail-address { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
-.detail-date { margin: 7px 0 0; color: var(--p); font-size: 11px; font-weight: 800; }
+.detail-date-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-top: 7px; }
+.detail-date-row .detail-date { min-width: 0; flex: 1; margin: 0; }
+.detail-date-edit { flex: 0 0 auto; min-height: 28px; padding: 4px 6px; font-size: 10px; }
+.detail-date-follow-note { flex: 0 0 auto; padding-top: 3px; color: var(--muted); font-size: 9px; }
+.detail-date-editor { margin-top: 11px; padding: 10px 11px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--p) 6%, var(--surface)); }
+.detail-date-editor label { display: grid; gap: 5px; color: var(--muted); font-size: 10px; font-weight: 800; }
+.detail-date-editor .ui-select-trigger { min-height: 38px; }
+.detail-date-editor .editor-actions { margin-top: 9px; }
+.detail-time-editor { display: grid; gap: 9px; margin-bottom: 11px; padding: 11px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--p) 5%, var(--surface)); }
+.detail-time-editor-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.detail-time-editor-heading strong { color: var(--ink); font-size: 11px; }
+.detail-time-editor-heading small { color: var(--muted); font-size: 9px; }
+.detail-time-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.detail-time-fields label { display: grid; gap: 5px; color: var(--muted); font-size: 10px; font-weight: 800; }
+.detail-time-fields input { width: 100%; min-height: 38px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 10px; outline: none; color: var(--ink); background: var(--surface); font-size: 12px; }
+.detail-time-fields input:focus { border-color: var(--p); box-shadow: 0 0 0 3px color-mix(in srgb, var(--p) 12%, transparent); }
 .detail-location { display: grid; gap: 3px; margin-top: 15px; padding: 10px 11px; border-radius: 12px; color: var(--p); background: color-mix(in srgb, var(--p) 9%, var(--surface)); }
 .detail-location span { font-size: 11px; font-weight: 900; }
 .detail-location small { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; }
@@ -473,8 +496,12 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 }
 
 @media (max-width: 900px) {
+  body, #app, ion-app { touch-action: auto; }
+  .redesign-page, .redesign-content, .journey-redesign { height: 100dvh; min-height: 100dvh; }
+  .journey-redesign.is-list-view { display: block; overflow: visible; }
+  .trip-list-scroll { position: fixed; inset: 0; width: auto; height: auto; }
   .journey-rail { display: none; }
-  .trip-list-view { padding: 28px 24px 42px; }
+  .trip-list-scroll { padding: 28px 24px 42px; }
   .list-page-header { align-items: flex-start; flex-direction: column; }
   .list-page-actions { width: 100%; }
   .list-page-actions .secondary-action, .list-page-actions .primary-action { flex: 1; }
@@ -507,7 +534,7 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
    .stop-detail-panel.sheet-peek .detail-kicker { margin-top: 6px; }
    .stop-detail-panel.sheet-peek .redesign-detail-scroll > h1 { margin-top: 2px; font-size: 22px; }
    .stop-detail-panel.sheet-peek .detail-address { margin-top: 2px; }
-   .stop-detail-panel.sheet-peek .detail-date, .stop-detail-panel.sheet-peek .detail-location, .stop-detail-panel.sheet-peek .detail-primary-actions, .stop-detail-panel.sheet-peek .detail-weather, .stop-detail-panel.sheet-peek .detail-section, .stop-detail-panel.sheet-peek .detail-parent-button, .stop-detail-panel.sheet-peek .detail-danger-button { display: none; }
+   .stop-detail-panel.sheet-peek .detail-date-row, .stop-detail-panel.sheet-peek .detail-location, .stop-detail-panel.sheet-peek .detail-primary-actions, .stop-detail-panel.sheet-peek .detail-weather, .stop-detail-panel.sheet-peek .detail-section, .stop-detail-panel.sheet-peek .detail-parent-button, .stop-detail-panel.sheet-peek .detail-danger-button { display: none; }
   .detail-sheet-toggle { display: grid; }
   .detail-sheet-handle { display: grid; height: 25px; place-items: center; }
   .detail-sheet-handle button { display: grid; width: 100%; height: 25px; place-items: center; border: 0; background: transparent; touch-action: none; }
@@ -521,12 +548,14 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 }
 
 @media (max-width: 560px) {
-  .trip-list-view { padding: max(22px, env(safe-area-inset-top)) 16px calc(32px + env(safe-area-inset-bottom)); }
+  .trip-list-scroll { padding: max(22px, env(safe-area-inset-top)) 16px calc(32px + env(safe-area-inset-bottom)); }
   .list-page-header { margin-bottom: 21px; }
   .list-page-header h1 { font-size: 34px; }
   .list-page-subtitle { font-size: 12px; }
   .list-page-actions .secondary-action, .list-page-actions .primary-action { min-height: 40px; padding-inline: 9px; font-size: 11px; }
-  .list-summary-bar { margin-bottom: 13px; }
+  .list-summary-bar { align-items: flex-start; flex-wrap: wrap; margin-bottom: 13px; }
+   .list-summary-controls { width: 100%; justify-content: space-between; }
+   .list-sort-control .ui-select { width: 150px; }
   .trip-list-grid { grid-template-columns: 1fr; gap: 9px; }
   .trip-card-main { min-height: 98px; padding: 13px 12px; }
   .trip-card-copy strong { font-size: 15px; }

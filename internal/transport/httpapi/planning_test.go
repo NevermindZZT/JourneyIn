@@ -304,3 +304,58 @@ func TestMoveStopHTTPWorkflow(t *testing.T) {
 		t.Fatalf("stale move status %d", conflict.StatusCode)
 	}
 }
+
+func TestMoveStopToDayHTTPWorkflow(t *testing.T) {
+	server := testPlanningServer(t)
+	defer server.Close()
+	trip := []byte(`{"schema_version":1,"title":"HTTP move day","status":"draft","timezone":"Asia/Shanghai","date_range":{"start":"2026-04-18","end":"2026-04-19"},"days":[{"id":"day-1","date":"2026-04-18","stops":[{"id":"stop-a","sequence":1,"title":"A"},{"id":"stop-b","sequence":2,"title":"B"}]},{"id":"day-2","date":"2026-04-19","stops":[{"id":"stop-c","sequence":1,"title":"C"}]}]}`)
+	response, err := http.Post(server.URL+"/api/v1/trips", "application/json", strings.NewReader(string(trip)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var created struct {
+		ID       string `json:"id"`
+		Revision int    `json:"revision"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/trips/"+created.ID+"/days/day-1/stops/stop-b/move", strings.NewReader(`{"target_day_id":"day-2","target_sequence":2}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("If-Match", "revision-"+strconv.Itoa(created.Revision))
+	moved, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer moved.Body.Close()
+	if moved.StatusCode != http.StatusOK {
+		t.Fatalf("move day status %d", moved.StatusCode)
+	}
+	var payload struct {
+		Revision int `json:"revision"`
+		Document struct {
+			Days []struct {
+				Stops []struct {
+					ID       string `json:"id"`
+					Sequence int    `json:"sequence"`
+				} `json:"stops"`
+			} `json:"days"`
+		} `json:"document"`
+	}
+	if err := json.NewDecoder(moved.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Revision != created.Revision+1 {
+		t.Fatalf("revision=%d", payload.Revision)
+	}
+	if got := []string{payload.Document.Days[0].Stops[0].ID, payload.Document.Days[1].Stops[0].ID, payload.Document.Days[1].Stops[1].ID}; !reflect.DeepEqual(got, []string{"stop-a", "stop-c", "stop-b"}) {
+		t.Fatalf("days=%v", got)
+	}
+	if payload.Document.Days[1].Stops[1].Sequence != 2 {
+		t.Fatalf("target sequence=%d", payload.Document.Days[1].Stops[1].Sequence)
+	}
+}

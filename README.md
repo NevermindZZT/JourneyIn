@@ -153,7 +153,7 @@ POST /api/v1/shares
 POST /api/v1/shares/{share_id}/revoke
 POST /api/v1/maps/pois/search
 POST /api/v1/trips/{trip_id}/days/{day_id}/stops
-POST /api/v1/trips/{trip_id}/days/{day_id}/stops/{stop_id}/move  # body: {"direction":"up"} 或 {"target_sequence":2}
+POST /api/v1/trips/{trip_id}/days/{day_id}/stops/{stop_id}/move  # body: {"direction":"up"}、{"target_sequence":2} 或 {"target_day_id":"day-2"}
 DELETE /api/v1/trips/{trip_id}/days/{day_id}/stops/{stop_id}
 POST /api/v1/trips/{trip_id}/days/{day_id}/stops/{stop_id}/children
 POST /api/v1/trips/{trip_id}/days/{day_id}/stops/{stop_id}/weather
