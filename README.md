@@ -1,6 +1,6 @@
 # JourneyIn
 
-[![CI](https://github.com/NevermindZZT/JourneyIn/actions/workflows/ci.yml/badge.svg)](https://github.com/NevermindZZT/JourneyIn/actions/workflows/ci.yml)
+[![Release](https://github.com/NevermindZZT/JourneyIn/actions/workflows/release.yml/badge.svg)](https://github.com/NevermindZZT/JourneyIn/actions/workflows/release.yml)
 [![Docker Image Version](https://img.shields.io/docker/v/nevermindzzt/journeyin?sort=semver)](https://hub.docker.com/r/nevermindzzt/journeyin)
 [![Docker Pulls](https://img.shields.io/docker/pulls/nevermindzzt/journeyin)](https://hub.docker.com/r/nevermindzzt/journeyin)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -32,7 +32,7 @@ go run ./cmd/journeyin -listen 127.0.0.1:8080 -data D:/data/journeyin/journeyin.
 
 ~~~text
 nevermindzzt/journeyin:latest
-nevermindzzt/journeyin:0.3.0
+nevermindzzt/journeyin:<version>
 ~~~
 
 使用持久化卷启动：
@@ -41,7 +41,7 @@ nevermindzzt/journeyin:0.3.0
 docker run --detach --name journeyin --publish 8080:8080 --volume journeyin-data:/data --env JOURNEYIN_AUTH_USERNAME=admin --env JOURNEYIN_AUTH_PASSWORD=<strong-login-password> --env JOURNEYIN_MCP_TOKEN=<strong-random-token> nevermindzzt/journeyin:latest
 ~~~
 
-镜像由 GitHub Actions 在推送 `v*.*.*` tag 时构建并发布，同时生成 `linux/amd64` 和 `linux/arm64` 多架构镜像。发布需要仓库 Secret `DOCKERHUB_TOKEN`。
+版本号唯一维护在仓库根目录的 `VERSION` 文件中；发布时只需推送与其内容一致的 `v<VERSION>` tag。唯一的 `release.yml` workflow 会先执行 Web/Go 校验，再构建 `linux/amd64`、`linux/arm64`、`darwin/amd64`、`darwin/arm64`、`windows/amd64` 和 `windows/arm64` 可执行文件并创建 GitHub Release，同时发布 `linux/amd64` 和 `linux/arm64` 多架构 Docker 镜像。发布需要仓库 Secret `DOCKERHUB_TOKEN`。
 
 从 Docker Hub 拉取镜像部署可直接使用 `docker-compose.hub.yml`；该文件不执行本地构建，并且每次启动都会检查远端镜像：
 
@@ -53,7 +53,7 @@ docker compose -f docker-compose.hub.yml pull
 docker compose -f docker-compose.hub.yml up --detach
 ~~~
 
-如需固定版本，可设置 `$env:JOURNEYIN_IMAGE = 'nevermindzzt/journeyin:0.3.0'` 后再执行上述命令。
+如需固定版本，可设置 `$env:JOURNEYIN_IMAGE = 'nevermindzzt/journeyin:<version>'` 后再执行上述命令。
 
 默认使用 Docker named volume `journeyin-data`，由容器以非 root 用户写入，不需要创建或修改宿主机目录权限。若希望把数据直接放在宿主机目录，可设置 `JOURNEYIN_DATA_PATH` 切换为 bind mount；Compose 会自动创建目录，镜像启动时会检查固定的 `/data`，按需修复数据库目录及 SQLite sidecar 文件的所有者，然后同一个 Go 进程在打开 SQLite 前永久降权为 UID/GID 65532，不需要 `chmod 777` 或手动 `chown`：
 

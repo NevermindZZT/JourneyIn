@@ -1,6 +1,17 @@
 package journeyin
 
-import "embed"
+import (
+	"embed"
+	"strings"
+)
+
+// Version is the application release version from the repository VERSION file.
+// Release builds may still override the command's copy with -ldflags.
+//
+//go:embed VERSION
+var versionFile string
+
+var Version = strings.TrimSpace(versionFile)
 
 // WebFS contains the production Web/PWA bundle.
 //

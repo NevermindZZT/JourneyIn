@@ -1,7 +1,12 @@
+import fs from 'node:fs'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
+const journeyinVersion = fs.readFileSync(new URL('../VERSION', import.meta.url), 'utf8').trim()
+if (!journeyinVersion) throw new Error('VERSION must not be empty')
+
 export default defineConfig({
+  define: { 'import.meta.env.VITE_JOURNEYIN_VERSION': JSON.stringify(journeyinVersion) },
   plugins: [vue()],
   server: {
     host: '127.0.0.1',

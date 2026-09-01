@@ -56,7 +56,7 @@ const poiPriorityOptions = [
   { value: 'baidu', label: '百度优先' },
 ]
 
-const APP_VERSION = '0.3.0'
+const APP_VERSION = import.meta.env.VITE_JOURNEYIN_VERSION
 const APP_SLOGAN = '在地图上规划每一段旅程'
 const GITHUB_URL = 'https://github.com/NevermindZZT/JourneyIn'
 const markdownRenderer = new MarkdownIt({ html: false, breaks: true, linkify: false, typographer: false })
