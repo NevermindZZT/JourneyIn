@@ -299,21 +299,27 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 
 .workspace-panel, .stop-detail-panel { border: 1px solid color-mix(in srgb, var(--line) 78%, transparent); color: var(--ink); background: color-mix(in srgb, var(--panel) 95%, transparent); box-shadow: 0 18px 60px color-mix(in srgb, var(--ink) 23%, transparent); backdrop-filter: blur(22px); transition: height .2s ease, top .2s ease; }
 .workspace-panel.is-sheet-dragging, .stop-detail-panel.is-sheet-dragging { transition: none !important; }
-.workspace-panel { position: absolute; z-index: 30; top: 18px; bottom: 18px; left: 18px; display: flex; width: min(392px, calc(100vw - 36px)); flex-direction: column; overflow: hidden; border-radius: 24px; }
-.workspace-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 19px 18px 14px; border-bottom: 1px solid var(--line); }
+.workspace-panel { position: absolute; z-index: 30; top: 18px; bottom: 18px; left: 18px; display: flex; width: min(392px, calc(100vw - 36px)); flex-direction: column; overflow: hidden; border-radius: 24px; container-type: inline-size; container-name: workspace-panel; }
+.workspace-panel-head { position: relative; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 19px 18px 14px; border-bottom: 1px solid var(--line); }
 .workspace-panel-kicker { display: flex; min-width: 0; align-items: center; gap: 7px; }
-.workspace-panel-kicker .eyebrow { margin: 0; }
-.share-status-tag { display: inline-flex; min-height: 21px; align-items: center; padding: 3px 7px; border: 1px solid color-mix(in srgb, var(--p) 46%, var(--line)); border-radius: 999px; color: var(--p); background: color-mix(in srgb, var(--p) 10%, var(--surface)); font-size: 9px; font-weight: 900; letter-spacing: .02em; }
-.workspace-panel-head > div:first-child { min-width: 0; }
+.workspace-panel-kicker .eyebrow { min-width: 0; overflow: hidden; margin: 0; text-overflow: ellipsis; white-space: nowrap; }
+.share-status-tag { display: inline-flex; flex: 0 0 auto; min-height: 21px; align-items: center; padding: 3px 7px; border: 1px solid color-mix(in srgb, var(--p) 46%, var(--line)); border-radius: 999px; color: var(--p); background: color-mix(in srgb, var(--p) 10%, var(--surface)); font-size: 9px; font-weight: 900; letter-spacing: .02em; white-space: nowrap; }
+.workspace-panel-head > div:first-child { min-width: 0; flex: 1 1 auto; padding-right: 218px; }
 .workspace-panel-head h1 { overflow: hidden; margin: 4px 0 0; color: var(--ink); font-size: 22px; letter-spacing: -.045em; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-panel-head p { overflow: hidden; margin: 5px 0 0; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.panel-head-actions { display: flex; flex: 0 0 auto; gap: 5px; }
+.panel-head-actions { position: absolute; top: 19px; right: 18px; display: flex; flex: 0 0 auto; gap: 5px; }
 .panel-action-button { display: inline-flex; min-width: 36px; min-height: 36px; align-items: center; justify-content: center; gap: 2px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); background: transparent; }
 @media (hover: hover) and (pointer: fine) { .panel-action-button:hover { border-color: var(--p); color: var(--p); background: color-mix(in srgb, var(--p) 8%, transparent); } }
 .panel-action-button span { font-size: 22px; line-height: 15px; }
 .panel-action-button small { font-size: 9px; font-weight: 800; }
 .panel-action-button ion-icon { font-size: 17px; }
 .edit-trip-action, .history-action { min-width: 58px; }
+@container workspace-panel (max-width: 430px) {
+  .workspace-panel-head > div:first-child { padding-right: 174px; }
+  .workspace-panel-head .panel-head-actions { top: 19px; right: 18px; gap: 4px; }
+  .workspace-panel-head .panel-action-button { width: 36px; min-width: 36px; padding-inline: 5px; }
+  .workspace-panel-head .panel-action-button small { display: none; }
+}
 
 .journey-view-tabs { display: flex; gap: 4px; padding: 9px 17px 0; border-bottom: 1px solid var(--line); }
 .journey-view-tabs button { min-height: 35px; padding: 6px 10px; border: 0; border-radius: 10px 10px 0 0; color: var(--muted); background: transparent; font-size: 11px; font-weight: 900; }
@@ -547,7 +553,9 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
   .workspace-panel.sheet-peek .itinerary-scroll { display: none; }
   .workspace-panel.sheet-peek .peek-summary { display: flex; }
   .workspace-panel.sheet-half .peek-summary, .workspace-panel.sheet-expanded .peek-summary { display: none; }
-  .workspace-panel-head { padding: 8px 15px 11px; }
+  .workspace-panel-head { position: relative; padding: 8px 15px 11px; }
+  .workspace-panel-head > div:first-child { width: 100%; padding-right: 178px; }
+  .workspace-panel-head .panel-head-actions { top: 8px; right: 15px; gap: 4px; }
   .workspace-panel-head h1 { font-size: 18px; }
   .workspace-panel-head p { font-size: 10px; }
   .workspace-panel-head .panel-action-button:first-child { display: none; }
@@ -780,7 +788,7 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
   .trip-details-duration span { text-align: left; }
 }
 
-.history-status-tag, .history-current-tag { display: inline-flex; min-height: 21px; align-items: center; padding: 3px 8px; border: 1px solid color-mix(in srgb, var(--accent) 52%, var(--line)); border-radius: 999px; color: var(--accent); background: color-mix(in srgb, var(--accent) 11%, var(--surface)); font-size: 9px; font-weight: 900; }
+.history-status-tag, .history-current-tag { display: inline-flex; flex: 0 0 auto; min-height: 21px; align-items: center; padding: 3px 8px; border: 1px solid color-mix(in srgb, var(--accent) 52%, var(--line)); border-radius: 999px; color: var(--accent); background: color-mix(in srgb, var(--accent) 11%, var(--surface)); font-size: 9px; font-weight: 900; white-space: nowrap; }
 .history-readonly-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; padding: 11px 13px; border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--line)); border-radius: 13px; color: var(--ink); background: color-mix(in srgb, var(--accent) 11%, var(--surface)); box-shadow: 0 8px 24px color-mix(in srgb, var(--ink) 14%, transparent); backdrop-filter: blur(15px); font-size: 11px; }
 .history-readonly-banner > span { min-width: 0; display: grid; gap: 3px; }
 .history-readonly-banner strong { color: var(--accent); }
