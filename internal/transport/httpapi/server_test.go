@@ -199,7 +199,7 @@ func TestValidateAndExportHTTPWorkflow(t *testing.T) {
 		t.Fatalf("round-trip import status %d", roundTrip.StatusCode)
 	}
 }
-func TestShareLinkReusesAndFollowsTripUpdates(t *testing.T) {
+func TestShareLinkReusesAndKeepsSnapshotAfterTripUpdates(t *testing.T) {
 	server := testHTTPServer(t)
 	defer server.Close()
 	trip := []byte(`{"schema_version":1,"title":"Share source","status":"draft","timezone":"Asia/Shanghai","date_range":{"start":"2026-04-18","end":"2026-04-18"},"days":[{"id":"day-1","date":"2026-04-18","stops":[]}]}`)
@@ -263,8 +263,8 @@ func TestShareLinkReusesAndFollowsTripUpdates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(sharedBody), "Share updated") || !strings.Contains(string(sharedBody), "\"revision\":2") {
-		t.Fatalf("share did not follow update: %s", string(sharedBody))
+	if !strings.Contains(string(sharedBody), "Share source") || !strings.Contains(string(sharedBody), "\"revision\":1") || strings.Contains(string(sharedBody), "Share updated") {
+		t.Fatalf("share snapshot changed after update: %s", string(sharedBody))
 	}
 }
 func TestMapKeysArePersistedWithoutReturningSecretValues(t *testing.T) {

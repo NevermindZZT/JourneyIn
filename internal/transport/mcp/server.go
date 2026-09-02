@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"journeyin/internal/application"
@@ -40,6 +41,14 @@ type CommitArgs struct {
 type GetArgs struct {
 	TripID string `json:"trip_id"`
 }
+type HistoryListArgs struct {
+	TripID string `json:"trip_id"`
+	Limit  int    `json:"limit,omitempty"`
+}
+type HistoryGetArgs struct {
+	TripID    string `json:"trip_id"`
+	HistoryID string `json:"history_id"`
+}
 type PlanArgs struct {
 	TripID           string                 `json:"trip_id"`
 	ExpectedRevision int                    `json:"expected_revision"`
@@ -69,6 +78,17 @@ type GetOutput struct {
 	Revision int             `json:"revision"`
 	Document json.RawMessage `json:"document"`
 }
+type HistoryListOutput struct {
+	Items []map[string]any `json:"items"`
+}
+type HistoryGetOutput struct {
+	TripID         string          `json:"trip_id"`
+	HistoryID      string          `json:"history_id"`
+	SourceRevision int             `json:"source_revision"`
+	Label          string          `json:"label,omitempty"`
+	CreatedAt      string          `json:"created_at"`
+	Document       json.RawMessage `json:"document"`
+}
 type PlanOutput struct {
 	TripID          string `json:"trip_id"`
 	Revision        int    `json:"revision"`
@@ -86,6 +106,8 @@ func NewServer(app *application.TripService, version string, schema fs.FS) *Serv
 	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.refresh_routes", Description: "Recalculate routes for a selected Provider, mode, and optional Day without changing Stop order."}, result.planTrip)
 	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.get_trip", Description: "Read one JourneyIn trip by ID."}, result.getTrip)
 	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.list_trips", Description: "List JourneyIn trips visible to the current connection."}, result.listTrips)
+	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.list_trip_history", Description: "List user-saved read-only history versions for a JourneyIn trip."}, result.listTripHistory)
+	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.get_trip_history", Description: "Read one user-saved JourneyIn trip history version."}, result.getTripHistory)
 	result.registerResources()
 	return result
 }
@@ -96,7 +118,7 @@ func (s *Server) HTTPHandler() http.Handler {
 func (s *Server) RunStdio(ctx context.Context) error { return s.mcp.Run(ctx, &mcp.StdioTransport{}) }
 
 func (s *Server) getCapabilities(ctx context.Context, req *mcp.CallToolRequest, input struct{}) (*mcp.CallToolResult, map[string]any, error) {
-	return nil, map[string]any{"version": s.version, "schema_versions": []int{1}, "tools": []string{"journeyin.get_capabilities", "journeyin.validate_trip", "journeyin.preview_save_trip", "journeyin.commit_save_trip", "journeyin.plan_trip", "journeyin.refresh_routes", "journeyin.get_trip", "journeyin.list_trips"}, "resources": []string{"journeyin://schema/trip/v1", "journeyin://trips/{trip_id}"}, "map_providers": []string{"baidu", "amap"}}, nil
+	return nil, map[string]any{"version": s.version, "schema_versions": []int{1}, "tools": []string{"journeyin.get_capabilities", "journeyin.validate_trip", "journeyin.preview_save_trip", "journeyin.commit_save_trip", "journeyin.plan_trip", "journeyin.refresh_routes", "journeyin.get_trip", "journeyin.list_trips", "journeyin.list_trip_history", "journeyin.get_trip_history"}, "resources": []string{"journeyin://schema/trip/v1", "journeyin://trips/{trip_id}", "journeyin://trips/{trip_id}/history/{history_id}"}, "map_providers": []string{"baidu", "amap"}}, nil
 }
 
 func (s *Server) validateTrip(ctx context.Context, req *mcp.CallToolRequest, input ValidateArgs) (*mcp.CallToolResult, ValidateOutput, error) {
@@ -132,6 +154,26 @@ func (s *Server) planTrip(ctx context.Context, req *mcp.CallToolRequest, input P
 		segments += len(day.Legs)
 	}
 	return nil, PlanOutput{TripID: record.ID, Revision: record.Revision, PlannedSegments: segments}, nil
+}
+
+func (s *Server) listTripHistory(ctx context.Context, req *mcp.CallToolRequest, input HistoryListArgs) (*mcp.CallToolResult, HistoryListOutput, error) {
+	records, err := s.app.ListTripVersions(ctx, input.TripID, input.Limit)
+	if err != nil {
+		return nil, HistoryListOutput{}, err
+	}
+	items := make([]map[string]any, 0, len(records))
+	for _, record := range records {
+		items = append(items, map[string]any{"history_id": record.ID, "trip_id": record.TripID, "source_revision": record.SourceRevision, "title": record.Title, "start_date": record.StartDate, "end_date": record.EndDate, "label": record.Label, "content_hash": record.ContentHash, "created_at": record.CreatedAt})
+	}
+	return nil, HistoryListOutput{Items: items}, nil
+}
+
+func (s *Server) getTripHistory(ctx context.Context, req *mcp.CallToolRequest, input HistoryGetArgs) (*mcp.CallToolResult, HistoryGetOutput, error) {
+	record, err := s.app.GetTripVersion(ctx, input.TripID, input.HistoryID)
+	if err != nil {
+		return nil, HistoryGetOutput{}, err
+	}
+	return nil, HistoryGetOutput{TripID: record.TripID, HistoryID: record.ID, SourceRevision: record.SourceRevision, Label: record.Label, CreatedAt: record.CreatedAt.Format(time.RFC3339Nano), Document: json.RawMessage(record.Document)}, nil
 }
 
 func (s *Server) getTrip(ctx context.Context, req *mcp.CallToolRequest, input GetArgs) (*mcp.CallToolResult, GetOutput, error) {

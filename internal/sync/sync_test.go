@@ -27,3 +27,16 @@ func TestRevisionConflict(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+func TestHistoryChangeDoesNotAdvanceWorkingRevision(t *testing.T) {
+	m := NewMemoryStore()
+	if _, err := m.Push(Change{ChangeID: "working-1", AggregateID: "t", DeviceID: "d", Hash: "working", BaseRevision: 0, NewRevision: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Push(Change{ChangeID: "history-1", AggregateID: "t", DeviceID: "d", Operation: OperationHistorySave, Hash: "history", BaseRevision: 1, NewRevision: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Push(Change{ChangeID: "working-2", AggregateID: "t", DeviceID: "d", Hash: "working-2", BaseRevision: 1, NewRevision: 2}); err != nil {
+		t.Fatal(err)
+	}
+}

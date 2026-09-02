@@ -125,10 +125,6 @@ func (s *Store) CreateTrip(ctx context.Context, document []byte, source string) 
 	if err != nil {
 		return TripRecord{}, fmt.Errorf("insert trip: %w", err)
 	}
-	_, err = tx.ExecContext(ctx, "INSERT INTO trip_revisions(trip_id, revision, document_json, content_hash, source, created_at) VALUES (?, 1, ?, ?, ?, ?)", trip.ID, string(normalized), hash, source, now.Format(time.RFC3339Nano))
-	if err != nil {
-		return TripRecord{}, fmt.Errorf("insert trip revision: %w", err)
-	}
 	if err := tx.Commit(); err != nil {
 		return TripRecord{}, err
 	}
@@ -198,9 +194,6 @@ func (s *Store) ReplaceTrip(ctx context.Context, id string, expectedRevision int
 		return TripRecord{}, ErrRevisionConflict
 	}
 	if _, err := tx.ExecContext(ctx, "UPDATE trips SET title=?, status=?, start_date=?, end_date=?, timezone=?, revision=?, document_json=?, content_hash=?, updated_at=? WHERE id=? AND revision=?", trip.Title, trip.Status, trip.DateRange.Start, trip.DateRange.End, trip.Timezone, current+1, string(normalized), hash, now.Format(time.RFC3339Nano), id, current); err != nil {
-		return TripRecord{}, err
-	}
-	if _, err := tx.ExecContext(ctx, "INSERT INTO trip_revisions(trip_id, revision, document_json, content_hash, source, created_at) VALUES (?, ?, ?, ?, ?, ?)", id, current+1, string(normalized), hash, source, now.Format(time.RFC3339Nano)); err != nil {
 		return TripRecord{}, err
 	}
 	if err := tx.Commit(); err != nil {

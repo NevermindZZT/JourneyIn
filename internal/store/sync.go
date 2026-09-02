@@ -13,6 +13,9 @@ import (
 )
 
 func (s *Store) PushChange(ctx context.Context, change journeysync.Change) (journeysync.Change, error) {
+	if journeysync.IsHistoryOperation(change.Operation) {
+		return s.pushHistoryChange(ctx, change)
+	}
 	if change.ChangeID == "" || change.AggregateID == "" || change.DeviceID == "" {
 		return journeysync.Change{}, errors.New("missing change identity")
 	}
@@ -72,9 +75,6 @@ func (s *Store) PushChange(ctx context.Context, change journeysync.Change) (jour
 			if _, err := tx.ExecContext(ctx, "INSERT INTO trips(id, title, status, start_date, end_date, timezone, revision, document_json, content_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", change.AggregateID, trip.Title, trip.Status, trip.DateRange.Start, trip.DateRange.End, trip.Timezone, change.NewRevision, string(normalized), hash, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)); err != nil {
 				return journeysync.Change{}, err
 			}
-		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO trip_revisions(trip_id, revision, document_json, content_hash, source, created_at) VALUES (?, ?, ?, ?, ?, ?)", change.AggregateID, change.NewRevision, string(normalized), hash, "sync", now.Format(time.RFC3339Nano)); err != nil {
-			return journeysync.Change{}, err
 		}
 	}
 	result, err := tx.ExecContext(ctx, "INSERT INTO sync_changes(change_id, aggregate_id, device_id, operation, base_revision, new_revision, hash, payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", change.ChangeID, change.AggregateID, change.DeviceID, change.Operation, change.BaseRevision, change.NewRevision, change.Hash, change.Payload, now.Format(time.RFC3339Nano))

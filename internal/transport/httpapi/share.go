@@ -165,13 +165,6 @@ func (s *Server) resolveShare(ctx context.Context, w http.ResponseWriter, token 
 		writeError(w, http.StatusNotFound, "not_found", "share not found", nil)
 		return journeyshare.Record{}, false
 	}
-	if s.trips != nil {
-		if latest, tripErr := s.trips.Get(ctx, record.TripID); tripErr == nil {
-			record.Revision = latest.Revision
-			record.ContentHash = latest.ContentHash
-			record.Content = append([]byte(nil), latest.Document...)
-		}
-	}
 	return record, true
 }
 

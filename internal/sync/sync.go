@@ -6,11 +6,20 @@ import (
 	"time"
 )
 
+const (
+	OperationHistorySave   = "history_save"
+	OperationHistoryDelete = "history_delete"
+)
+
 var (
 	ErrConflict            = errors.New("revision conflict")
 	ErrIdempotencyConflict = errors.New("idempotency key reused with different change")
 	ErrNotFound            = errors.New("change not found")
 )
+
+func IsHistoryOperation(operation string) bool {
+	return operation == OperationHistorySave || operation == OperationHistoryDelete
+}
 
 type Change struct {
 	Sequence     Cursor    `json:"sequence,omitempty"`
@@ -52,18 +61,23 @@ func (s *MemoryStore) Push(c Change) (Change, error) {
 		}
 		return old, nil
 	}
-	if s.revisions[c.AggregateID] != c.BaseRevision {
-		return Change{}, ErrConflict
-	}
-	if c.NewRevision != c.BaseRevision+1 {
-		return Change{}, ErrConflict
+	if IsHistoryOperation(c.Operation) {
+		if c.NewRevision != c.BaseRevision {
+			return Change{}, ErrConflict
+		}
+	} else {
+		if s.revisions[c.AggregateID] != c.BaseRevision || c.NewRevision != c.BaseRevision+1 {
+			return Change{}, ErrConflict
+		}
 	}
 	s.seq++
 	c.Sequence = s.seq
 	c.CreatedAt = time.Now().UTC()
 	s.changes = append(s.changes, c)
 	s.byID[c.ChangeID] = c
-	s.revisions[c.AggregateID] = c.NewRevision
+	if !IsHistoryOperation(c.Operation) {
+		s.revisions[c.AggregateID] = c.NewRevision
+	}
 	return c, nil
 }
 func (s *MemoryStore) Pull(aggregate string, cur Cursor, limit int) ([]Change, Cursor, error) {
