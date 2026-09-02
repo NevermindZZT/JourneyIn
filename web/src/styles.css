@@ -68,6 +68,10 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .global-error { color: var(--md-error); background: color-mix(in srgb, var(--md-error) 8%, var(--surface)); }
 .global-error span { min-width: 0; flex: 1; }
 .global-error button, .share-banner button { border: 0; color: inherit; background: transparent; font-size: 20px; }
+.global-notice { display: flex; align-items: center; justify-content: space-between; gap: 9px; margin-bottom: 8px; padding: 11px 13px; border: 1px solid color-mix(in srgb, var(--p) 35%, var(--line)); border-radius: 13px; color: var(--p); background: color-mix(in srgb, var(--p) 9%, var(--surface)); box-shadow: 0 8px 24px color-mix(in srgb, var(--ink) 14%, transparent); backdrop-filter: blur(15px); font-size: 11px; }
+.global-notice ion-icon { flex: 0 0 auto; font-size: 17px; }
+.global-notice span { min-width: 0; flex: 1; }
+.global-notice button { border: 0; color: inherit; background: transparent; font-size: 20px; }
 .share-banner { color: var(--p); background: color-mix(in srgb, var(--p) 10%, var(--surface)); }
 .share-banner > span { min-width: 0; display: grid; gap: 3px; }
 .share-banner a { overflow-wrap: anywhere; color: var(--p); }
@@ -245,8 +249,9 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .trip-card-menu-button[aria-expanded="true"] { border-color: var(--line); color: var(--p); background: var(--surface); }
 @media (hover: hover) and (pointer: fine) { .trip-card-menu-button:hover { border-color: var(--line); color: var(--p); background: var(--surface); } }
 .trip-card-menu { position: absolute; z-index: 8; top: 46px; right: 10px; min-width: 132px; padding: 5px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 15px 34px color-mix(in srgb, var(--ink) 18%, transparent); }
-.trip-card-menu button { display: flex; width: 100%; min-height: 36px; align-items: center; gap: 7px; padding: 7px 9px; border: 0; border-radius: 8px; text-align: left; color: var(--md-error); background: transparent; font-size: 11px; font-weight: 800; }
-@media (hover: hover) and (pointer: fine) { .trip-card-menu button:hover { background: color-mix(in srgb, var(--md-error) 10%, transparent); } }
+.trip-card-menu button { display: flex; width: 100%; min-height: 40px; align-items: center; gap: 7px; padding: 7px 9px; border: 0; border-radius: 8px; text-align: left; color: var(--ink); background: transparent; font-size: 11px; font-weight: 800; }
+.trip-card-menu .danger-menu-item { color: var(--md-error); }
+@media (hover: hover) and (pointer: fine) { .trip-card-menu button:hover { background: color-mix(in srgb, var(--p) 9%, transparent); } .trip-card-menu .danger-menu-item:hover { background: color-mix(in srgb, var(--md-error) 10%, transparent); } }
 .trip-card-menu ion-icon { font-size: 15px; }
 
 .journey-workspace { position: relative; min-width: 0; min-height: 0; flex: 1 1 auto; overflow: hidden; }
@@ -308,6 +313,7 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .panel-action-button span { font-size: 22px; line-height: 15px; }
 .panel-action-button small { font-size: 9px; font-weight: 800; }
 .panel-action-button ion-icon { font-size: 17px; }
+.edit-trip-action { min-width: 58px; }
 
 .journey-view-tabs { display: flex; gap: 4px; padding: 9px 17px 0; border-bottom: 1px solid var(--line); }
 .journey-view-tabs button { min-height: 35px; padding: 6px 10px; border: 0; border-radius: 10px 10px 0 0; color: var(--muted); background: transparent; font-size: 11px; font-weight: 900; }
@@ -477,6 +483,31 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .modal-panel { border-color: var(--line); border-radius: 22px; color: var(--ink); background: var(--surface); box-shadow: 0 24px 80px color-mix(in srgb, #000 34%, transparent); }
 .modal-panel h2 { color: var(--ink); }
 .modal-panel input, .modal-panel textarea, .modal-panel select { border-color: var(--line); color: var(--ink); background: var(--md-surface-container-low); }
+.trip-details-backdrop { position: fixed; z-index: 75; inset: 0; display: grid; place-items: center; overflow: hidden; padding: 20px; background: color-mix(in srgb, #101817 62%, transparent); }
+.trip-details-panel { width: min(520px, calc(100vw - 32px)); padding: 0; }
+.trip-details-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 27px 30px 18px; border-bottom: 1px solid var(--line); }
+.trip-details-header > div { min-width: 0; }
+.trip-details-header h2 { margin: 5px 0 0; font-size: 27px; }
+.trip-details-header p:last-child { margin: 7px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.trip-details-form { display: grid; gap: 14px; padding: 23px 30px 28px; }
+.trip-details-form label { margin-top: 0; }
+.trip-details-form input { min-height: 44px; }
+.trip-details-form input:focus { border-color: var(--p); box-shadow: 0 0 0 3px color-mix(in srgb, var(--p) 14%, transparent); }
+.trip-details-field-head { display: flex; align-items: flex-end; gap: 9px; }
+.trip-details-field-head label { min-width: 0; flex: 1; }
+.trip-details-field-head > span { padding-bottom: 10px; color: var(--muted); font-size: 10px; white-space: nowrap; }
+.trip-details-date-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.trip-details-duration { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 11px 12px; border: 1px solid color-mix(in srgb, var(--p) 28%, var(--line)); border-radius: 12px; background: color-mix(in srgb, var(--p) 7%, var(--surface)); }
+.trip-details-duration strong { color: var(--p); font-size: 14px; }
+.trip-details-duration span { color: var(--muted); font-size: 10px; text-align: right; }
+.trip-details-error { display: grid; gap: 4px; margin: -3px 0 0; padding: 10px 11px; border: 1px solid color-mix(in srgb, var(--md-error) 38%, var(--line)); border-radius: 11px; color: var(--md-error); background: color-mix(in srgb, var(--md-error) 8%, var(--surface)); font-size: 10px; line-height: 1.5; }
+.trip-details-error strong { font-size: 11px; }
+.trip-details-error small { color: var(--muted); font-size: 9px; }
+.trip-details-hint, .trip-details-note { display: flex; align-items: flex-start; gap: 6px; margin: -3px 0 0; color: var(--p); font-size: 10px; line-height: 1.55; }
+.trip-details-hint ion-icon { flex: 0 0 auto; margin-top: 1px; font-size: 14px; }
+.trip-details-note { color: var(--muted); }
+.trip-details-form .modal-actions { margin-top: 2px; }
+.trip-details-form .modal-actions button { min-height: 44px; }
 .modal-actions button { border-color: var(--line); color: var(--p); background: var(--surface); }
 .modal-actions button.primary { border-color: var(--p); color: var(--md-on-primary); background: var(--p); }
 
@@ -734,4 +765,17 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
   .new-trip-date-grid { grid-template-columns: 1fr; }
   .new-trip-actions { position: sticky; bottom: 0; padding-top: 9px; background: var(--surface); }
   .new-trip-actions .secondary-action, .new-trip-actions .primary-action { flex: 1; }
+}
+
+@media (max-width: 720px) {
+  .trip-details-backdrop { place-items: end center; padding: 8px; }
+  .trip-details-panel { width: 100%; max-height: calc(100dvh - 16px); border-radius: 24px 24px 16px 16px; }
+  .trip-details-header { padding: 22px 20px 17px; }
+  .trip-details-header h2 { font-size: 24px; }
+  .trip-details-form { padding: 20px; }
+  .trip-details-date-grid { grid-template-columns: 1fr; }
+  .trip-details-form .modal-actions { position: sticky; bottom: 0; padding-top: 9px; background: var(--surface); }
+  .trip-details-form .modal-actions button { flex: 1; }
+  .trip-details-duration { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .trip-details-duration span { text-align: left; }
 }

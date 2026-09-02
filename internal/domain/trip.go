@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type Trip struct {
@@ -184,8 +185,11 @@ func (t Trip) Validate() []ValidationIssue {
 	if t.SchemaVersion != 1 {
 		add("schema_version", "unsupported", "schema_version must be 1", "error")
 	}
-	if strings.TrimSpace(t.Title) == "" {
+	title := strings.TrimSpace(t.Title)
+	if title == "" {
 		add("title", "required", "title is required", "error")
+	} else if utf8.RuneCountInString(title) > 120 {
+		add("title", "limit", "title must be at most 120 characters", "error")
 	}
 	if t.Status == "" {
 		add("status", "required", "status is required", "error")
@@ -206,8 +210,12 @@ func (t Trip) Validate() []ValidationIssue {
 	if endErr != nil {
 		add("date_range.end", "date", "end must use YYYY-MM-DD", "error")
 	}
-	if startErr == nil && endErr == nil && end.Before(start) {
-		add("date_range", "order", "end must not be before start", "error")
+	if startErr == nil && endErr == nil {
+		if end.Before(start) {
+			add("date_range", "order", "end must not be before start", "error")
+		} else if int(end.Sub(start)/(24*time.Hour))+1 > 60 {
+			add("date_range", "limit", "date range cannot exceed 60 days", "error")
+		}
 	}
 	if len(t.Days) == 0 {
 		add("days", "required", "at least one day is required", "error")

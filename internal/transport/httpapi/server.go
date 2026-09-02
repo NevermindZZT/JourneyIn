@@ -88,6 +88,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/trips", s.createTrip)
 	mux.HandleFunc("POST /api/v1/import", s.importTrip)
 	mux.HandleFunc("GET /api/v1/trips/{id}", s.getTrip)
+	mux.HandleFunc("PATCH /api/v1/trips/{id}", s.updateTripDetails)
 	mux.HandleFunc("PUT /api/v1/trips/{id}", s.replaceTrip)
 	mux.HandleFunc("POST /api/v1/trips/{id}/days/{dayID}/stops", s.addStop)
 	mux.HandleFunc("POST /api/v1/trips/{id}/days/{dayID}/stops/{stopID}/move", s.moveStop)

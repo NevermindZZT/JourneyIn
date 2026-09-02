@@ -5,7 +5,7 @@ import {
 } from '@ionic/vue'
 import BMapLoader from '@baidumap/jsapi-loader'
 import AMapLoader from '@amap/amap-jsapi-loader'
-import { addOutline, chevronDownOutline, chevronUpOutline, closeOutline, cloudOfflineOutline, linkOutline, logInOutline, mapOutline, menuOutline, navigateOutline, searchOutline, settingsOutline, sunnyOutline } from 'ionicons/icons'
+import { addOutline, chevronDownOutline, chevronUpOutline, closeOutline, cloudOfflineOutline, createOutline, linkOutline, logInOutline, mapOutline, menuOutline, navigateOutline, searchOutline, settingsOutline, sunnyOutline } from 'ionicons/icons'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 import PrototypePreview from './PrototypePreview.vue'
@@ -20,7 +20,7 @@ type Stop = { id: string; sequence: number; kind?: string; title: string; addres
 type SubStop = { id: string; sequence: number; kind?: string; title: string; address?: string; location?: LocationData; time_window?: { arrival?: string; departure?: string }; description_markdown?: string; links?: LinkData[]; weather?: Record<string, unknown> }
 type Leg = { id: string; from_stop_id: string; to_stop_id: string; mode?: string; snapshots?: Array<{ provider?: string; coordinate_system?: string; mode?: string; strategy?: string; source?: string; geometry?: Array<[number, number]> | Array<Coord>; distance_m?: number; duration_s?: number; fetched_at?: string }> }
 type Day = { id: string; date: string; title?: string; notes_markdown?: string; stops: Stop[]; legs?: Leg[] }
-type TripDocument = { title: string; timezone: string; description_markdown?: string; links?: LinkData[]; map?: { preferred_provider?: 'baidu' | 'amap'; enabled_providers?: Array<'baidu' | 'amap'>; default_mode?: TravelMode }; days: Day[] }
+type TripDocument = { title: string; date_range?: { start: string; end: string }; timezone: string; description_markdown?: string; links?: LinkData[]; map?: { preferred_provider?: 'baidu' | 'amap'; enabled_providers?: Array<'baidu' | 'amap'>; default_mode?: TravelMode }; days: Day[] }
 type SharedBootstrap = { trip: TripDocument & { id?: string; status?: string }; browser_key?: string; amap_browser_key?: string; amap_security_proxy_path?: string; amap_security_js_code_configured?: boolean; default_map_provider?: 'baidu' | 'amap'; revision?: number }
 type TripSummary = { id: string; title: string; status: string; start_date: string; end_date: string; timezone: string; revision: number; days?: number; stops?: number; updated_at?: string }
 type TripSortMode = 'updated' | 'date'
@@ -80,6 +80,13 @@ function formatDateTime(value?: string) {
 }
 function formatDateRange(start?: string, end?: string) {
   return [formatDate(start), formatDate(end)].filter(Boolean).join(' — ')
+}
+function inclusiveDayCount(start: string, end: string) {
+  if (!start || !end) return 0
+  const startTime = Date.parse(start + 'T00:00:00Z')
+  const endTime = Date.parse(end + 'T00:00:00Z')
+  if (Number.isNaN(startTime) || Number.isNaN(endTime) || endTime < startTime) return 0
+  return Math.floor((endTime - startTime) / 86400000) + 1
 }
 const markdownRenderer = new MarkdownIt({ html: false, breaks: true, linkify: false, typographer: false })
 markdownRenderer.validateLink = (url: string) => /^https?:\/\//i.test(url.trim())
@@ -141,6 +148,14 @@ const tripDescriptionFullscreen = ref(false)
 const tripDescriptionDraft = ref('')
 const tripDescriptionEditorMode = ref<MarkdownEditorMode>('edit')
 const tripDescriptionSaving = ref(false)
+const tripDetailsEditing = ref(false)
+const tripDetailsTitleDraft = ref('')
+const tripDetailsStartDateDraft = ref('')
+const tripDetailsEndDateDraft = ref('')
+const tripDetailsSaving = ref(false)
+const tripDetailsIdempotencyKey = ref('')
+const tripDetailsTitleInput = ref<HTMLInputElement | null>(null)
+const tripDetailsNotice = ref('')
 const stopDateEditing = ref(false)
 const stopDateDraftDayID = ref('')
 const stopDateSaving = ref(false)
@@ -331,6 +346,43 @@ const plannableDays = computed(() => visibleDays.value.filter(canPlanDay))
 const selectedStop = computed(() => visibleStops.value.find(stop => stop.id === selectedStopId.value) || null)
 const selectedSubStop = computed(() => selectedStop.value?.children?.find(child => child.id === selectedSubStopId.value) || null)
 const selectedTarget = computed<Stop | SubStop | null>(() => selectedSubStop.value || selectedStop.value || null)
+function tripDateRangeFor(document: TripDocument | null, summary: TripSummary | null = selected.value) {
+  return {
+    start: document?.date_range?.start || summary?.start_date || document?.days[0]?.date || '',
+    end: document?.date_range?.end || summary?.end_date || document?.days[document.days.length - 1]?.date || '',
+  }
+}
+function planningPointCount(day: Day) {
+  return (day.stops || []).reduce((count, stop) => count + 1 + (stop.children?.length || 0), 0)
+}
+const tripDetailsTitleCount = computed(() => Array.from(tripDetailsTitleDraft.value).length)
+const tripDetailsDayCount = computed(() => inclusiveDayCount(tripDetailsStartDateDraft.value, tripDetailsEndDateDraft.value))
+const tripDetailsOriginalDateRange = computed(() => tripDateRangeFor(tripDocument.value, selected.value))
+const tripDetailsDateChanged = computed(() => Boolean(tripDetailsStartDateDraft.value && tripDetailsEndDateDraft.value) && (tripDetailsStartDateDraft.value !== tripDetailsOriginalDateRange.value.start || tripDetailsEndDateDraft.value !== tripDetailsOriginalDateRange.value.end))
+const tripDetailsRemovedDays = computed(() => {
+  const days = tripDocument.value?.days || []
+  const count = tripDetailsDayCount.value
+  return count > 0 && count < days.length ? days.slice(count) : []
+})
+const tripDetailsBlockingDays = computed(() => tripDetailsRemovedDays.value.filter(day => planningPointCount(day) > 0))
+const tripDetailsDateError = computed(() => {
+  const start = tripDetailsStartDateDraft.value
+  const end = tripDetailsEndDateDraft.value
+  if (!start || !end) return '请选择开始日期和结束日期'
+  const count = tripDetailsDayCount.value
+  if (count <= 0) return '请输入有效的日期范围'
+  if (count > 60) return '行程最多支持 60 天'
+  return ''
+})
+const tripDetailsDateHint = computed(() => {
+  if (!tripDetailsDateChanged.value || tripDetailsDateError.value) return ''
+  const currentDays = tripDocument.value?.days.length || 0
+  const nextDays = tripDetailsDayCount.value
+  if (nextDays > currentDays) return '保存后会按 D1、D2 的顺序保留现有安排，并新增 ' + (nextDays - currentDays) + ' 个空白日。'
+  if (nextDays < currentDays) return '保存后会移除末尾 ' + (currentDays - nextDays) + ' 个日期；包含规划点的日期不能被移除。'
+  return '现有安排会按 D1、D2 的顺序对应到新的开始日期。'
+})
+const tripDetailsCanSave = computed(() => Boolean(selected.value && tripDocument.value && tripDetailsTitleDraft.value.trim() && !tripDetailsDateError.value && !tripDetailsBlockingDays.value.length && !tripDetailsSaving.value))
 function stopDate(stop: Stop | SubStop) {
   const day = tripDocument.value?.days.find(item => item.stops.some(stopItem => stopItem.id === stop.id || stopItem.children?.some(child => child.id === stop.id)))
   return formatDate(day?.date) || '日期待定'
@@ -610,6 +662,7 @@ function startSheetDrag(event: PointerEvent) {
 }
 
 function navigateToList(mode: 'push' | 'replace' = 'push') {
+  cancelEditTripDetails()
   selected.value = null
   tripDocument.value = null
   tripView.value = 'list'
@@ -627,6 +680,7 @@ function navigateToList(mode: 'push' | 'replace' = 'push') {
 }
 
 function navigateToTrip(trip: TripSummary, mode: 'push' | 'replace' = 'push') {
+  cancelEditTripDetails()
   selected.value = trip
   tripView.value = 'detail'
   selectedStopId.value = ''
@@ -708,6 +762,7 @@ function handleGlobalKeyDown(event: KeyboardEvent) {
   if (event.key !== 'Escape') return
   if (descriptionFullscreen.value && descriptionEditing.value) { closeDescriptionFullscreen(); event.preventDefault(); return }
   if (tripDescriptionFullscreen.value && tripDescriptionEditing.value) { closeTripDescriptionFullscreen(); event.preventDefault(); return }
+  if (tripDetailsEditing.value) { cancelEditTripDetails(); event.preventDefault(); return }
   if (mapPickOpen.value) { cancelMapPick(); event.preventDefault(); return }
   if (newTripOpen.value) { newTripOpen.value = false; event.preventDefault(); return }
   if (settingsOpen.value) { settingsOpen.value = false; event.preventDefault(); return }
@@ -887,7 +942,7 @@ async function loadDetail(trip: TripSummary) {
     syncProviderFromDocument(tripDocument.value)
     selectedDay.value = 'all'
     await nextTick()
-    await renderMap()
+    void renderMap()
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '行程详情读取失败'
     tripDocument.value = null
@@ -1028,6 +1083,99 @@ function beginEditTripDescription() { tripDescriptionDraft.value = tripDocument.
 function openTripDescriptionFullscreen() { tripDescriptionFullscreen.value = true }
 function closeTripDescriptionFullscreen() { tripDescriptionFullscreen.value = false }
 function cancelEditTripDescription() { tripDescriptionEditing.value = false; tripDescriptionDraft.value = ''; tripDescriptionEditorMode.value = 'edit'; tripDescriptionFullscreen.value = false }
+function beginEditTripDetails() {
+  if (shareMode || !selected.value || !tripDocument.value) return
+  const range = tripDateRangeFor(tripDocument.value, selected.value)
+  tripDetailsTitleDraft.value = tripDocument.value.title || selected.value.title
+  tripDetailsStartDateDraft.value = range.start
+  tripDetailsEndDateDraft.value = range.end
+  tripDetailsIdempotencyKey.value = makeID('trip-details')
+  tripDetailsNotice.value = ''
+  tripDetailsEditing.value = true
+  error.value = ''
+  void nextTick(() => tripDetailsTitleInput.value?.focus())
+}
+function cancelEditTripDetails() {
+  if (tripDetailsSaving.value) return
+  tripDetailsEditing.value = false
+  tripDetailsTitleDraft.value = ''
+  tripDetailsStartDateDraft.value = ''
+  tripDetailsEndDateDraft.value = ''
+  tripDetailsIdempotencyKey.value = ''
+}
+function tripDetailsConflictMessage(days: Array<{ day_id?: string; date?: string; stop_count?: number }>) {
+  if (!days.length) return '不能移除仍包含规划点的日期，请先移动规划点或恢复结束日期。'
+  const detail = days.map(day => {
+    const count = day.stop_count || 0
+    return (day.date ? formatDate(day.date) : day.day_id || '目标日期') + '（' + count + ' 个规划点）'
+  }).join('、')
+  return '不能缩短日期范围：' + detail + '仍有规划点，请先移动规划点或恢复结束日期。'
+}
+async function editTripDetailsFromList(trip: TripSummary) {
+  tripMenuID.value = ''
+  if (selected.value?.id === trip.id && tripDocument.value) {
+    beginEditTripDetails()
+    return
+  }
+  selected.value = trip
+  tripView.value = 'detail'
+  selectedStopId.value = ''
+  selectedSubStopId.value = ''
+  panelMode.value = 'journey'
+  journeySection.value = 'itinerary'
+  panelOpen.value = true
+  mobileMapToolsOpen.value = false
+  setSheetBreakpoint('half', 'replace', false)
+  syncNavigationURL('push', { layer: 'trip', tripID: trip.id, day: 'all', sheet: 'half' })
+  await loadDetail(trip)
+  if (selected.value?.id === trip.id && tripDocument.value) beginEditTripDetails()
+}
+async function saveTripDetails() {
+  if (!selected.value || !tripDocument.value || tripDetailsSaving.value) return
+  const title = tripDetailsTitleDraft.value.trim()
+  if (!title) { error.value = '请填写行程名称'; return }
+  if (tripDetailsDateError.value) { error.value = tripDetailsDateError.value; return }
+  if (tripDetailsBlockingDays.value.length) { error.value = tripDetailsConflictMessage(tripDetailsBlockingDays.value.map(day => ({ day_id: day.id, date: day.date, stop_count: planningPointCount(day) }))); return }
+  const previousDayID = selectedDay.value !== 'all' ? tripDocument.value.days[selectedDay.value - 1]?.id || '' : ''
+  const tripID = selected.value.id
+  const revision = selected.value.revision
+  tripDetailsSaving.value = true
+  error.value = ''
+  try {
+    const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(tripID), { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + revision, 'Idempotency-Key': tripDetailsIdempotencyKey.value || makeID('trip-details') }, body: JSON.stringify({ title, date_range: { start: tripDetailsStartDateDraft.value, end: tripDetailsEndDateDraft.value } }) })
+    const payload = await response.json() as { document?: TripDocument; title?: string; start_date?: string; end_date?: string; revision?: number; stops?: number; days?: number; updated_at?: string; changes?: { added_days?: number; removed_days?: number; cleared_weather_stops?: number }; error?: { code?: string; message?: string; details?: { days?: Array<{ day_id?: string; date?: string; stop_count?: number }> } } }
+    if (!response.ok) {
+      if (response.status === 409 && payload.error?.code === 'date_range_conflict') throw new Error(tripDetailsConflictMessage(payload.error.details?.days || []))
+      if (response.status === 409) {
+        const current = selected.value
+        if (current) await loadDetail(current)
+        throw new Error('行程已被其他操作更新，请重新编辑后再保存')
+      }
+      throw new Error(payload.error?.message || '保存行程信息失败')
+    }
+    applyTripPayload(payload)
+    if (previousDayID && tripDocument.value) {
+      const dayIndex = tripDocument.value.days.findIndex(day => day.id === previousDayID)
+      selectedDay.value = dayIndex >= 0 ? dayIndex + 1 : 'all'
+    } else if (selectedDay.value !== 'all' && selectedDay.value > (tripDocument.value?.days.length || 0)) {
+      selectedDay.value = 'all'
+    }
+    const changes = payload.changes || {}
+    const notices: string[] = []
+    if ((changes.added_days || 0) > 0) notices.push('已新增 ' + changes.added_days + ' 个空白日')
+    if ((changes.removed_days || 0) > 0) notices.push('已移除 ' + changes.removed_days + ' 个空白日')
+    if ((changes.cleared_weather_stops || 0) > 0) notices.push('日期变化，已清除 ' + changes.cleared_weather_stops + ' 个天气快照')
+    tripDetailsNotice.value = notices.join('；')
+    tripDetailsSaving.value = false
+    cancelEditTripDetails()
+    syncNavigationURL('replace')
+    await renderMap()
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '保存行程信息失败'
+  } finally {
+    tripDetailsSaving.value = false
+  }
+}
 async function saveTripDescription() {
   if (!selected.value || !tripDocument.value) return
   const previous = tripDocument.value.description_markdown || ''; tripDocument.value.description_markdown = tripDescriptionDraft.value.trim(); tripDescriptionSaving.value = true; error.value = ''
@@ -1376,14 +1524,19 @@ function attachRouteLabel(snapshot: { geometry?: Array<[number, number]> | Array
   label.setStyle?.({ color: '#ffffff', backgroundColor: '#24695cdd', border: '0', borderRadius: '999px', padding: '4px 8px', fontSize: '12px', lineHeight: '16px', whiteSpace: 'nowrap', boxShadow: '0 3px 10px #0003' })
   label.setPosition?.(new mapAPI.Point(middle.lng, middle.lat)); mapInstance.addOverlay(label)
 }
-function applyTripPayload(payload: { document?: TripDocument; revision?: number; stops?: number; days?: number; updated_at?: string }) {
+function applyTripPayload(payload: { document?: TripDocument; title?: string; start_date?: string; end_date?: string; revision?: number; stops?: number; days?: number; updated_at?: string }) {
   const previousStopID = selectedStopId.value
   const previousSubStopID = selectedSubStopId.value
+  const previousSelected = selected.value
   if (payload.document) tripDocument.value = payload.document
   if (selected.value) {
-    selected.value = { ...selected.value, revision: payload.revision ?? selected.value.revision, stops: payload.stops ?? selected.value.stops, days: payload.days ?? selected.value.days, updated_at: payload.updated_at ?? selected.value.updated_at }
+    const range = tripDateRangeFor(payload.document || tripDocument.value, previousSelected)
+    const nextTitle = payload.title || payload.document?.title || selected.value.title
+    const nextStartDate = payload.start_date || range.start || selected.value.start_date
+    const nextEndDate = payload.end_date || range.end || selected.value.end_date
+    selected.value = { ...selected.value, title: nextTitle, start_date: nextStartDate, end_date: nextEndDate, revision: payload.revision ?? selected.value.revision, stops: payload.stops ?? selected.value.stops, days: payload.days ?? selected.value.days, updated_at: payload.updated_at ?? selected.value.updated_at }
     const index = trips.value.findIndex(trip => trip.id === selected.value?.id)
-    if (index >= 0) trips.value[index] = { ...trips.value[index], revision: selected.value.revision, stops: selected.value.stops, days: selected.value.days, updated_at: payload.updated_at ?? trips.value[index].updated_at }
+    if (index >= 0) trips.value[index] = { ...trips.value[index], title: nextTitle, start_date: nextStartDate, end_date: nextEndDate, revision: selected.value.revision, stops: selected.value.stops, days: selected.value.days, updated_at: payload.updated_at ?? trips.value[index].updated_at }
   }
   const previousStop = previousStopID ? findPlanningPoint(previousStopID) : null
   selectedStopId.value = previousStop && !isChildStop(previousStop) ? previousStop.id : previousStop ? parentForStop(previousStop)?.id || '' : ''
@@ -1852,7 +2005,7 @@ onUnmounted(() => {
                   <span class="trip-card-arrow">›</span>
                 </button>
                 <button class="trip-card-menu-button" type="button" :aria-expanded="tripMenuID === trip.id" :aria-label="'打开 ' + trip.title + ' 更多操作'" @click.stop="toggleTripMenu(trip.id)">⋯</button>
-                <div v-if="tripMenuID === trip.id" class="trip-card-menu" role="menu"><button type="button" role="menuitem" @click="tripMenuID = ''; deleteTrip(trip)"><IonIcon :icon="closeOutline" /> 删除行程</button></div>
+                <div v-if="tripMenuID === trip.id" class="trip-card-menu" role="menu"><button type="button" role="menuitem" @click="editTripDetailsFromList(trip)"><IonIcon :icon="createOutline" /> 编辑行程信息</button><button type="button" role="menuitem" class="danger-menu-item" @click="tripMenuID = ''; deleteTrip(trip)"><IonIcon :icon="closeOutline" /> 删除行程</button></div>
               </article>
             </div>
             </div>
@@ -1888,8 +2041,9 @@ onUnmounted(() => {
                 <button class="map-pick-action" type="button" :disabled="!mapReady || !tripDocument" @click="toggleMapPick"><IonIcon :icon="mapOutline" /> {{ mapPickMode ? '取消地图选点' : '地图选点' }}</button>
               </div>
 
-              <section v-if="error || (shareNoticeVisible && shareURL)" class="map-notices redesign-notices">
+              <section v-if="error || tripDetailsNotice || (shareNoticeVisible && shareURL)" class="map-notices redesign-notices">
                 <div v-if="error" class="global-error"><IonIcon :icon="cloudOfflineOutline" /><span>{{ error }}</span><button aria-label="关闭错误" @click="error = ''">×</button></div>
+                <div v-if="tripDetailsNotice" class="global-notice"><IonIcon :icon="createOutline" /><span>{{ tripDetailsNotice }}</span><button aria-label="关闭行程更新提示" @click="tripDetailsNotice = ''">×</button></div>
                 <div v-if="shareNoticeVisible && shareURL" class="share-banner"><span><strong>只读分享已创建</strong><a :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><small v-if="shareExpiresAt">有效期至 {{ formatDateTime(shareExpiresAt) }}</small><small v-if="shareCopyMessage" class="share-copy-feedback">{{ shareCopyMessage }}</small></span><div class="share-actions"><button type="button" @click="copyShareURL">复制链接</button><button v-if="shareID" type="button" @click="revokeShare">撤销</button><button type="button" aria-label="关闭分享提示" @click="dismissShareNotice">×</button></div></div>
               </section>
             </div>
@@ -1898,7 +2052,7 @@ onUnmounted(() => {
               <button class="sheet-handle" type="button" :aria-label="sheetBreakpoint === 'peek' ? '展开行程' : '收起行程'" @pointerdown="startSheetDrag" @click="cycleSheetBreakpoint"><span></span></button>
               <header class="workspace-panel-head">
                 <div><div class="workspace-panel-kicker"><p class="eyebrow">{{ shareMode ? 'SHARED JOURNEY' : 'CURRENT JOURNEY' }}</p><span v-if="shareURL" class="share-status-tag">已分享</span></div><h1>{{ selected?.title || tripDocument.title }}</h1><p>{{ selected ? formatDateRange(selected.start_date, selected.end_date) : '选择一条行程查看详情' }}</p></div>
-                <div class="panel-head-actions"><button v-if="!shareMode" class="panel-action-button" type="button" aria-label="返回行程列表" @click="navigateBackToList"><span>‹</span><small>行程</small></button><button class="panel-action-button collapse-action" type="button" :aria-label="sheetBreakpoint === 'peek' ? '展开行程' : '收起到 Peek'" @click="setSheetBreakpoint(sheetBreakpoint === 'peek' ? 'half' : 'peek')"><IonIcon :icon="sheetBreakpoint === 'peek' ? chevronUpOutline : chevronDownOutline" /></button></div>
+                <div class="panel-head-actions"><button v-if="!shareMode" class="panel-action-button" type="button" aria-label="返回行程列表" @click="navigateBackToList"><span>‹</span><small>行程</small></button><button v-if="!shareMode" class="panel-action-button edit-trip-action" type="button" aria-label="编辑行程信息" @click="beginEditTripDetails"><IonIcon :icon="createOutline" /><small>编辑</small></button><button class="panel-action-button collapse-action" type="button" :aria-label="sheetBreakpoint === 'peek' ? '展开行程' : '收起到 Peek'" @click="setSheetBreakpoint(sheetBreakpoint === 'peek' ? 'half' : 'peek')"><IonIcon :icon="sheetBreakpoint === 'peek' ? chevronUpOutline : chevronDownOutline" /></button></div>
               </header>
               <nav v-if="panelMode === 'journey'" class="journey-view-tabs" aria-label="行程内容"><button type="button" :class="{ selected: journeySection === 'itinerary' }" @click="journeySection = 'itinerary'">规划点 <small>{{ visibleStops.length }}</small></button><button type="button" :class="{ selected: journeySection === 'overview' }" @click="journeySection = 'overview'">说明</button></nav>
               <div v-if="panelMode === 'journey'" class="journey-day-tabs" aria-label="行程日期"><button type="button" :class="{ selected: selectedDay === 'all' }" @click="selectJourneyDay('all')">全程</button><button v-for="(day, index) in tripDocument.days" :key="day.id" type="button" :class="{ selected: selectedDay === index + 1 }" @click="selectJourneyDay(index + 1)">D{{ index + 1 }} <small>{{ formatDate(day.date).slice(5) }}</small></button></div>
@@ -1946,6 +2100,21 @@ onUnmounted(() => {
       <div v-if="descriptionFullscreen && descriptionEditing" class="fullscreen-editor-backdrop"><section class="fullscreen-editor" role="dialog" aria-modal="true" aria-labelledby="fullscreen-description-title"><header><h2 id="fullscreen-description-title">编辑规划点信息</h2><button class="modal-close" type="button" aria-label="退出全屏编辑" @click="closeDescriptionFullscreen">×</button></header><MarkdownEditor class="fullscreen-markdown-editor" v-model="descriptionDraft" v-model:mode="descriptionEditorMode" :preview-html="renderMarkdown(descriptionDraft)" :rows="12" editor-label="MARKDOWN" preview-label="地点说明预览" editor-aria-label="地点说明 Markdown 原始文本" placeholder="补充门票、开放时间、行程备注等信息" /><div class="description-actions"><button class="text-button" type="button" @click="cancelEditDescription">取消</button><button class="primary-text-button" type="button" :disabled="descriptionSaving" @click="saveDescription">{{ descriptionSaving ? '保存中…' : '保存规划点' }}</button></div></section></div>
       <div v-if="tripDescriptionFullscreen && tripDescriptionEditing" class="fullscreen-editor-backdrop"><section class="fullscreen-editor" role="dialog" aria-modal="true" aria-labelledby="fullscreen-trip-description-title"><header><h2 id="fullscreen-trip-description-title">编辑行程总体说明</h2><button class="modal-close" type="button" aria-label="退出全屏编辑" @click="closeTripDescriptionFullscreen">×</button></header><MarkdownEditor class="fullscreen-markdown-editor" v-model="tripDescriptionDraft" v-model:mode="tripDescriptionEditorMode" :preview-html="renderMarkdown(tripDescriptionDraft)" :rows="12" editor-label="MARKDOWN" preview-label="行程说明预览" editor-aria-label="行程说明 Markdown 原始文本" placeholder="补充整个行程的背景、节奏和注意事项" /><div class="description-actions"><button class="text-button" type="button" @click="cancelEditTripDescription">取消</button><button class="primary-text-button" type="button" :disabled="tripDescriptionSaving" @click="saveTripDescription">{{ tripDescriptionSaving ? '保存中…' : '保存说明' }}</button></div></section></div>
       <div v-if="mapPickOpen" class="modal-backdrop" @click.self="cancelMapPick"><section class="modal-panel map-pick-panel" role="dialog" aria-modal="true" aria-labelledby="map-pick-title"><button class="modal-close" aria-label="取消地图选点" @click="cancelMapPick">×</button><p class="eyebrow">MAP PICK</p><h2 id="map-pick-title">保存地图选点</h2><p class="map-pick-coordinate">{{ mapPickLocation?.crs }} · {{ mapPickLocation?.lat.toFixed(6) }}, {{ mapPickLocation?.lng.toFixed(6) }}</p><label>地点名称<input v-model="mapPickTitle" required autofocus placeholder="例如：临时观景点" /></label><label>地址或备注（可选）<input v-model="mapPickAddress" placeholder="补充位置说明" /></label><label class="select-field">加入日期<UiSelect v-model="mapPickDayID" aria-label="加入日期" :options="tripDayOptions" /></label><div class="modal-actions"><button type="button" @click="cancelMapPick">取消</button><button type="button" class="primary" :disabled="actionLoading || !mapPickTitle.trim()" @click="saveMapPick">{{ actionLoading ? '保存中…' : '保存规划点' }}</button></div></section></div>
+      <div v-if="tripDetailsEditing && !shareMode" class="modal-backdrop trip-details-backdrop" @click.self="cancelEditTripDetails">
+        <section class="modal-panel trip-details-panel" role="dialog" aria-modal="true" aria-labelledby="trip-details-title">
+          <header class="trip-details-header"><div><p class="eyebrow">TRIP DETAILS</p><h2 id="trip-details-title">编辑行程信息</h2><p>名称和日期会作为一次更改保存。</p></div><button class="modal-close" type="button" :disabled="tripDetailsSaving" aria-label="关闭编辑行程信息" @click="cancelEditTripDetails">×</button></header>
+          <form class="trip-details-form" @submit.prevent="saveTripDetails">
+            <div class="trip-details-field-head"><label>行程名称<input ref="tripDetailsTitleInput" v-model="tripDetailsTitleDraft" maxlength="120" required placeholder="例如：杭州春日慢游" /></label><span>{{ tripDetailsTitleCount }}/120</span></div>
+            <div class="trip-details-date-grid"><label>开始日期<input v-model="tripDetailsStartDateDraft" type="date" required /></label><label>结束日期<input v-model="tripDetailsEndDateDraft" type="date" :min="tripDetailsStartDateDraft" required /></label></div>
+            <div class="trip-details-duration"><strong v-if="tripDetailsDayCount > 0">共 {{ tripDetailsDayCount }} 天</strong><strong v-else>日期范围待确认</strong><span>日期按本地日历计算，最多支持 60 天</span></div>
+            <p v-if="tripDetailsDateError" class="trip-details-error" role="alert">{{ tripDetailsDateError }}</p>
+            <div v-if="tripDetailsBlockingDays.length" class="trip-details-error" role="alert"><strong>不能缩短到当前日期范围</strong><span v-for="day in tripDetailsBlockingDays" :key="day.id">{{ formatDate(day.date) }} 仍有 {{ planningPointCount(day) }} 个规划点。</span><small>请先移动这些规划点，或恢复结束日期。</small></div>
+            <p v-if="tripDetailsDateHint" class="trip-details-hint"><IonIcon :icon="createOutline" /> {{ tripDetailsDateHint }}</p>
+            <p v-if="tripDetailsDateChanged" class="trip-details-note">日期变化后，受影响规划点的天气快照会清除；已有路线不会自动重新规划。</p>
+            <div class="modal-actions"><button type="button" :disabled="tripDetailsSaving" @click="cancelEditTripDetails">取消</button><button class="primary" type="submit" :disabled="!tripDetailsCanSave">{{ tripDetailsSaving ? '保存中…' : '保存更改' }}</button></div>
+          </form>
+        </section>
+      </div>
       <div v-if="newTripOpen" class="new-trip-backdrop" @click.self="newTripOpen = false">
         <section class="new-trip-window" role="dialog" aria-modal="true" aria-labelledby="new-trip-title">
           <aside class="new-trip-hero"><span class="new-trip-mark">✦</span><p class="eyebrow">START A JOURNEY</p><h2>把下一段路，<br />放到地图上。</h2><p>先建立一个轻量的行程容器，之后再逐日添加地点、说明和路线。</p><div class="new-trip-hero-orbit"></div></aside>
