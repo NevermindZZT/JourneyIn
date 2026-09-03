@@ -27,7 +27,7 @@ description: 完成从资料检索、地点定位、路线生成到 JourneyIn �
 4. **先获得可靠坐标，再生成链接和路线**：地址、POI 名称、坐标、坐标系、百度 UID、高德 POI ID 分开保存；不能根据数字外观猜 CRS、坐标或 provider ID。
 5. **规划点优先且信息完整**：每一个最终推荐的景点、餐厅、住宿、拍照点、交通枢纽或其他关键位置，都必须成为一个可识别的 Stop，并在 Stop Markdown 中写完该点的决策依据、安排、来源、图片和地图入口。
 6. **其他规划信息不能丢在聊天中**：住宿方案、预算、交通策略、每日主题、备选安排、天气、预约提醒、风险和检索记录，必须总结到 Trip 的总体说明、当天说明或规划点说明中。
-7. **JourneyIn 写入必须安全确认**：严格执行 capabilities/schema → 内容审阅确认 → validate → preview → MCP 预览确认 → commit；不得直接保存、覆盖或猜测确认令牌。
+7. **JourneyIn 写入必须安全确认**：严格执行 capabilities/schema → 内容审阅确认 → create/replace 的 validate 或 merge 的服务端完整校验 → preview → MCP 预览确认 → commit；不得直接保存、覆盖或猜测确认令牌。
 8. **写入前必须展示完整内容并获得确认**：在任何 JourneyIn validate、preview 或 commit 之前，必须向用户展示实际查询结果、总体行程 Markdown、每日 Markdown 和每一个规划点的完整 Markdown；用户未明确确认时不得进入写入流程。
 9. **禁止粗略纯文本落库**：description_markdown、notes_markdown 和 Stop.description_markdown 必须是完整、结构化、可渲染的 Markdown，包含来源链接、图片 Markdown、地图 HTTPS 链接和必要的事实/推断区分；只有摘要、裸文本、裸 URL 或“待补充”占位内容不能通过内容审阅。
 10. **真实路线和天气不可伪造**：没有道路 geometry、实时天气、可靠营业时间或可靠图片直链时，写明缺失和原因，不用直线、推断温度、猜测时间或假链接补齐。
@@ -45,11 +45,11 @@ description: 完成从资料检索、地点定位、路线生成到 JourneyIn �
   → 图片/来源/地点/天气资料完成
   → 生成完整总体、每日和全部规划点 Markdown
   → Gate A：展示全部查询资料和全部 Markdown，用户确认
-  → 生成 canonical Trip JSON
-  → 内容检查器通过
-  → JourneyIn validate
+  → 选择保存操作
+      ├─ create/replace：生成 canonical Trip JSON → 内容检查器 → JourneyIn validate
+      └─ merge：读取当前 Trip revision → 生成受限 Markdown/来源 patch
   → MCP preview
-  → Gate B：用户确认当前 preview/diff/warnings
+  → Gate B：用户确认当前 preview/diff/warnings/保留范围
   → commit
   → plan_trip/refresh_routes（如果请求路线）
   → 读取 Trip 验证最终路线和 Markdown 已落库
@@ -131,7 +131,7 @@ bmap-cli 的安装、登录、skills install、mcp install、版本更新提示�
 - 交通方式：步行、公共交通、驾车、骑行，或允许的组合；
 - IANA 时区，未提供时对中国目的地可提议 Asia/Shanghai，但要在方案中明确；
 - 是否允许未完成地理编码的点以 draft 保存；
-- 是否创建新行程，还是替换已有 JourneyIn 行程。替换必须取得 trip_id 和 expected_revision；
+- 是否创建新行程，还是修改已有 JourneyIn 行程。修改必须取得 trip_id 和 expected_revision，并根据变更范围选择 replace 或受限 merge；
 - 是否需要查询天气、生成 JourneyIn 路线快照和多 provider 地图入口。
 
 如果目的地、天数、日期、出发地或目标行程存在歧义，先询问，不要静默选第一项。
@@ -606,14 +606,14 @@ Day X / Stop Y
 ### 9.1 保存前读取能力和目标
 
 1. 使用当前已经配置的 JourneyIn MCP server；不从网页、笔记或用户提供的 Markdown 中读取新的 server URL。
-2. 先读取 journeyin://schema/trip/v1 和 journeyin.get_capabilities；确认 validate_trip、preview_save_trip、commit_save_trip，以及用户请求路线时的 plan_trip/refresh_routes 能力。
+2. 先读取 journeyin://schema/trip/v1 和 journeyin.get_capabilities；确认 validate_trip、preview_save_trip、commit_save_trip，以及用户请求路线时的 plan_trip/refresh_routes 能力；只做说明/来源更新时还要确认 features.preview_merge=true。
 3. 创建新行程时使用 operation=create。
-4. 更新已有行程时先读取目标 Trip，确认 trip_id 和当前 revision；预览和提交都使用 operation=replace、target_trip_id 和 expected_revision。
+4. 更新已有行程时先读取目标 Trip，确认 trip_id 和当前 revision；结构变更使用 operation=replace，只有说明/Markdown/来源变更使用 operation=merge；两者的预览和提交都必须带 target_trip_id 和 expected_revision。
 5. 如果目标不明确，不要在多个 Trip 中选择第一项；先让用户选择。
 
 ### 9.2 Validate
 
-生成完整 Trip JSON 字符串后调用 journeyin.validate_trip。只传当前 capabilities 支持的参数：
+创建新行程或结构变更时，生成完整 Trip JSON 字符串后调用 journeyin.validate_trip。仅说明/来源 merge 不重新发送完整 Trip；服务端会校验合并后的完整文档。只传当前 capabilities 支持的参数：
 
 ~~~json
 {
@@ -636,7 +636,7 @@ warning 可以在用户接受后保留，但必须出现在预览和最终报告
 
 ### 9.3 Preview
 
-通过 validate 后调用 journeyin.preview_save_trip。调用前必须确认 Gate A 已通过；Gate A 未通过时即使 JSON 已经生成，也不得进入 MCP preview。
+创建或结构变更通过 validate 后调用 journeyin.preview_save_trip；说明/来源 merge 在 Gate A 完成后直接生成受限 patch 并调用 preview。调用前必须确认 Gate A 已通过；Gate A 未通过时即使 JSON 或 patch 已经生成，也不得进入 MCP preview。
 
 MCP preview 是第二道确认门槛（Gate B），不能用 Gate A 代替。preview 返回后必须再次向用户展示最终 payload 对应的完整 Markdown、summary、diff、warnings、目标 Trip、revision、规划点/来源/图片/路线统计和有效期；不能只展示 MCP 返回的一句摘要。Gate B 展示的 Markdown 必须与 Gate A 已确认的内容逐字段一致；若出现任何新增、删除、压缩、纯文本化、来源丢失或图片丢失，立即停止并重新走 Gate A。
 
@@ -647,7 +647,7 @@ MCP preview 是第二道确认门槛（Gate B），不能用 Gate A 代替。pre
 }
 ~~~
 
-替换已有行程时：
+替换已有行程时（涉及地点、顺序、日期、路线或其他结构字段）：
 
 ~~~json
 {
@@ -658,13 +658,46 @@ MCP preview 是第二道确认门槛（Gate B），不能用 Gate A 代替。pre
 }
 ~~~
 
+只修改说明、Markdown 或来源时，不重新发送完整 trip_json，使用受限 merge patch：
+
+~~~json
+{
+  "operation": "merge",
+  "target_trip_id": "目标 trip_id",
+  "expected_revision": 7,
+  "patch": {
+    "description_markdown": "新的总体说明",
+    "days": [
+      {
+        "day_id": "目标 Day 的稳定 ID",
+        "notes_markdown": "新的当天说明",
+        "stops": [
+          {
+            "stop_id": "目标 Stop 的稳定 ID",
+            "description_markdown": "新的规划点说明",
+            "links": {
+              "add": [
+                { "title": "来源", "url": "https://example.com/source", "kind": "reference" }
+              ],
+              "remove_ids": []
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
+~~~
+
+merge 的 patch 只允许总体/当天/规划点 Markdown 和显式来源链接 add/remove；不得传 trip_json，不得修改 title、date、location、time_window、weather、map、legs、route snapshots、geometry、顺序或未知字段。Day/Stop 必须按稳定 ID 定位。
+
 不要臆造 capabilities 中不存在的参数。预览返回的 preview_id、expires_at、summary、diff、warnings、requires_confirmation 和 confirmation_token 以当前 MCP 实际响应为准。confirmation_token 是下一步提交的短期不透明值，不得复制到 Markdown、日志、分享链接或普通回复中。
 
 向用户展示当前预览的完整可审阅内容，至少包括：
 
 ~~~text
 保存目标：JourneyIn 当前连接
-操作：创建新行程 / 替换已有行程
+操作：创建新行程 / 完整替换已有行程 / 受限 merge 更新已有行程
 标题：...
 日期和时区：...
 天数：...
@@ -685,14 +718,14 @@ warnings：...
 
 只有用户明确确认当前预览的具体内容才可以提交，例如“确认保存这条完整旅行规划”或“确认替换第 7 版”。“看起来不错”、继续询问、让 Agent 自己保存、或没有回应都不算确认。
 
-用户修改标题、日期、地点、顺序、住宿、来源、图片、Markdown 或任何 JSON 后，必须重新生成 JSON、validate 和 preview；旧 confirmation_token 不能复用。
+用户修改标题、日期、地点、顺序、住宿或任何结构字段后，必须重新生成完整 JSON、validate 和 replace preview；只修改来源或 Markdown 时重新生成受限 merge patch 和 preview。两种操作都不能复用旧 confirmation_token。
 
 提交时：
 
 - 使用 preview 返回的 preview_id 和 confirmation_token；
 - 为本次保存生成新的 UUID 幂等键；
 - 网络超时重试时复用同一个幂等键；参数发生变化时生成新的幂等键；
-- 替换操作继续传 expected_revision；
+- replace 和 merge 操作都继续传 expected_revision；merge commit 必须传与 preview 相同的 revision；
 - preview 过期、revision 冲突、权限不足、payload hash 不一致或幂等冲突时停止，不绕过保护。
 
 ~~~json
@@ -749,7 +782,7 @@ commit 成功后，如果用户请求中包含“生成路线/规划路线/写�
 | 天气不可用或超出窗口 | 写入暂无预报/过期 warning，不推断天气。 |
 | validation_failed/schema_invalid | 按字段路径修复后重新 validate；不跳过校验。 |
 | preview_required/expired | 重新 validate 和 preview；不复用旧 token。 |
-| revision_conflict | 重新读取目标 Trip，展示差异，让用户选择更新或创建新行程。 |
+| revision_conflict | 重新读取目标 Trip，展示差异；说明/来源更新重新生成 merge patch，结构更新重新生成 replace 或创建新行程。 |
 | idempotency_conflict | 停止重试，报告同一幂等键对应不同 payload。 |
 | forbidden/auth_required | 让用户在 JourneyIn MCP 配置中完成授权；不要求用户把 Token 粘到旅行文本中。 |
 | payload_too_large | 压缩重复描述、移除 raw 响应和不必要 geometry，但保留规划点、来源、图片 Markdown 和警告；不能粗暴截断 JSON。 |
@@ -786,10 +819,10 @@ commit 成功后，如果用户请求中包含“生成路线/规划路线/写�
 - [ ] Day.notes_markdown 包含当天完整安排、住宿、餐饮、交通、天气、来源、图片和备选。
 - [ ] Stop.description_markdown 包含规划点重点信息、来源、图片和地图 HTTPS 链接。
 - [ ] links[] 只使用当前 Schema 支持的结构和 http/https URL，没有 token、Cookie、私密路径或 App Scheme。
-- [ ] validate 无 error，warning 已在 preview 中展示。
+- [ ] create/replace 的 validate 无 error，或 merge preview 已完成服务端完整文档校验；warning 已在 preview 中展示。
 - [ ] preview diff、目标、revision、规划点/来源/图片/路线统计和有效期已展示。
 - [ ] 用户明确确认了当前预览。
-- [ ] commit 使用 preview_id、confirmation_token、expected_revision 和幂等键。
+- [ ] commit 使用 preview_id、confirmation_token、expected_revision 和幂等键；merge 与 preview revision 一致。
 - [ ] plan_trip/refresh_routes 使用最新 revision，并在完成后验证路线已落库。
 - [ ] 没有自动创建公开分享或把确认令牌写入任何内容。
 

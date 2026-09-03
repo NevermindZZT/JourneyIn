@@ -27,11 +27,32 @@ type ValidateArgs struct {
 	TripJSON string `json:"trip_json"`
 }
 type PreviewArgs struct {
-	TripJSON         string `json:"trip_json"`
-	Operation        string `json:"operation"`
-	TargetTripID     string `json:"target_trip_id,omitempty"`
-	ExpectedRevision int    `json:"expected_revision,omitempty"`
+	TripJSON         string                 `json:"trip_json,omitempty"`
+	Operation        string                 `json:"operation"`
+	TargetTripID     string                 `json:"target_trip_id,omitempty"`
+	ExpectedRevision int                    `json:"expected_revision,omitempty"`
+	Patch            application.MergePatch `json:"patch,omitempty"`
+	patchProvided    bool
 }
+
+func (p *PreviewArgs) UnmarshalJSON(data []byte) error {
+	type plain PreviewArgs
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if raw == nil {
+		return errors.New("preview arguments must be a JSON object")
+	}
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*p = PreviewArgs(decoded)
+	_, p.patchProvided = raw["patch"]
+	return nil
+}
+
 type CommitArgs struct {
 	PreviewID         string `json:"preview_id"`
 	ConfirmationToken string `json:"confirmation_token"`
@@ -100,7 +121,7 @@ func NewServer(app *application.TripService, version string, schema fs.FS) *Serv
 	result := &Server{app: app, version: version, schema: schema, mcp: server}
 	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.get_capabilities", Description: "Return JourneyIn capabilities and supported schema versions."}, result.getCapabilities)
 	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.validate_trip", Description: "Validate a JourneyIn Trip JSON document without writing it."}, result.validateTrip)
-	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.preview_save_trip", Description: "Create a short-lived preview for creating or replacing a trip; does not commit a revision."}, result.previewSaveTrip)
+	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.preview_save_trip", Description: "Create a short-lived preview for creating, replacing, or safely merging a trip. Merge accepts only Markdown and source-link patches addressed by stable Day/Stop IDs; it preserves map, locations, weather, legs, and route geometry, and does not commit a revision."}, result.previewSaveTrip)
 	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.commit_save_trip", Description: "Commit a user-confirmed JourneyIn trip preview with idempotency protection."}, result.commitSaveTrip)
 	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.plan_trip", Description: "Generate saved routes for adjacent planning points and persist route snapshots."}, result.planTrip)
 	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.refresh_routes", Description: "Recalculate routes for a selected Provider, mode, and optional Day without changing Stop order."}, result.planTrip)
@@ -118,7 +139,7 @@ func (s *Server) HTTPHandler() http.Handler {
 func (s *Server) RunStdio(ctx context.Context) error { return s.mcp.Run(ctx, &mcp.StdioTransport{}) }
 
 func (s *Server) getCapabilities(ctx context.Context, req *mcp.CallToolRequest, input struct{}) (*mcp.CallToolResult, map[string]any, error) {
-	return nil, map[string]any{"version": s.version, "schema_versions": []int{1}, "tools": []string{"journeyin.get_capabilities", "journeyin.validate_trip", "journeyin.preview_save_trip", "journeyin.commit_save_trip", "journeyin.plan_trip", "journeyin.refresh_routes", "journeyin.get_trip", "journeyin.list_trips", "journeyin.list_trip_history", "journeyin.get_trip_history"}, "resources": []string{"journeyin://schema/trip/v1", "journeyin://trips/{trip_id}", "journeyin://trips/{trip_id}/history/{history_id}"}, "map_providers": []string{"baidu", "amap"}}, nil
+	return nil, map[string]any{"version": s.version, "schema_versions": []int{1}, "features": map[string]any{"preview_merge": true, "merge_patch_version": 1}, "tools": []string{"journeyin.get_capabilities", "journeyin.validate_trip", "journeyin.preview_save_trip", "journeyin.commit_save_trip", "journeyin.plan_trip", "journeyin.refresh_routes", "journeyin.get_trip", "journeyin.list_trips", "journeyin.list_trip_history", "journeyin.get_trip_history"}, "resources": []string{"journeyin://schema/trip/v1", "journeyin://trips/{trip_id}", "journeyin://trips/{trip_id}/history/{history_id}"}, "map_providers": []string{"baidu", "amap"}}, nil
 }
 
 func (s *Server) validateTrip(ctx context.Context, req *mcp.CallToolRequest, input ValidateArgs) (*mcp.CallToolResult, ValidateOutput, error) {
@@ -131,6 +152,19 @@ func (s *Server) validateTrip(ctx context.Context, req *mcp.CallToolRequest, inp
 }
 
 func (s *Server) previewSaveTrip(ctx context.Context, req *mcp.CallToolRequest, input PreviewArgs) (*mcp.CallToolResult, application.PreviewResult, error) {
+	if input.Operation == "merge" {
+		if !input.patchProvided && input.Patch.IsEmpty() {
+			return nil, application.PreviewResult{}, errors.New("patch is required for merge")
+		}
+		if strings.TrimSpace(input.TripJSON) != "" {
+			return nil, application.PreviewResult{}, errors.New("trip_json must not be provided with operation merge")
+		}
+		result, err := s.app.PreviewMerge(ctx, input.Patch, input.TargetTripID, input.ExpectedRevision, "mcp")
+		return nil, result, err
+	}
+	if input.patchProvided || !input.Patch.IsEmpty() {
+		return nil, application.PreviewResult{}, errors.New("patch is only supported with operation merge")
+	}
 	result, err := s.app.PreviewSave(ctx, []byte(input.TripJSON), input.Operation, input.TargetTripID, input.ExpectedRevision, "mcp")
 	return nil, result, err
 }

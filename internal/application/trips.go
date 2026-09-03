@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"sync"
 	"time"
 
@@ -44,6 +45,12 @@ type PreviewResult struct {
 	ConfirmationToken    string                   `json:"confirmation_token,omitempty"`
 	Summary              map[string]any           `json:"summary"`
 	Warnings             []domain.ValidationIssue `json:"warnings,omitempty"`
+	Operation            string                   `json:"operation,omitempty"`
+	TargetTripID         string                   `json:"target_trip_id,omitempty"`
+	BaseRevision         int                      `json:"base_revision,omitempty"`
+	ChangedPaths         []string                 `json:"changed_paths,omitempty"`
+	Diff                 []PreviewChange          `json:"diff,omitempty"`
+	Preserved            map[string]bool          `json:"preserved,omitempty"`
 }
 
 type CommitResult struct {
@@ -188,10 +195,17 @@ func (s *TripService) CommitSave(ctx context.Context, previewID, confirmationTok
 	if domain.ContentHash([]byte(confirmationToken)) != p.ConfirmationHash {
 		return CommitResult{}, errors.New("invalid confirmation token")
 	}
-	if expectedRevision != 0 && p.Operation == "replace" && expectedRevision != p.ExpectedRevision {
-		return CommitResult{}, errors.New("expected revision does not match preview")
+	if p.Operation != "create" {
+		if expectedRevision < 1 {
+			return CommitResult{}, errors.New("expected_revision is required for update")
+		}
+		if expectedRevision != p.ExpectedRevision {
+			return CommitResult{}, errors.New("expected revision does not match preview")
+		}
 	}
-	requestHash := domain.ContentHash(append(p.Document, []byte("|"+p.Operation+"|"+p.TargetTripID)...))
+	requestPayload := append([]byte(nil), p.Document...)
+	requestPayload = append(requestPayload, []byte("|"+p.Operation+"|"+p.TargetTripID+"|"+strconv.Itoa(p.ExpectedRevision))...)
+	requestHash := domain.ContentHash(requestPayload)
 	scope := "trip:" + p.TargetTripID
 	if p.Operation == "create" {
 		scope = "trip:create"
@@ -217,7 +231,7 @@ func (s *TripService) CommitSave(ctx context.Context, previewID, confirmationTok
 		return CommitResult{}, err
 	}
 	result := CommitResult{TripID: record.ID, Revision: record.Revision, Status: "created", ViewURL: "/trips/" + record.ID}
-	if p.Operation == "replace" {
+	if p.Operation != "create" {
 		result.Status = "updated"
 	}
 	encoded, _ := json.Marshal(result)
