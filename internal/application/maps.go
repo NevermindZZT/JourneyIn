@@ -26,6 +26,11 @@ type MapService struct {
 	dailyLimit         int
 	mu                 sync.Mutex
 	flights            map[string]*mapFlight
+	// cacheWriteMu serializes map cache writes. SQLite only applies PRAGMA
+	// busy_timeout to the connection that executed it, so concurrent writers on
+	// other pooled connections can hit SQLITE_BUSY even with a busy timeout set.
+	// Cache writes are idempotent, so serializing them has no correctness cost.
+	cacheWriteMu sync.Mutex
 }
 
 type mapFlight struct {
@@ -367,7 +372,9 @@ func (s *MapService) cached(ctx context.Context, providerID journeymaps.Provider
 	s.mu.Unlock()
 	data, err := fetch()
 	if err == nil && s.store != nil {
+		s.cacheWriteMu.Lock()
 		err = s.store.PutMapCache(ctx, provider, kind, cacheKey, data, time.Now().UTC().Add(ttl), time.Now().UTC())
+		s.cacheWriteMu.Unlock()
 	}
 	s.mu.Lock()
 	flight.data = data
