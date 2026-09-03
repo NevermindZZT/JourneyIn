@@ -9,6 +9,8 @@
   --md-on-surface-variant: #64716f;
   --md-outline: #b8bbb1;
   --md-error: #b64545;
+  --md-warning: #a66228;
+  --md-success: #2f7d68;
   --md-map: #dbe8e2;
   --accent: #e56a4d;
   --p: var(--md-primary);
@@ -30,6 +32,8 @@
   --md-on-surface-variant: #b5c1bc;
   --md-outline: #53625e;
   --md-error: #ffb4ab;
+  --md-warning: #ffb86b;
+  --md-success: #8bd3b2;
   --md-map: #243c3a;
   --accent: #ff9a78;
 }
@@ -841,4 +845,68 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
   .trip-history-item { align-items: stretch; flex-direction: column; }
   .trip-history-item-actions { width: 100%; }
   .trip-history-item-actions button { flex: 1; }
+}
+
+
+/* Planning point resolution and editing */
+.location-readiness-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0 12px; padding: 12px 13px; border: 1px solid color-mix(in srgb, var(--md-warning) 42%, var(--line)); border-radius: 14px; color: var(--ink); background: color-mix(in srgb, var(--md-warning) 10%, var(--surface)); }
+.location-readiness-banner > div { min-width: 0; display: grid; gap: 4px; }
+.location-readiness-banner strong { color: var(--md-warning); font-size: 11px; }
+.location-readiness-banner span { color: var(--muted); font-size: 10px; line-height: 1.45; }
+.location-readiness-banner .text-action, .location-readiness-readonly { flex: 0 0 auto; min-height: 36px; padding: 8px 11px; border: 1px solid color-mix(in srgb, var(--md-warning) 48%, var(--line)); border-radius: 10px; color: var(--md-warning); background: var(--surface); font-size: 10px; font-weight: 900; white-space: nowrap; }
+.redesign-stop-row.location-missing { border-color: color-mix(in srgb, var(--md-warning) 30%, var(--line)); background: color-mix(in srgb, var(--md-warning) 4%, var(--surface)); }
+.stop-location-badge { display: inline-flex; width: max-content; min-height: 17px; align-items: center; margin-top: 4px; padding: 2px 6px; border: 1px solid color-mix(in srgb, var(--md-success) 34%, var(--line)); border-radius: 999px; color: var(--md-success); background: color-mix(in srgb, var(--md-success) 8%, var(--surface)); font-size: 9px; font-style: normal; font-weight: 900; }
+.stop-location-badge.missing { border-color: color-mix(in srgb, var(--md-warning) 42%, var(--line)); color: var(--md-warning); background: color-mix(in srgb, var(--md-warning) 10%, var(--surface)); }
+.detail-location { gap: 6px; }
+.detail-location.location-missing { border: 1px solid color-mix(in srgb, var(--md-warning) 38%, var(--line)); color: var(--md-warning); background: color-mix(in srgb, var(--md-warning) 9%, var(--surface)); }
+.detail-location-heading, .point-editor-location-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.detail-location-heading > span:first-child { display: inline-flex; align-items: center; gap: 6px; }
+.location-status-icon { display: inline-grid; width: 17px; height: 17px; place-items: center; border-radius: 50%; color: var(--md-on-primary); background: var(--md-success); font-size: 9px; }
+.location-status-icon.missing { color: #fff; background: var(--md-warning); font-weight: 900; }
+.location-state-label { color: var(--muted); font-size: 9px; font-weight: 800; white-space: nowrap; }
+.detail-location-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.detail-location-actions .text-action { min-height: 34px; padding: 7px 9px; border: 1px solid color-mix(in srgb, var(--p) 34%, var(--line)); border-radius: 9px; color: var(--p); background: var(--surface); font-size: 10px; font-weight: 900; }
+.detail-location-actions .text-action:disabled { cursor: not-allowed; opacity: .45; }
+.detail-navigation-button:disabled { cursor: not-allowed; border-color: var(--line); color: var(--muted); opacity: .6; }
+.map-pick-context { margin: -6px 0 13px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.location-search-title-field { border-top: 1px solid var(--line); padding-top: 10px; }
+.point-editor-backdrop { z-index: 120; }
+.point-editor-panel { display: flex; width: min(520px, calc(100vw - 32px)); max-height: min(760px, calc(100dvh - 32px)); min-height: 0; flex-direction: column; padding: 0; overflow: hidden; }
+.point-editor-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 25px 28px 18px; border-bottom: 1px solid var(--line); }
+.point-editor-header > div { min-width: 0; }
+.point-editor-header h2 { margin: 5px 0 0; color: var(--ink); font-size: 26px; letter-spacing: -.04em; }
+.point-editor-header p:last-child { max-width: 360px; margin: 7px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.point-editor-form { display: flex; min-height: 0; flex: 0 1 auto; flex-direction: column; gap: 14px; max-height: calc(100dvh - 190px); overflow-y: auto; padding: 20px 28px 24px; overscroll-behavior: contain; scroll-padding-bottom: 24px; }
+.point-editor-form > label { display: grid; gap: 6px; color: var(--muted); font-size: 11px; font-weight: 800; }
+.point-editor-form > label input { width: 100%; min-height: 44px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 11px; outline: none; color: var(--ink); background: var(--md-surface-container-low); font-size: 12px; }
+.point-editor-form > label input:focus { border-color: var(--p); box-shadow: 0 0 0 3px color-mix(in srgb, var(--p) 14%, transparent); }
+.point-editor-location { display: grid; gap: 10px; padding: 13px; border: 1px solid color-mix(in srgb, var(--md-success) 30%, var(--line)); border-radius: 14px; background: color-mix(in srgb, var(--md-success) 6%, var(--surface)); }
+.point-editor-location.missing { border-color: color-mix(in srgb, var(--md-warning) 42%, var(--line)); background: color-mix(in srgb, var(--md-warning) 8%, var(--surface)); }
+.point-editor-location-head > div { display: grid; min-width: 0; gap: 4px; }
+.point-editor-location-head strong { color: var(--ink); font-size: 12px; }
+.point-editor-location-head small, .point-editor-location > small { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; }
+.point-editor-location > p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
+.point-editor-location-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.point-editor-location-actions button { min-height: 42px; }
+.point-editor-related { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--surface) 82%, var(--md-surface-container-low)); }
+.point-editor-related > span { display: grid; min-width: 0; gap: 3px; }
+.point-editor-related strong { color: var(--ink); font-size: 11px; }
+.point-editor-related small { color: var(--muted); font-size: 9px; line-height: 1.4; }
+.point-editor-related .text-action { flex: 0 0 auto; min-height: 36px; padding: 7px 9px; border: 1px solid color-mix(in srgb, var(--p) 35%, var(--line)); border-radius: 9px; color: var(--p); background: var(--surface); font-size: 10px; font-weight: 900; }
+.point-editor-note { margin: -4px 0 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
+.point-editor-error, .modal-form-error { margin: 0; padding: 9px 10px; border: 1px solid color-mix(in srgb, var(--md-error) 38%, var(--line)); border-radius: 10px; color: var(--md-error); background: color-mix(in srgb, var(--md-error) 8%, var(--surface)); font-size: 10px; line-height: 1.45; }
+.point-editor-actions { position: relative; z-index: 2; flex: 0 0 auto; margin: 0; padding: 12px 28px 24px; border-top: 1px solid var(--line); background: var(--surface); }
+.point-editor-actions button { min-height: 44px; }
+@media (max-width: 720px) {
+  .location-readiness-banner { align-items: flex-start; }
+  .location-readiness-banner .text-action, .location-readiness-readonly { align-self: center; }
+  .point-editor-backdrop { place-items: end center; padding: 8px; }
+  .point-editor-panel { width: 100%; height: auto; max-height: calc(100dvh - 16px); border-radius: 24px 24px 16px 16px; }
+  .point-editor-header { padding: 22px 20px 16px; }
+  .point-editor-header h2 { font-size: 24px; }
+  .point-editor-form { max-height: calc(100dvh - 200px); padding: 18px 20px 22px; scroll-padding-bottom: 22px; }
+  .point-editor-actions { margin: 0; padding: 12px 20px calc(22px + env(safe-area-inset-bottom)); }
+  .point-editor-actions button { flex: 1; }
+  .point-editor-related { align-items: flex-start; flex-direction: column; }
+  .point-editor-related .text-action { width: 100%; }
 }

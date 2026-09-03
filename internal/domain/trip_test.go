@@ -21,8 +21,8 @@ func TestNormalizeTripGeneratesIDAndPreservesValidity(t *testing.T) {
 	if trip.ID == "" {
 		t.Fatal("expected generated trip id")
 	}
-	if len(issues) != 0 {
-		t.Fatalf("unexpected issues: %+v", issues)
+	if len(issues) != 1 || issues[0].Code != "missing" || issues[0].Level != "warning" {
+		t.Fatalf("expected unresolved-location warning, got %+v", issues)
 	}
 	var decoded map[string]any
 	if err := json.Unmarshal(normalized, &decoded); err != nil {
@@ -61,5 +61,16 @@ func TestTripValidationRejectsInvalidLinksAndDates(t *testing.T) {
 	}
 	if !foundOrder || !foundURL {
 		t.Fatalf("expected date order and URL errors, got %+v", issues)
+	}
+}
+
+func TestPublishedTripRequiresPlanningPointLocation(t *testing.T) {
+	input := []byte(`{"schema_version":1,"title":"已发布","status":"published","timezone":"Asia/Shanghai","date_range":{"start":"2026-04-18","end":"2026-04-18"},"days":[{"id":"day-1","date":"2026-04-18","stops":[{"id":"stop-1","sequence":1,"title":"待定位"}]}]}`)
+	_, _, issues, err := NormalizeTrip(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 1 || issues[0].Code != "missing" || issues[0].Level != "error" {
+		t.Fatalf("expected published location error, got %+v", issues)
 	}
 }

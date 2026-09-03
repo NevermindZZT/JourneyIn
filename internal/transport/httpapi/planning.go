@@ -213,6 +213,10 @@ func writePlanningError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusServiceUnavailable, "provider_unavailable", err.Error(), nil)
 		return
 	}
+	if errors.Is(err, application.ErrPlanningLocationRequired) {
+		writeError(w, http.StatusUnprocessableEntity, "location_required", "planning points must have reliable locations before route generation", map[string]any{"requires_user_consent": true})
+		return
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "not_found", err.Error(), nil)
 		return

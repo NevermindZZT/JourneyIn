@@ -182,6 +182,17 @@ func (t Trip) Validate() []ValidationIssue {
 	add := func(path, code, message, level string) {
 		issues = append(issues, ValidationIssue{Path: path, Code: code, Message: message, Level: level})
 	}
+	locationIssueLevel := "warning"
+	locationIssueMessage := "planning point has no reliable location; user consent is required before saving this unresolved draft"
+	if t.Status == "published" {
+		locationIssueLevel = "error"
+		locationIssueMessage = "published planning points must have a reliable location"
+	}
+	addMissingLocation := func(path string, raw json.RawMessage) {
+		if value := strings.TrimSpace(string(raw)); value == "" || value == "null" {
+			add(path, "missing", locationIssueMessage, locationIssueLevel)
+		}
+	}
 	if t.SchemaVersion != 1 {
 		add("schema_version", "unsupported", "schema_version must be 1", "error")
 	}
@@ -251,6 +262,10 @@ func (t Trip) Validate() []ValidationIssue {
 			}
 			if stop.Sequence < 1 {
 				add(stopPath+".sequence", "range", "sequence must be positive", "error")
+			}
+			addMissingLocation(stopPath+".location", stop.Location)
+			for childIndex, child := range stop.Children {
+				addMissingLocation(fmt.Sprintf("%s.children[%d].location", stopPath, childIndex), child.Location)
 			}
 			validateLinks(stopPath+".links", stop.Links, add)
 		}

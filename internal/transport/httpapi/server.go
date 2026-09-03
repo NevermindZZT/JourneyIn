@@ -95,6 +95,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PATCH /api/v1/trips/{id}", s.updateTripDetails)
 	mux.HandleFunc("PUT /api/v1/trips/{id}", s.replaceTrip)
 	mux.HandleFunc("POST /api/v1/trips/{id}/days/{dayID}/stops", s.addStop)
+	mux.HandleFunc("PATCH /api/v1/trips/{id}/days/{dayID}/stops/{stopID}", s.updatePlanningPoint)
 	mux.HandleFunc("POST /api/v1/trips/{id}/days/{dayID}/stops/{stopID}/move", s.moveStop)
 	mux.HandleFunc("DELETE /api/v1/trips/{id}/days/{dayID}/stops/{stopID}", s.deleteStop)
 	mux.HandleFunc("POST /api/v1/trips/{id}/days/{dayID}/stops/{stopID}/children", s.addSubStop)
@@ -180,7 +181,7 @@ func (s *Server) capabilities(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"version": s.version, "schema_versions": []int{1}, "default_map_provider": defaultProvider, "map_providers": providers, "mcp": map[string]any{"http_endpoint": "/mcp", "transports": []string{"streamable-http", "stdio"}}})
+	writeJSON(w, http.StatusOK, map[string]any{"version": s.version, "schema_versions": []int{1}, "default_map_provider": defaultProvider, "map_providers": providers, "features": map[string]any{"planning_point_edit": true, "coordinate_repair": true}, "mcp": map[string]any{"http_endpoint": "/mcp", "transports": []string{"streamable-http", "stdio"}}})
 }
 
 func (s *Server) schemaTrip(w http.ResponseWriter, r *http.Request) {

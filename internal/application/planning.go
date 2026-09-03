@@ -67,6 +67,9 @@ func (s *TripService) AddStop(ctx context.Context, tripID string, expectedRevisi
 	if len(input.Location) == 0 || string(input.Location) == "null" {
 		return store.TripRecord{}, ErrPlanningLocationRequired
 	}
+	if err := validatePlanningPointLocation(input.Location); err != nil {
+		return store.TripRecord{}, err
+	}
 	record, err := s.store.GetTrip(ctx, tripID)
 	if err != nil {
 		return store.TripRecord{}, err
@@ -470,6 +473,9 @@ func (s *TripService) AddSubStop(ctx context.Context, tripID string, expectedRev
 	}
 	if len(input.Location) == 0 || string(input.Location) == "null" {
 		return store.TripRecord{}, ErrPlanningLocationRequired
+	}
+	if err := validatePlanningPointLocation(input.Location); err != nil {
+		return store.TripRecord{}, err
 	}
 	record, err := s.store.GetTrip(ctx, tripID)
 	if err != nil {
