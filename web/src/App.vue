@@ -263,6 +263,8 @@ const searchQuery = ref('')
 const searchRegion = ref('')
 const searchCategory = ref<'all' | '旅游景点' | '酒店' | '餐饮'>('all')
 const searchResults = ref<PlaceCandidate[]>([])
+const selectedSearchResultIndex = ref(-1)
+const searchResultMarkers: any[] = []
 const searchLoading = ref(false)
 const searchMessage = ref('')
 type LocationSearchMode = 'add' | 'repair'
@@ -918,6 +920,8 @@ function closeJourneySearch() {
   locationSearchTitleDraft.value = ''
   searchMessage.value = ''
   searchResults.value = []
+  selectedSearchResultIndex.value = -1
+  clearSearchResultMarkers()
   setSheetBreakpoint('half', 'replace')
 }
 
@@ -1632,6 +1636,7 @@ async function renderBaiduMap() {
     else mapInstance.centerAndZoom('中国', 5)
     applyMapType()
     mapError.value = ''
+    renderSearchResultMarkers()
   } catch (cause) { mapReady.value = false; mapWarning.value = ''; mapError.value = safeMapError(cause, '地图初始化失败') }
 }
 function resetMapSDK() {
@@ -1706,6 +1711,79 @@ function focusAMapPoint(stop: Stop | SubStop) {
   mapInstance.setCenter?.(amapPointToArray(point), true)
   mapInstance.setZoom?.(SELECTED_STOP_ZOOM, true)
 }
+
+function searchResultMapPoint(result: PlaceCandidate, provider: 'baidu' | 'amap'): (Coord & { crs: string }) | null {
+  const location = result.location
+  if (!location || !Number.isFinite(location.lat) || !Number.isFinite(location.lng)) return null
+  const crs = candidateCoordinateCRS(result)
+  if (!crs) return null
+  return mapRoutePointFor({ lat: location.lat, lng: location.lng } as Coord, crs, provider)
+}
+
+function searchResultBaiduIcon(selected: boolean, label: string): any {
+  if (typeof mapAPI?.Icon !== 'function' || typeof mapAPI?.Size !== 'function') return undefined
+  const color = selected ? '#e56a4d' : '#0e7490'
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 26 26"><circle cx="13" cy="13" r="11" fill="' + color + '" stroke="#ffffff" stroke-width="2"/><text x="13" y="16.5" text-anchor="middle" font-size="11" font-weight="700" fill="#ffffff" font-family="sans-serif">' + label + '</text></svg>'
+  return new mapAPI.Icon('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg), new mapAPI.Size(26, 26))
+}
+
+function clearSearchResultMarkers() {
+  for (const overlay of searchResultMarkers) {
+    try {
+      if (selectedMapProvider.value === 'amap') mapInstance?.remove?.(overlay)
+      else mapInstance?.removeOverlay?.(overlay)
+    } catch { /* best effort */ }
+  }
+  searchResultMarkers.length = 0
+}
+
+function focusMapOnSearchResult(result: PlaceCandidate) {
+  if (!mapInstance || !mapAPI) return
+  const point = searchResultMapPoint(result, selectedMapProvider.value)
+  if (!point) return
+  mapInstance.resize?.()
+  if (selectedMapProvider.value === 'amap') {
+    mapInstance.setCenter?.(amapPointToArray(point), true)
+    mapInstance.setZoom?.(SELECTED_STOP_ZOOM, true)
+  } else {
+    const mapPoint = new mapAPI.Point(point.lng, point.lat)
+    if (typeof mapInstance.centerAndZoom === 'function') mapInstance.centerAndZoom(mapPoint, SELECTED_STOP_ZOOM, { noAnimation: true })
+    else { mapInstance.setCenter?.(mapPoint); mapInstance.setZoom?.(SELECTED_STOP_ZOOM, { zoomCenter: mapPoint }) }
+  }
+}
+
+function renderSearchResultMarkers() {
+  if (!mapInstance || !mapAPI || panelMode.value !== 'search' || !searchResults.value.length) { clearSearchResultMarkers(); return }
+  clearSearchResultMarkers()
+  searchResults.value.forEach((result, index) => {
+    const point = searchResultMapPoint(result, selectedMapProvider.value)
+    if (!point) return
+    const selected = index === selectedSearchResultIndex.value
+    const label = String(index + 1)
+    let marker: any = null
+    if (selectedMapProvider.value === 'amap') {
+      marker = new mapAPI.Marker({ position: amapPointToArray(point), content: '<div class="search-result-pin' + (selected ? ' selected' : '') + '"><span>' + label + '</span></div>', offset: new mapAPI.Pixel(-13, -13), zIndex: 120 })
+      marker.on?.('click', () => selectSearchResult(index))
+      mapInstance.add?.(marker)
+    } else {
+      const mapPoint = new mapAPI.Point(point.lng, point.lat)
+      const icon = searchResultBaiduIcon(selected, label)
+      marker = new mapAPI.Marker(mapPoint, icon ? { icon } : undefined)
+      marker.addEventListener?.('click', () => selectSearchResult(index))
+      mapInstance.addOverlay(marker)
+    }
+    searchResultMarkers.push(marker)
+  })
+}
+
+function selectSearchResult(index: number) {
+  const result = searchResults.value[index]
+  if (!result) return
+  selectedSearchResultIndex.value = index
+  focusMapOnSearchResult(result)
+  renderSearchResultMarkers()
+}
+
 async function renderAMapMap() {
   if (!amapKey.value || !mapContainer.value || !tripDocument.value) return
   const renderVersion = ++mapRenderVersion
@@ -1777,6 +1855,7 @@ async function renderAMapMap() {
     else mapInstance.setCenter?.([116.397428, 39.90923])
     applyMapType()
     mapError.value = ''
+    renderSearchResultMarkers()
   } catch (cause) {
     mapReady.value = false
     mapWarning.value = ''
@@ -1951,13 +2030,14 @@ function applyTripPayload(payload: { document?: TripDocument; title?: string; st
 }
 async function searchPlaces() {
   if (!searchQuery.value.trim()) { searchMessage.value = '请输入景点、酒店、餐厅或地址'; return }
-  searchLoading.value = true; searchMessage.value = ''; searchResults.value = []
+  searchLoading.value = true; searchMessage.value = ''; searchResults.value = []; selectedSearchResultIndex.value = -1; clearSearchResultMarkers()
   try {
     const response = await apiFetch('/api/v1/maps/pois/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: poiProviderPriority.value, query: searchQuery.value.trim(), region: searchRegion.value.trim(), category: searchCategory.value === 'all' ? undefined : searchCategory.value, page: 1, page_size: 10 }) })
     const payload = await response.json() as { items?: PlaceCandidate[]; error?: { message?: string } }
     if (!response.ok) throw new Error(payload.error?.message || '地点搜索失败')
     searchResults.value = payload.items || []
     if (!searchResults.value.length) searchMessage.value = '没有找到结果，请补充城市或更换关键词'
+    renderSearchResultMarkers()
   } catch (cause) { searchMessage.value = cause instanceof Error ? cause.message : '地点搜索失败' } finally { searchLoading.value = false }
 }
 async function addPlaceToTrip(candidate: PlaceCandidate) {
@@ -2504,7 +2584,7 @@ onUnmounted(() => {
                 <div class="search-panel-heading"><button class="inline-back-button" type="button" @click="closeJourneySearch"><span>‹</span> 返回行程</button><span class="eyebrow">{{ locationSearchMode === 'repair' ? 'RELOCATE POINT' : searchParentStopId ? 'ADD CHILD POINT' : 'ADD A PLACE' }}</span><h2>{{ locationSearchMode === 'repair' ? '重新定位规划点' : searchParentStopId ? '添加子规划点' : '搜索地点' }}</h2><p>{{ locationSearchMode === 'repair' ? '为“' + (findPlanningPoint(locationSearchTargetID)?.title || '当前规划点') + '”查找新的坐标；名称可以一起调整。' : searchParentStopId && selectedStop ? '添加到：' + selectedStop.title : '搜索结果会保留名称、地址、坐标系和 Provider 引用。' }}</p></div>
                 <form class="redesign-search-form" @submit.prevent="searchPlaces"><label>{{ locationSearchMode === 'repair' ? '搜索关键词' : '地点或关键词' }}<input v-model="searchQuery" :placeholder="locationSearchMode === 'repair' ? '可改用别名、完整地址或附近地标' : '例如：西湖、咖啡馆、观景台'" autocomplete="off" /></label><label v-if="locationSearchMode === 'repair'" class="location-search-title-field">保存名称<input v-model="locationSearchTitleDraft" maxlength="200" placeholder="保留当前名称或改成更准确的名称" autocomplete="off" /></label><label>城市/区域（可选）<input v-model="searchRegion" placeholder="例如：杭州市西湖区" autocomplete="address-level2" /></label><label class="select-field">搜索类型<UiSelect v-model="searchCategory" aria-label="搜索类型" :options="searchCategoryOptions" /></label><button class="primary-action search-submit" type="submit" :disabled="searchLoading"><IonIcon :icon="searchOutline" /> {{ searchLoading ? '搜索中…' : locationSearchMode === 'repair' ? '重新搜索候选' : '搜索地点' }}</button></form>
                 <p class="search-help">{{ locationSearchMode === 'repair' ? '只会在你点击“替换位置”后写入；候选会显示完整地址、Provider 和 CRS。位置变更会清除受影响路线与该点天气。' : '先查询本地地点目录，未命中后调用当前优先 Provider；选择结果后才会保存到 Trip。' }}</p><p v-if="searchMessage" class="inline-message">{{ searchMessage }}</p>
-                <div class="search-results"><article v-for="(result, index) in searchResults" :key="result.id || result.name + index" class="search-result"><div><strong>{{ result.name }}</strong><span>{{ result.address || '地址待补充' }}</span><small v-if="result.location">{{ candidateCoordinateCRS(result) }} · {{ result.location.lat.toFixed(5) }}, {{ result.location.lng.toFixed(5) }} · {{ result.provider || 'Provider 未知' }}</small></div><button class="secondary-action compact-action" type="button" :disabled="actionLoading" @click="applySearchResult(result)">{{ locationSearchMode === 'repair' ? '替换位置' : searchParentStopId ? '添加子点' : '添加' }}</button></article></div>
+                <div class="search-results"><article v-for="(result, index) in searchResults" :key="result.id || result.name + index" class="search-result" :class="{ selected: selectedSearchResultIndex === index }" @click="selectSearchResult(index)"><div><strong>{{ result.name }}</strong><span>{{ result.address || '地址待补充' }}</span><small v-if="result.location">{{ candidateCoordinateCRS(result) }} · {{ result.location.lat.toFixed(5) }}, {{ result.location.lng.toFixed(5) }} · {{ result.provider || 'Provider 未知' }}</small></div><div class="search-result-actions"><button class="text-action search-locate-button" type="button" @click.stop="selectSearchResult(index)">定位</button><button class="secondary-action compact-action" type="button" :disabled="actionLoading" @click.stop="applySearchResult(result)">{{ locationSearchMode === 'repair' ? '替换位置' : searchParentStopId ? '添加子点' : '添加' }}</button></div></article></div>
               </div>
 
               <div v-else class="panel-scroll itinerary-scroll">

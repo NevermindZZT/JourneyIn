@@ -409,9 +409,17 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .search-help { margin: 14px 0 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
 .search-results { display: grid; gap: 7px; margin-top: 13px; }
 .search-result { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 9px; padding: 11px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--surface) 78%, transparent); }
-.search-result > div { display: grid; min-width: 0; flex: 1; gap: 3px; }
+.search-result > div:first-child { display: grid; min-width: 0; flex: 1; gap: 3px; }
 .search-result strong { overflow: hidden; color: var(--ink); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .search-result span, .search-result small { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.search-result { cursor: pointer; }
+.search-result:hover, .search-result.selected { border-color: color-mix(in srgb, var(--p) 46%, var(--line)); background: color-mix(in srgb, var(--p) 9%, var(--surface)); }
+.search-result-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
+.search-locate-button { min-height: 34px; padding: 7px 9px; border: 1px solid color-mix(in srgb, var(--accent) 46%, var(--line)); border-radius: 9px; color: var(--accent); background: transparent; font-size: 10px; font-weight: 900; white-space: nowrap; }
+@media (hover: hover) and (pointer: fine) { .search-locate-button:hover { background: color-mix(in srgb, var(--accent) 10%, var(--surface)); } }
+.search-result-pin { display: grid; width: 26px; height: 26px; place-items: center; border: 2px solid #ffffff; border-radius: 50% 50% 50% 0; color: #ffffff; background: #0e7490; box-shadow: 0 3px 8px rgba(0, 0, 0, .35); font-size: 11px; font-weight: 900; line-height: 1; transform: rotate(-45deg); transform-origin: center; cursor: pointer; }
+.search-result-pin > span { transform: rotate(45deg); }
+.search-result-pin.selected { background: #e56a4d; }
 
 /* Stop detail is a desktop drawer and the only mobile Sheet when a stop is selected. */
 .stop-detail-panel { position: absolute; z-index: 32; top: 18px; right: 18px; bottom: 18px; display: flex; width: min(420px, calc(100vw - 36px)); flex-direction: column; overflow: hidden; border-radius: 24px; }
