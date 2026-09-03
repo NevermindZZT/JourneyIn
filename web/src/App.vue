@@ -565,12 +565,21 @@ function setSheetBreakpoint(next: SheetBreakpoint, mode: 'push' | 'replace' = 'r
   if (sync) syncNavigationURL(mode)
   void nextTick().then(() => {
     mapInstance?.resize?.()
-    focusSelectedMapTarget()
+    if (selectedTarget.value) focusSelectedMapTarget()
+    else recenterMapToVisibleViewport()
   })
+  if (sheetRecenterTimer !== null) { window.clearTimeout(sheetRecenterTimer); sheetRecenterTimer = null }
+  sheetRecenterTimer = window.setTimeout(() => {
+    sheetRecenterTimer = null
+    mapInstance?.resize?.()
+    if (selectedTarget.value) focusSelectedMapTarget()
+    else fitVisibleMapContent()
+  }, 260)
 }
 
 let sheetDragCleanup: (() => void) | null = null
 let sheetDragReleaseTimer: number | null = null
+let sheetRecenterTimer: number | null = null
 let suppressSheetClick = false
 
 type TouchGestureState = { pointerId: number; startX: number; startY: number; moved: boolean; target: EventTarget | null }
@@ -825,10 +834,142 @@ function focusSelectedMapTarget() {
   else focusMapOnPoint(target)
 }
 
+function mapVisibleRect(): { left: number; top: number; right: number; bottom: number } | null {
+  const container = mapContainer.value
+  if (!container) return null
+  const containerRect = container.getBoundingClientRect()
+  const size = mapInstance?.getContainerSize?.()
+  const width = Number(size?.width) || container.clientWidth || containerRect.width
+  const height = Number(size?.height) || container.clientHeight || containerRect.height
+  if (!(width > 0) || !(height > 0)) return null
+  let left = 0; let top = 0; let right = width; let bottom = height
+  document.querySelectorAll<HTMLElement>('.floating-panel, .details-drawer').forEach(overlay => {
+    const rect = overlay.getBoundingClientRect()
+    const overlapWidth = Math.min(containerRect.right, rect.right) - Math.max(containerRect.left, rect.left)
+    const overlapHeight = Math.min(containerRect.bottom, rect.bottom) - Math.max(containerRect.top, rect.top)
+    if (overlapWidth <= 0 || overlapHeight <= 0) return
+    const touchesLeft = rect.left <= containerRect.left + 16
+    const touchesRight = rect.right >= containerRect.right - 16
+    const touchesTop = rect.top <= containerRect.top + 16
+    const touchesBottom = rect.bottom >= containerRect.bottom - 16
+    if (overlapWidth / width >= .75) {
+      if (touchesBottom) bottom = Math.min(bottom, rect.top - containerRect.top)
+      else if (touchesTop) top = Math.max(top, rect.bottom - containerRect.top)
+    } else if (overlapHeight / height >= .75) {
+      if (touchesLeft) left = Math.max(left, rect.right - containerRect.left)
+      if (touchesRight) right = Math.min(right, rect.left - containerRect.left)
+    }
+  })
+  if (right <= left || bottom <= top) return { left: 0, top: 0, right: width, bottom: height }
+  return { left, top, right, bottom }
+}
+
+function visibleMapPoints(): any[] {
+  if (!mapAPI) return []
+  const provider = selectedMapProvider.value
+  const points: any[] = []
+  const pushPoint = (stop: Stop | SubStop) => {
+    const point = pointForProvider(stop, provider)
+    if (!point) return
+    if (provider === 'amap') points.push([point.lng, point.lat])
+    else if (typeof mapAPI.Point === 'function') points.push(new mapAPI.Point(point.lng, point.lat))
+  }
+  for (const stop of mapStops.value) pushPoint(stop)
+  for (const child of selectedStop.value?.children || []) pushPoint(child)
+  return points
+}
+
+function fitVisibleMapContent() {
+  if (!mapInstance || !mapAPI) return
+  const rect = mapVisibleRect()
+  if (!rect) return
+  const container = mapContainer.value
+  const fullW = container?.clientWidth || 0
+  const fullH = container?.clientHeight || 0
+  const visibleW = rect.right - rect.left
+  const visibleH = rect.bottom - rect.top
+  const points = visibleMapPoints()
+  if (!points.length) return
+  const provider = selectedMapProvider.value
+  const readPixel = (value: any): { x: number; y: number } | null => {
+    try {
+      if (provider === 'amap') {
+        const pixel = mapInstance.lngLatToContainer?.(value)
+        if (Array.isArray(pixel)) return { x: Number(pixel[0]), y: Number(pixel[1]) }
+        return pixel && typeof pixel.x === 'number' ? { x: pixel.x, y: pixel.y } : null
+      }
+      const pixel = mapInstance.pointToPixel?.(value)
+      return pixel && typeof pixel.x === 'number' ? { x: pixel.x, y: pixel.y } : null
+    } catch { return null }
+  }
+  const measure = () => {
+    let minX = Infinity; let minY = Infinity; let maxX = -Infinity; let maxY = -Infinity
+    for (const point of points) {
+      const pixel = readPixel(point)
+      if (!pixel) continue
+      minX = Math.min(minX, pixel.x); minY = Math.min(minY, pixel.y)
+      maxX = Math.max(maxX, pixel.x); maxY = Math.max(maxY, pixel.y)
+    }
+    return Number.isFinite(minX) ? { minX, minY, maxX, maxY } : null
+  }
+  if (visibleW >= fullW - 2 && visibleH >= fullH - 2) {
+    if (provider === 'amap') mapInstance.setFitView?.(points, false, [24, 24, 24, 24])
+    else mapInstance.setViewport?.(points)
+    return
+  }
+  const first = measure()
+  if (!first) return
+  const pad = 24
+  const contentW = Math.max(1, first.maxX - first.minX)
+  const contentH = Math.max(1, first.maxY - first.minY)
+  const targetW = Math.max(1, visibleW - pad * 2)
+  const targetH = Math.max(1, visibleH - pad * 2)
+  const factor = Math.min(targetW / contentW, targetH / contentH)
+  const currentZoom = mapInstance.getZoom?.() ?? 5
+  const newZoom = Math.min(19, Math.max(3, Math.round(currentZoom + Math.log2(factor))))
+  if (provider === 'amap') mapInstance.setZoom?.(newZoom, true)
+  else mapInstance.setZoom?.(newZoom, { noAnimation: true })
+  const second = measure()
+  if (!second) return
+  const centerX = (second.minX + second.maxX) / 2
+  const centerY = (second.minY + second.maxY) / 2
+  const visibleCenterX = (rect.left + rect.right) / 2
+  const visibleCenterY = (rect.top + rect.bottom) / 2
+  const newCenterX = fullW / 2 + centerX - visibleCenterX
+  const newCenterY = fullH / 2 + centerY - visibleCenterY
+  if (provider === 'amap') {
+    const center = mapInstance.containerToLngLat?.([newCenterX, newCenterY])
+    if (center) mapInstance.setCenter?.(center, true)
+    return
+  }
+  const center = mapInstance.pixelToPoint?.(new mapAPI.Pixel(newCenterX, newCenterY))
+  if (center) mapInstance.setCenter?.(center, { noAnimation: true })
+}
+
+function recenterMapToVisibleViewport() {
+  if (!mapInstance || !mapAPI) return
+  const viewport = mapFocusViewport()
+  if (!viewport) return
+  const offsetX = viewport.x - viewport.width / 2
+  const offsetY = viewport.y - viewport.height / 2
+  if (Math.abs(offsetX) < 1 && Math.abs(offsetY) < 1) return
+  if (selectedMapProvider.value === 'amap') {
+    if (typeof mapInstance.containerToLngLat !== 'function' || typeof mapInstance.setCenter !== 'function') return
+    const shifted = mapInstance.containerToLngLat([viewport.width / 2 - offsetX, viewport.height / 2 - offsetY])
+    if (shifted) mapInstance.setCenter(shifted, true)
+    return
+  }
+  if (typeof mapAPI.Pixel !== 'function' || typeof mapInstance.pixelToPoint !== 'function' || typeof mapInstance.setCenter !== 'function') return
+  const shiftedPixel = new mapAPI.Pixel(viewport.width / 2 - offsetX, viewport.height / 2 - offsetY)
+  const center = mapInstance.pixelToPoint(shiftedPixel)
+  if (center) mapInstance.setCenter(center, { noAnimation: true })
+}
+
 function handleViewportResize() {
   window.requestAnimationFrame(() => {
     mapInstance?.resize?.()
-    focusSelectedMapTarget()
+    if (selectedTarget.value) focusSelectedMapTarget()
+    else fitVisibleMapContent()
   })
 }
 
@@ -1632,7 +1773,7 @@ async function renderBaiduMap() {
       await nextTick()
       if (renderVersion !== mapRenderVersion) return
       focusMapOnPoint(focusTarget)
-    } else if (points.length) mapInstance.setViewport(points)
+    } else if (points.length) fitVisibleMapContent()
     else mapInstance.centerAndZoom('中国', 5)
     applyMapType()
     mapError.value = ''
@@ -1750,6 +1891,7 @@ function focusMapOnSearchResult(result: PlaceCandidate) {
     if (typeof mapInstance.centerAndZoom === 'function') mapInstance.centerAndZoom(mapPoint, SELECTED_STOP_ZOOM, { noAnimation: true })
     else { mapInstance.setCenter?.(mapPoint); mapInstance.setZoom?.(SELECTED_STOP_ZOOM, { zoomCenter: mapPoint }) }
   }
+  window.requestAnimationFrame(() => recenterMapToVisibleViewport())
 }
 
 function renderSearchResultMarkers() {
@@ -1851,7 +1993,7 @@ async function renderAMapMap() {
     }
     const focusTarget = selectedTarget.value
     if (focusTarget) { await nextTick(); if (renderVersion !== mapRenderVersion) return; focusAMapPoint(focusTarget) }
-    else if (points.length) mapInstance.setFitView?.()
+    else if (points.length) fitVisibleMapContent()
     else mapInstance.setCenter?.([116.397428, 39.90923])
     applyMapType()
     mapError.value = ''
