@@ -74,20 +74,20 @@ type ListOutput struct {
 }
 
 type GetOutput struct {
-	TripID   string          `json:"trip_id"`
-	Revision int             `json:"revision"`
-	Document json.RawMessage `json:"document"`
+	TripID   string         `json:"trip_id"`
+	Revision int            `json:"revision"`
+	Document map[string]any `json:"document"`
 }
 type HistoryListOutput struct {
 	Items []map[string]any `json:"items"`
 }
 type HistoryGetOutput struct {
-	TripID         string          `json:"trip_id"`
-	HistoryID      string          `json:"history_id"`
-	SourceRevision int             `json:"source_revision"`
-	Label          string          `json:"label,omitempty"`
-	CreatedAt      string          `json:"created_at"`
-	Document       json.RawMessage `json:"document"`
+	TripID         string         `json:"trip_id"`
+	HistoryID      string         `json:"history_id"`
+	SourceRevision int            `json:"source_revision"`
+	Label          string         `json:"label,omitempty"`
+	CreatedAt      string         `json:"created_at"`
+	Document       map[string]any `json:"document"`
 }
 type PlanOutput struct {
 	TripID          string `json:"trip_id"`
@@ -104,10 +104,10 @@ func NewServer(app *application.TripService, version string, schema fs.FS) *Serv
 	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.commit_save_trip", Description: "Commit a user-confirmed JourneyIn trip preview with idempotency protection."}, result.commitSaveTrip)
 	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.plan_trip", Description: "Generate saved routes for adjacent planning points and persist route snapshots."}, result.planTrip)
 	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.refresh_routes", Description: "Recalculate routes for a selected Provider, mode, and optional Day without changing Stop order."}, result.planTrip)
-	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.get_trip", Description: "Read one JourneyIn trip by ID."}, result.getTrip)
+	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.get_trip", Description: "Read one complete JourneyIn Trip object by ID, including Markdown, days, stops, legs, links, map data, and current revision."}, result.getTrip)
 	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.list_trips", Description: "List JourneyIn trips visible to the current connection."}, result.listTrips)
 	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.list_trip_history", Description: "List user-saved read-only history versions for a JourneyIn trip."}, result.listTripHistory)
-	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.get_trip_history", Description: "Read one user-saved JourneyIn trip history version."}, result.getTripHistory)
+	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.get_trip_history", Description: "Read one complete immutable saved JourneyIn Trip history snapshot, including Markdown, days, stops, legs, links, and map data."}, result.getTripHistory)
 	result.registerResources()
 	return result
 }
@@ -173,7 +173,11 @@ func (s *Server) getTripHistory(ctx context.Context, req *mcp.CallToolRequest, i
 	if err != nil {
 		return nil, HistoryGetOutput{}, err
 	}
-	return nil, HistoryGetOutput{TripID: record.TripID, HistoryID: record.ID, SourceRevision: record.SourceRevision, Label: record.Label, CreatedAt: record.CreatedAt.Format(time.RFC3339Nano), Document: json.RawMessage(record.Document)}, nil
+	document, err := decodeTripDocument(record.Document)
+	if err != nil {
+		return nil, HistoryGetOutput{}, err
+	}
+	return nil, HistoryGetOutput{TripID: record.TripID, HistoryID: record.ID, SourceRevision: record.SourceRevision, Label: record.Label, CreatedAt: record.CreatedAt.Format(time.RFC3339Nano), Document: document}, nil
 }
 
 func (s *Server) getTrip(ctx context.Context, req *mcp.CallToolRequest, input GetArgs) (*mcp.CallToolResult, GetOutput, error) {
@@ -184,7 +188,11 @@ func (s *Server) getTrip(ctx context.Context, req *mcp.CallToolRequest, input Ge
 	if err != nil {
 		return nil, GetOutput{}, err
 	}
-	return nil, GetOutput{TripID: record.ID, Revision: record.Revision, Document: json.RawMessage(record.Document)}, nil
+	document, err := decodeTripDocument(record.Document)
+	if err != nil {
+		return nil, GetOutput{}, err
+	}
+	return nil, GetOutput{TripID: record.ID, Revision: record.Revision, Document: document}, nil
 }
 
 func (s *Server) listTrips(ctx context.Context, req *mcp.CallToolRequest, input ListArgs) (*mcp.CallToolResult, ListOutput, error) {
@@ -212,6 +220,17 @@ func RequireBearer(next http.Handler, token string) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func decodeTripDocument(data []byte) (map[string]any, error) {
+	var document map[string]any
+	if err := json.Unmarshal(data, &document); err != nil {
+		return nil, err
+	}
+	if document == nil {
+		return nil, errors.New("trip document must be a JSON object")
+	}
+	return document, nil
 }
 
 func hasErrors(issues []domain.ValidationIssue) bool {
