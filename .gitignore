@@ -13,7 +13,6 @@ web/dist/bmap-smoke.html
 # Local agent and planning artifacts
 /plan.md
 /AGENTS.md
-/.agents/
 /.planning/
 /plans/
 *.plan.md
