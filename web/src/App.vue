@@ -896,8 +896,10 @@ function fitVisibleMapContent() {
   const readPixel = (value: any): { x: number; y: number } | null => {
     try {
       if (provider === 'amap') {
-        const pixel = mapInstance.lngLatToContainer?.(value)
+        const lnglat = Array.isArray(value) ? new mapAPI.LngLat(Number(value[0]), Number(value[1])) : value
+        const pixel = mapInstance.lngLatToContainer?.(lnglat)
         if (Array.isArray(pixel)) return { x: Number(pixel[0]), y: Number(pixel[1]) }
+        if (pixel && typeof pixel.getX === 'function') return { x: Number(pixel.getX()), y: Number(pixel.getY()) }
         return pixel && typeof pixel.x === 'number' ? { x: pixel.x, y: pixel.y } : null
       }
       const pixel = mapInstance.pointToPixel?.(value)
@@ -915,8 +917,12 @@ function fitVisibleMapContent() {
     return Number.isFinite(minX) ? { minX, minY, maxX, maxY } : null
   }
   if (visibleW >= fullW - 2 && visibleH >= fullH - 2) {
-    if (provider === 'amap') mapInstance.setFitView?.(points, false, [24, 24, 24, 24])
-    else mapInstance.setViewport?.(points)
+    if (provider === 'amap') {
+      const overlays = mapOverlays.filter(Boolean)
+      if (overlays.length && typeof mapInstance.setFitView === 'function') {
+        mapInstance.setFitView(overlays, false, [24, 24, 24, 24])
+      }
+    } else mapInstance.setViewport?.(points)
     return
   }
   const first = measure()
@@ -940,7 +946,8 @@ function fitVisibleMapContent() {
   const newCenterX = fullW / 2 + centerX - visibleCenterX
   const newCenterY = fullH / 2 + centerY - visibleCenterY
   if (provider === 'amap') {
-    const center = mapInstance.containerToLngLat?.([newCenterX, newCenterY])
+    const pixel = new mapAPI.Pixel(newCenterX, newCenterY)
+    const center = mapInstance.containerToLngLat?.(pixel)
     if (center) mapInstance.setCenter?.(center, true)
     return
   }
@@ -957,7 +964,8 @@ function recenterMapToVisibleViewport() {
   if (Math.abs(offsetX) < 1 && Math.abs(offsetY) < 1) return
   if (selectedMapProvider.value === 'amap') {
     if (typeof mapInstance.containerToLngLat !== 'function' || typeof mapInstance.setCenter !== 'function') return
-    const shifted = mapInstance.containerToLngLat([viewport.width / 2 - offsetX, viewport.height / 2 - offsetY])
+    const pixel = new mapAPI.Pixel(viewport.width / 2 - offsetX, viewport.height / 2 - offsetY)
+    const shifted = mapInstance.containerToLngLat(pixel)
     if (shifted) mapInstance.setCenter(shifted, true)
     return
   }
@@ -1791,7 +1799,16 @@ function resetMapSDK() {
   mapReady.value = false
   mapWarning.value = ''
   if (mapReadyTimer !== null) { window.clearTimeout(mapReadyTimer); mapReadyTimer = null }
+  if (mapContainer.value) {
+    try { mapContainer.value.innerHTML = '' } catch { /* best effort */ }
+  }
   try { BMapLoader.reset() } catch { /* loader reset is best effort */ }
+  try { (AMapLoader as any).reset?.() } catch { /* loader reset is best effort */ }
+  try {
+    delete (window as any).AMap
+    delete (window as any).AMapUI
+    delete (window as any).Loca
+  } catch { /* cleanup is best effort */ }
   mapScriptPromise = null
   amapScriptPromise = null
   loadedMapKey = ''
@@ -1948,10 +1965,15 @@ async function renderAMapMap() {
         if (Number.isFinite(lng) && Number.isFinite(lat)) handleMapClick({ point: { lng, lat, crs: 'gcj02' } })
       })
       mapInstance.on?.('complete', () => { mapReady.value = true; mapError.value = ''; mapWarning.value = '' })
+      mapInstance.on?.('error', (err: any) => {
+        console.error('AMap runtime error:', err)
+        mapError.value = safeMapError(err, '高德地图运行异常')
+      })
       if (mapReadyTimer !== null) window.clearTimeout(mapReadyTimer)
       mapReadyTimer = window.setTimeout(() => { if (!mapReady.value) mapWarning.value = '高德地图底图加载较慢；请检查 JS Key、安全密钥、域名白名单和网络连接。地图仍可继续尝试加载。' }, 8000)
       loadedMapKey = ''
     }
+    mapInstance.resize?.()
     clearAMapOverlays()
     const points: any[] = []
     for (const stop of mapStops.value) {
@@ -2695,7 +2717,7 @@ onUnmounted(() => {
 
           <section v-else class="journey-workspace" aria-label="地图工作区">
             <div class="map-canvas redesign-map-canvas" :class="{ 'map-pick-active': mapPickMode }">
-              <div v-if="keyConfigured && tripDocument && !mapError" ref="mapContainer" id="map"></div>
+              <div v-if="keyConfigured && tripDocument && !mapError" :key="selectedMapProvider" ref="mapContainer" id="map"></div>
               <div v-if="!tripDocument || !keyConfigured || mapError" class="map-fallback">
                 <IonIcon :icon="mapOutline" />
                 <strong>{{ !tripDocument ? '正在读取行程地图' : mapError || (mapProviderLabel + '未配置') }}</strong>

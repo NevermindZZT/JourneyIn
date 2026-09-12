@@ -28,7 +28,7 @@ func (s *Server) amapServiceProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := strings.TrimPrefix(r.URL.Path, amapProxyPrefix)
-	if path == "" || strings.Contains(path, "..") || (!strings.HasPrefix(path, "/v3/") && !strings.HasPrefix(path, "/v4/") && !strings.HasPrefix(path, "/v5/")) || strings.HasPrefix(path, "/v4/map/styles") {
+	if path == "" || strings.Contains(path, "..") || (!strings.HasPrefix(path, "/v3/") && !strings.HasPrefix(path, "/v4/") && !strings.HasPrefix(path, "/v5/")) {
 		writeError(w, http.StatusNotFound, "amap_service_not_allowed", "AMap service path is not allowed", nil)
 		return
 	}
@@ -40,7 +40,11 @@ func (s *Server) amapServiceProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	query.Del("jscode")
 	query.Set("jscode", securityCode)
-	target := &url.URL{Scheme: "https", Host: "restapi.amap.com", Path: path, RawQuery: query.Encode()}
+	targetHost := "restapi.amap.com"
+	if strings.HasPrefix(path, "/v4/map/styles") {
+		targetHost = "webapi.amap.com"
+	}
+	target := &url.URL{Scheme: "https", Host: targetHost, Path: path, RawQuery: query.Encode()}
 	var body io.Reader
 	if r.Method == http.MethodPost {
 		data, err := io.ReadAll(io.LimitReader(r.Body, amapProxyMaxBody+1))

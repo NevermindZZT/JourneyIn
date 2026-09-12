@@ -25,11 +25,11 @@ func TestAMapServiceProxyRequiresSecurityCodeAndRestrictsPaths(t *testing.T) {
 		t.Fatalf("key mismatch response=%d body=%s", response.Code, response.Body.String())
 	}
 
-	request = httptest.NewRequest(http.MethodGet, "/_AMapService/v4/map/styles", nil)
+	request = httptest.NewRequest(http.MethodGet, "/_AMapService/unsupported/path", nil)
 	response = httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusNotFound {
-		t.Fatalf("styles proxy status=%d", response.Code)
+		t.Fatalf("unsupported path proxy status=%d", response.Code)
 	}
 	request = httptest.NewRequest(http.MethodDelete, "/_AMapService/v3/geocode/geo", nil)
 	response = httptest.NewRecorder()
