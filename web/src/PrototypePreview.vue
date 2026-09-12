@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { IonIcon } from '@ionic/vue'
+import BrandLogo from './BrandLogo.vue'
 import {
   addOutline,
   chevronDownOutline,
@@ -112,7 +113,7 @@ function toggleMapTools() {
   <main class="prototype-shell" :class="{ 'prototype-dark': darkMode }">
     <header class="prototype-toolbar">
       <div class="prototype-brand" aria-label="JourneyIn 原型预览">
-        <span class="prototype-brand-mark">✦</span>
+        <BrandLogo :size="26" variant="mark" shape="squircle" class="prototype-brand-logo" />
         <strong>JourneyIn</strong>
         <span class="prototype-caption">Trailglass UI Prototype</span>
       </div>
@@ -143,7 +144,7 @@ function toggleMapTools() {
     <section class="prototype-stage">
       <div v-if="screen === 'desktop'" class="desktop-prototype" aria-label="桌面端工作区原型">
         <aside class="desktop-rail">
-          <div class="rail-logo" aria-label="JourneyIn">✦</div>
+          <BrandLogo :size="36" variant="mark" shape="squircle" style="margin-bottom: 14px;" />
           <button class="rail-item selected" type="button"><IonIcon :icon="compassOutline" /><span>行程</span></button>
           <button class="rail-item" type="button"><IonIcon :icon="mapOutline" /><span>地图</span></button>
           <button class="rail-item" type="button"><IonIcon :icon="settingsOutline" /><span>设置</span></button>
@@ -262,7 +263,7 @@ function toggleMapTools() {
       <div v-else-if="screen === 'list'" class="mobile-viewport list-viewport" aria-label="手机端行程列表原型">
         <div class="mobile-list-screen">
           <header class="mobile-list-header">
-            <div class="mobile-inline-brand"><span class="prototype-brand-mark">✦</span><span>JourneyIn</span><span class="preview-chip">原型</span></div>
+            <div class="mobile-inline-brand"><BrandLogo :size="20" variant="mark" shape="squircle" /><span>JourneyIn</span><span class="preview-chip">原型</span></div>
             <div class="list-heading-row"><div><span class="section-kicker">旅行工作台</span><h1>你的行程</h1><p>把下一段旅程放在地图上</p></div><div class="list-header-actions"><button type="button" aria-label="搜索行程"><IonIcon :icon="searchOutline" /></button><button type="button" aria-label="打开设置"><IonIcon :icon="settingsOutline" /></button></div></div>
           </header>
           <div class="list-filter-row"><span>全部行程 <b>3</b></span><button type="button">最近更新 <IonIcon :icon="chevronDownOutline" /></button></div>

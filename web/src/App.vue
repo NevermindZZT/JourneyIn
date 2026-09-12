@@ -12,6 +12,7 @@ import PrototypePreview from './PrototypePreview.vue'
 import UiSelect from './UiSelect.vue'
 import MarkdownEditor from './MarkdownEditor.vue'
 import TripPosterModal from './TripPosterModal.vue'
+import BrandLogo from './BrandLogo.vue'
 
 type Theme = 'system' | 'light' | 'dark'
 type Coord = { lat: number; lng: number }
@@ -2669,7 +2670,7 @@ onUnmounted(() => {
         <main class="journey-redesign" :class="{ 'is-list-view': tripView === 'list', 'is-detail-view': tripView === 'detail', 'has-stop-selection': Boolean(selectedStop), 'is-shared-view': shareMode, 'is-history-view': Boolean(historyView) }">
           <input ref="fileInput" class="visually-hidden" type="file" accept="application/json,.json" aria-hidden="true" tabindex="-1" @change="importTrip" />
           <aside class="journey-rail" aria-label="JourneyIn 主导航">
-            <button class="rail-brand" type="button" aria-label="返回行程列表" @click="navigateToList()"><span class="rail-brand-mark">✦</span><span class="rail-brand-name">JourneyIn</span></button>
+            <button class="rail-brand" type="button" aria-label="返回行程列表" @click="navigateToList()"><BrandLogo :size="38" variant="mark" shape="squircle" class="rail-brand-mark-logo" /><span class="rail-brand-name">JourneyIn</span></button>
             <nav class="rail-nav" aria-label="工作区">
               <button class="rail-nav-item" :class="{ selected: tripView === 'list' }" type="button" @click="navigateToList()"><IonIcon :icon="menuOutline" /><span>行程</span></button>
               <button class="rail-nav-item" :class="{ selected: tripView === 'detail' }" type="button" :disabled="!selected" @click="selected ? navigateToTrip(selected, 'replace') : undefined"><IonIcon :icon="mapOutline" /><span>地图</span></button>
@@ -2891,7 +2892,7 @@ onUnmounted(() => {
 
               <section v-else-if="settingsSection === 'about'" class="settings-page-section settings-about-section">
                 <div class="settings-section-heading"><span class="eyebrow">ABOUT JOURNEYIN</span><h3>关于 JourneyIn</h3><p>了解当前版本、项目作者和 JourneyIn 的开源项目信息。</p></div>
-                <div class="settings-card settings-about-hero"><span class="settings-about-mark">✦</span><div><strong>JourneyIn</strong><p>{{ APP_SLOGAN }}</p><a :href="GITHUB_URL" target="_blank" rel="noopener noreferrer">访问项目主页 ↗</a></div></div>
+                <div class="settings-card settings-about-hero"><BrandLogo :size="52" variant="mark" shape="squircle" class="settings-about-logo" /><div><strong>JourneyIn</strong><p>{{ APP_SLOGAN }}</p><a :href="GITHUB_URL" target="_blank" rel="noopener noreferrer">访问项目主页 ↗</a></div></div>
                 <div class="settings-about-meta"><div class="settings-about-meta-item"><span>版本</span><strong>v{{ displayVersion }}</strong></div><div class="settings-about-meta-item"><span>作者</span><strong>NevermindZZT</strong></div><div class="settings-about-meta-item"><span>开源协议</span><strong>MIT License</strong></div></div>
                 <div class="settings-card settings-about-description"><span class="eyebrow">PROJECT INTRODUCTION</span><p>JourneyIn 是一款地图优先的旅行规划工具，将地点、顺序、路线、天气和 Markdown 说明组织在同一份可保存的行程中。</p><p>项目提供百度地图与高德地图 Provider、Trip JSON、只读分享、同步、MCP 和 Docker 部署能力，帮助你把下一段旅程清晰地放到地图上。</p></div>
               </section>

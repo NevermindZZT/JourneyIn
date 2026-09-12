@@ -3,6 +3,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { domToPng } from 'modern-screenshot'
 import QrcodeVue from 'qrcode.vue'
 import RouteTopologyMap from './RouteTopologyMap.vue'
+import BrandLogo from './BrandLogo.vue'
 
 type Coord = { lat: number; lng: number }
 type LocationData = { preferred?: string; coordinates?: Record<string, Coord & { crs?: string }> }
@@ -316,7 +317,7 @@ async function shareNative() {
           <!-- 海报头部 -->
           <div class="poster-hero">
             <div class="poster-brand">
-              <span class="brand-sparkle">✦</span>
+              <BrandLogo :size="18" variant="mark" shape="squircle" class="poster-brand-icon" />
               <span class="brand-title">JOURNEYIN ITINERARY</span>
             </div>
             <h1 class="poster-trip-title">{{ trip?.title || '旅行规划' }}</h1>
@@ -401,7 +402,10 @@ async function shareNative() {
           <!-- 海报底部：二维码与水印 -->
           <footer class="poster-footer-card">
             <div class="footer-left">
-              <div class="footer-brand-title">JourneyIn 线路规划</div>
+              <div class="footer-brand-title">
+                <BrandLogo :size="20" variant="mark" shape="squircle" class="poster-footer-logo" />
+                <span>JourneyIn 线路规划</span>
+              </div>
               <p class="footer-slogan">在地图上规划每一段旅程 · 扫码查看实时交互地图与导航</p>
               <span class="footer-copy">Made with JourneyIn · 只读快照分享</span>
             </div>
@@ -927,6 +931,9 @@ async function shareNative() {
 }
 
 .footer-brand-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 0.9375rem;
   font-weight: 800;
   color: #0284c7;
