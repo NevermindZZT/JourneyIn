@@ -30,6 +30,8 @@ const emit = defineEmits<{
 const posterCardRef = ref<HTMLElement | null>(null)
 const posterTheme = ref<'light' | 'dark'>('light')
 const posterLayout = ref<'long' | 'day'>('long')
+type DescLinesMode = '2' | '4' | 'all'
+const descLinesMode = ref<DescLinesMode>('4')
 const activeDayIndex = ref<number>(0)
 const isGenerating = ref(false)
 const generatedImage = ref<string>('')
@@ -274,6 +276,33 @@ async function shareNative() {
             </button>
           </div>
         </div>
+
+        <div class="control-group">
+          <span class="control-label">地点说明</span>
+          <div class="segmented-pill">
+            <button
+              type="button"
+              :class="{ active: descLinesMode === '2' }"
+              @click="descLinesMode = '2'"
+            >
+              2行
+            </button>
+            <button
+              type="button"
+              :class="{ active: descLinesMode === '4' }"
+              @click="descLinesMode = '4'"
+            >
+              4行
+            </button>
+            <button
+              type="button"
+              :class="{ active: descLinesMode === 'all' }"
+              @click="descLinesMode = 'all'"
+            >
+              全部
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- 海报渲染与预览区 (外层可滚动) -->
@@ -326,11 +355,11 @@ async function shareNative() {
                   <span class="day-num-tag">Day {{ posterLayout === 'day' ? activeDayIndex + 1 : dIdx + 1 }}</span>
                   <span class="day-date-str">{{ formatDisplayDate(day.date) }}</span>
                 </div>
-                <span v-if="day.title" class="day-sub-title">{{ day.title }}</span>
+                <div v-if="day.title" class="day-sub-title">{{ day.title }}</div>
               </div>
 
-              <p v-if="day.notes_markdown" class="day-notes-box">
-                {{ stripMarkdown(day.notes_markdown).slice(0, 80) }}
+              <p v-if="day.notes_markdown" class="day-notes-box" :class="'clamp-' + descLinesMode">
+                {{ stripMarkdown(day.notes_markdown) }}
               </p>
 
               <!-- 当天的地点列表 -->
@@ -348,8 +377,8 @@ async function shareNative() {
                       </span>
                     </div>
                     <p v-if="stop.address" class="stop-address">{{ stop.address }}</p>
-                    <p v-if="stop.description_markdown" class="stop-desc">
-                      {{ stripMarkdown(stop.description_markdown).slice(0, 70) }}
+                    <p v-if="stop.description_markdown" class="stop-desc" :class="'clamp-' + descLinesMode">
+                      {{ stripMarkdown(stop.description_markdown) }}
                     </p>
 
                     <!-- 下一段交通 -->
@@ -545,21 +574,22 @@ async function shareNative() {
   font-weight: 700;
 }
 
-/* 核心滚动容器：使用普通块级流动，彻底避免 flex-stretch 导致的海报高度截断问题 */
+/* 核心滚动容器：支持横向和纵向流动，窄屏下可横向滑动浏览 */
 .poster-scroll-wrapper {
   flex: 1;
   min-height: 0;
+  overflow-x: auto;
   overflow-y: auto;
-  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
   padding: 24px 16px;
   background: var(--md-surface-container);
   display: block;
 }
 
-/* 核心海报容器：天然由所有子元素撑开完整高度 */
+/* 核心海报容器：固定保持 560px 规整宽度，绝不因窄屏被压缩变形 */
 .poster-card {
   width: 560px;
-  max-width: 100%;
+  min-width: 560px;
   margin: 0 auto;
   box-sizing: border-box;
   border-radius: 24px;
@@ -697,24 +727,31 @@ async function shareNative() {
 
 .day-heading {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
-  align-items: center;
+  align-items: baseline;
+  gap: 8px 16px;
   margin-bottom: 12px;
 }
 
 .day-badge-wrap {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .day-num-tag {
   background: #0284c7;
   color: #ffffff;
-  padding: 2px 8px;
+  padding: 3px 8px;
   border-radius: 6px;
   font-size: 0.75rem;
   font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+  line-height: 1.2;
 }
 
 .poster-card.dark .day-num-tag {
@@ -724,11 +761,17 @@ async function shareNative() {
 .day-date-str {
   font-size: 0.875rem;
   font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .day-sub-title {
   font-size: 0.8125rem;
-  opacity: 0.7;
+  opacity: 0.75;
+  line-height: 1.45;
+  word-break: break-word;
+  text-align: right;
+  flex: 1 1 200px;
 }
 
 .day-notes-box {
@@ -736,6 +779,7 @@ async function shareNative() {
   font-size: 0.8125rem;
   line-height: 1.5;
   opacity: 0.8;
+  word-break: break-word;
 }
 
 .stops-timeline {
@@ -817,10 +861,35 @@ async function shareNative() {
 }
 
 .stop-desc {
-  margin: 2px 0 6px;
+  margin: 4px 0 6px;
   font-size: 0.8125rem;
-  line-height: 1.4;
+  line-height: 1.5;
   opacity: 0.85;
+  word-break: break-word;
+}
+
+.stop-desc.clamp-2,
+.day-notes-box.clamp-2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stop-desc.clamp-4,
+.day-notes-box.clamp-4 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stop-desc.clamp-all,
+.day-notes-box.clamp-all {
+  display: block;
+  overflow: visible;
 }
 
 .step-leg-info {
@@ -923,5 +992,28 @@ async function shareNative() {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+@media (max-width: 640px) {
+  .poster-modal-backdrop {
+    padding: 8px;
+  }
+  .poster-modal-panel {
+    border-radius: 20px;
+    height: 96vh;
+    max-height: 96vh;
+  }
+  .poster-modal-header,
+  .poster-controls-bar,
+  .poster-modal-actions {
+    padding-inline: 16px;
+  }
+  .poster-controls-bar {
+    gap: 10px;
+    padding-block: 10px;
+  }
+  .poster-scroll-wrapper {
+    padding: 16px 10px;
+  }
 }
 </style>
