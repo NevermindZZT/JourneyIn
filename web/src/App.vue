@@ -5,12 +5,13 @@ import {
 } from '@ionic/vue'
 import BMapLoader from '@baidumap/jsapi-loader'
 import AMapLoader from '@amap/amap-jsapi-loader'
-import { addOutline, chevronDownOutline, chevronUpOutline, closeOutline, cloudOfflineOutline, createOutline, linkOutline, logInOutline, mapOutline, menuOutline, navigateOutline, searchOutline, settingsOutline, sunnyOutline } from 'ionicons/icons'
+import { addOutline, chevronDownOutline, chevronUpOutline, closeOutline, cloudOfflineOutline, createOutline, imageOutline, linkOutline, logInOutline, mapOutline, menuOutline, navigateOutline, searchOutline, settingsOutline, sunnyOutline } from 'ionicons/icons'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 import PrototypePreview from './PrototypePreview.vue'
 import UiSelect from './UiSelect.vue'
 import MarkdownEditor from './MarkdownEditor.vue'
+import TripPosterModal from './TripPosterModal.vue'
 
 type Theme = 'system' | 'light' | 'dark'
 type Coord = { lat: number; lng: number }
@@ -195,6 +196,7 @@ const shareID = ref('')
 const shareExpiresAt = ref('')
 const shareCopyMessage = ref('')
 const shareNoticeVisible = ref(false)
+const posterModalOpen = ref(false)
 const actionLoading = ref(false)
 const settingsOpen = ref(false)
 type SettingsSection = 'appearance' | 'connection' | 'maps' | 'search' | 'sharing' | 'mcp' | 'about'
@@ -2333,6 +2335,22 @@ async function copyShareURL() {
 function dismissShareNotice() {
   shareNoticeVisible.value = false
 }
+const effectiveTheme = computed<'light' | 'dark'>(() => {
+  if (theme.value === 'system') {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  }
+  return theme.value === 'dark' ? 'dark' : 'light'
+})
+function openTripPoster() {
+  posterModalOpen.value = true
+}
+async function openPosterForTrip(trip: TripSummary) {
+  tripMenuID.value = ''
+  if (selected.value?.id !== trip.id) {
+    await selectTrip(trip)
+  }
+  posterModalOpen.value = true
+}
 async function revokeShare() {
   if (!shareID.value || !window.confirm('确认撤销当前在线分享吗？撤销后链接将无法访问。')) return
   actionLoading.value = true
@@ -2669,7 +2687,7 @@ onUnmounted(() => {
                   <span class="trip-card-arrow">›</span>
                 </button>
                 <button class="trip-card-menu-button" type="button" :aria-expanded="tripMenuID === trip.id" :aria-label="'打开 ' + trip.title + ' 更多操作'" @click.stop="toggleTripMenu(trip.id)">⋯</button>
-                <div v-if="tripMenuID === trip.id" class="trip-card-menu" role="menu"><button type="button" role="menuitem" @click="editTripDetailsFromList(trip)"><IonIcon :icon="createOutline" /> 编辑行程信息</button><button type="button" role="menuitem" @click="openTripHistoryFromList(trip)"><span aria-hidden="true">↶</span> 版本历史</button><button type="button" role="menuitem" class="danger-menu-item" @click="tripMenuID = ''; deleteTrip(trip)"><IonIcon :icon="closeOutline" /> 删除行程</button></div>
+                <div v-if="tripMenuID === trip.id" class="trip-card-menu" role="menu"><button type="button" role="menuitem" @click="openPosterForTrip(trip)"><IonIcon :icon="imageOutline" /> 分享行程海报</button><button type="button" role="menuitem" @click="editTripDetailsFromList(trip)"><IonIcon :icon="createOutline" /> 编辑行程信息</button><button type="button" role="menuitem" @click="openTripHistoryFromList(trip)"><span aria-hidden="true">↶</span> 版本历史</button><button type="button" role="menuitem" class="danger-menu-item" @click="tripMenuID = ''; deleteTrip(trip)"><IonIcon :icon="closeOutline" /> 删除行程</button></div>
               </article>
             </div>
             </div>
@@ -2709,7 +2727,7 @@ onUnmounted(() => {
                 <div v-if="historyView" class="history-readonly-banner"><span><strong>历史版本 · 只读</strong><small>{{ historyView.label || '保存于 ' + formatDateTime(historyView.created_at) }} · 工作版本 {{ historyView.source_revision }}</small></span><button type="button" @click="exitTripHistory">返回当前版本</button></div>
                  <div v-if="error" class="global-error"><IonIcon :icon="cloudOfflineOutline" /><span>{{ error }}</span><button aria-label="关闭错误" @click="error = ''">×</button></div>
                 <div v-if="tripDetailsNotice" class="global-notice"><IonIcon :icon="createOutline" /><span>{{ tripDetailsNotice }}</span><button aria-label="关闭行程更新提示" @click="tripDetailsNotice = ''">×</button></div>
-                <div v-if="shareNoticeVisible && shareURL" class="share-banner"><span><strong>只读分享已创建</strong><a :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><small v-if="shareExpiresAt">有效期至 {{ formatDateTime(shareExpiresAt) }}</small><small v-if="shareCopyMessage" class="share-copy-feedback">{{ shareCopyMessage }}</small></span><div class="share-actions"><button type="button" @click="copyShareURL">复制链接</button><button v-if="shareID" type="button" @click="revokeShare">撤销</button><button type="button" aria-label="关闭分享提示" @click="dismissShareNotice">×</button></div></div>
+                <div v-if="shareNoticeVisible && shareURL" class="share-banner"><span><strong>只读分享已创建</strong><a :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><small v-if="shareExpiresAt">有效期至 {{ formatDateTime(shareExpiresAt) }}</small><small v-if="shareCopyMessage" class="share-copy-feedback">{{ shareCopyMessage }}</small></span><div class="share-actions"><button type="button" @click="copyShareURL">复制链接</button><button type="button" @click="openTripPoster">生成海报</button><button v-if="shareID" type="button" @click="revokeShare">撤销</button><button type="button" aria-label="关闭分享提示" @click="dismissShareNotice">×</button></div></div>
               </section>
             </div>
 
@@ -2739,7 +2757,7 @@ onUnmounted(() => {
                   <div v-if="visibleStops.length" class="redesign-stop-list"><article v-for="stop in visibleStops" :key="stop.id" class="redesign-stop-row" :class="{ selected: selectedStopId === stop.id, 'reorder-active': reorderMode, 'location-missing': !pointFor(stop) }"><button class="redesign-stop-main" type="button" @click="selectPlanningPointFromList(stop)"><span class="stop-number">{{ stop.sequence }}</span><span><strong>{{ stop.title }}</strong><small>{{ stopDate(stop) }} · {{ stop.address || '地址待补充' }}</small><em class="stop-location-badge" :class="{ missing: !pointFor(stop) }">{{ locationStatus(stop) }}</em></span><span class="row-chevron">›</span></button><div v-if="reorderMode && !readOnlyView" class="reorder-actions" @click.stop><button class="reorder-move-button" type="button" :disabled="actionLoading || !canMovePlanningPoint(stop, -1)" :aria-label="'上移规划点 ' + stop.title" @click="movePlanningPoint(stop, -1)"><IonIcon :icon="chevronUpOutline" /></button><button class="reorder-move-button" type="button" :disabled="actionLoading || !canMovePlanningPoint(stop, 1)" :aria-label="'下移规划点 ' + stop.title" @click="movePlanningPoint(stop, 1)"><IonIcon :icon="chevronDownOutline" /></button></div><button v-if="!readOnlyView" class="stop-delete-button" type="button" :aria-label="'删除规划点 ' + stop.title" @click.stop="deletePlanningPoint(stop)">×</button></article></div><p v-else class="muted compact-empty">当前日期还没有规划点。</p>
                   <button v-if="!readOnlyView" class="add-place-action" type="button" @click="openJourneySearch()"><IonIcon :icon="searchOutline" /> 搜索并添加规划点</button>
                 </div>
-                <div v-if="!readOnlyView" class="panel-data-actions"><button type="button" @click="openImportPicker">导入</button><button type="button" :disabled="actionLoading" @click="downloadTrip">导出 JSON</button><button type="button" :disabled="actionLoading" @click="createShare">在线分享</button></div>
+                <div v-if="!readOnlyView" class="panel-data-actions"><button type="button" @click="openImportPicker">导入</button><button type="button" :disabled="actionLoading" @click="downloadTrip">导出 JSON</button><button type="button" :disabled="actionLoading" @click="createShare">在线分享</button><button type="button" @click="openTripPoster">生成海报</button></div><div v-else class="panel-data-actions"><button type="button" @click="openTripPoster">保存为图片</button></div>
               </div>
             </aside>
 
@@ -2845,7 +2863,7 @@ onUnmounted(() => {
 
               <section v-else-if="settingsSection === 'sharing'" class="settings-page-section">
                 <div class="settings-section-heading"><span class="eyebrow">ONLINE SHARING</span><h3>在线分享</h3><p>集中管理当前行程的只读分享链接；分享状态不会遮挡地图。</p></div>
-                <div class="settings-card settings-share-card"><div class="settings-card-heading"><div><strong>{{ selected?.title || '当前行程' }}</strong><small>持有链接即可查看当前行程快照</small></div><span class="provider-status">{{ shareURL ? '已分享' : '未分享' }}</span></div><template v-if="selected"><a v-if="shareURL" class="settings-share-url" :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><p v-if="shareExpiresAt" class="settings-share-expiry">有效期至 {{ formatDateTime(shareExpiresAt) }}</p><p v-if="!shareURL" class="settings-help">当前行程还没有在线分享；点击下方按钮创建一个只读链接。</p><div class="settings-actions"><button v-if="shareURL" class="primary-action" type="button" @click="copyShareURL">复制链接</button><button v-if="shareURL && shareID" class="secondary-action" type="button" :disabled="actionLoading" @click="revokeShare">撤销分享</button><button v-else class="primary-action" type="button" :disabled="actionLoading" @click="createShare">{{ actionLoading ? '创建中…' : '在线分享' }}</button></div><p v-if="shareCopyMessage" class="settings-feedback">{{ shareCopyMessage }}</p></template><p v-else class="settings-help">请先选择一条行程，再管理它的在线分享链接。</p></div>
+                <div class="settings-card settings-share-card"><div class="settings-card-heading"><div><strong>{{ selected?.title || '当前行程' }}</strong><small>持有链接即可查看当前行程快照</small></div><span class="provider-status">{{ shareURL ? '已分享' : '未分享' }}</span></div><template v-if="selected"><a v-if="shareURL" class="settings-share-url" :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><p v-if="shareExpiresAt" class="settings-share-expiry">有效期至 {{ formatDateTime(shareExpiresAt) }}</p><p v-if="!shareURL" class="settings-help">当前行程还没有在线分享；点击下方按钮创建一个只读链接。</p><div class="settings-actions"><button v-if="shareURL" class="primary-action" type="button" @click="copyShareURL">复制链接</button><button class="secondary-action" type="button" @click="openTripPoster">分享海报</button><button v-if="shareURL && shareID" class="secondary-action" type="button" :disabled="actionLoading" @click="revokeShare">撤销分享</button><button v-else class="primary-action" type="button" :disabled="actionLoading" @click="createShare">{{ actionLoading ? '创建中…' : '在线分享' }}</button></div><p v-if="shareCopyMessage" class="settings-feedback">{{ shareCopyMessage }}</p></template><p v-else class="settings-help">请先选择一条行程，再管理它的在线分享链接。</p></div>
                 <div class="settings-note"><span class="settings-note-mark">i</span><span>分享链接是只读快照，默认有效期为 7 天。撤销后，持有链接的人将无法继续查看。</span></div>
               </section>
 
@@ -2866,6 +2884,14 @@ onUnmounted(() => {
       </div>
       <div v-if="false && settingsOpen" class="modal-backdrop" @click.self="settingsOpen = false"><section class="modal-panel settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title"><button class="modal-close" aria-label="关闭" @click="settingsOpen = false">×</button><p class="eyebrow">JOURNEYIN SETTINGS</p><h2 id="settings-title">设置</h2><p class="settings-intro">当前主题：{{ themeLabel }}。Key 配置保存到 SQLite，服务端 Key 不会回显。</p><section class="settings-section"><h3>外观</h3><p class="settings-label">主题：{{ themeLabel }}</p><div class="theme-options"><button type="button" :class="{ selected: theme === 'system' }" @click="setTheme('system')">跟随系统</button><button type="button" :class="{ selected: theme === 'light' }" @click="setTheme('light')">浅色</button><button type="button" :class="{ selected: theme === 'dark' }" @click="setTheme('dark')">深色</button></div></section><section class="settings-section"><h3>服务端连接</h3><label>当前服务地址<input v-model="serverURL" readonly /></label><label>兼容 REST API Token<input v-model="authTokenInput" type="password" placeholder="仅用于兼容旧客户端，可留空" autocomplete="off" /></label><div class="modal-actions"><button type="button" @click="logout">清除令牌</button><button type="button" class="primary" @click="saveAuth">保存令牌</button></div><p v-if="settingsMessage" class="settings-message">{{ settingsMessage }}</p></section><section class="settings-section"><h3>默认地图</h3><label>默认地图 Provider<select v-model="defaultMapProvider"><option value="baidu">百度地图</option><option value="amap">高德地图</option></select></label><p class="key-help">用于没有单独地图偏好的新行程和查看页面；单个行程已保存的地图 Provider 不会被覆盖。地图工具仍可临时切换 Provider。</p><div class="modal-actions"><button type="button" class="primary" :disabled="settingsSaving" @click="saveDefaultMapProvider">{{ settingsSaving ? '保存中…' : '保存默认地图' }}</button></div></section><section class="settings-section"><h3>百度地图</h3><p class="key-status">浏览器端 Key：<strong>{{ baiduKey ? '已配置' : '未配置' }}</strong> · 服务端 Key：<strong>{{ settingsData?.map?.baidu?.server_key_configured ? '已配置' : '未配置' }}</strong></p><label>百度浏览器端 Key<input v-model="baiduBrowserKeyInput" type="password" :placeholder="settingsData?.map?.baidu?.browser_key_configured ? '已配置，输入新 Key 可替换' : '用于 JSAPI 4.0/BMap 网页地图'" autocomplete="off" /></label><label>百度服务端 Key<input v-model="baiduServerKeyInput" type="password" placeholder="已配置时输入新 Key 可替换；留空保持当前值" autocomplete="off" /></label><p class="key-help">浏览器端 Key 用于地图底图；服务端 Key 用于 POI 搜索、地理编码、路线和天气。请确认当前访问 host 在百度控制台白名单内。</p><a href="https://lbsyun.baidu.com/apiconsole/key" target="_blank" rel="noopener noreferrer">申请/管理百度地图 Key ↗</a></section><section class="settings-section"><h3>高德地图</h3><p class="key-status">JS Key：<strong>{{ settingsData?.map?.amap?.js_key_configured ? '已配置' : '未配置' }}</strong> · 服务端 Key：<strong>{{ settingsData?.map?.amap?.server_key_configured ? '已配置' : '未配置' }}</strong> · 安全密钥：<strong>{{ settingsData?.map?.amap?.security_js_code_configured ? '已配置' : '未配置' }}</strong></p><label>高德 JS Key<input v-model="amapJSKeyInput" type="password" placeholder="用于高德 Web 地图" autocomplete="off" /></label><label>高德服务端 Key<input v-model="amapServerKeyInput" type="password" placeholder="已配置时输入新 Key 可替换；留空保持当前值" autocomplete="off" /></label><label>高德 JS 安全密钥<input v-model="amapSecurityJSCodeInput" type="password" placeholder="用于 JSAPI 安全代理；已配置时输入新密钥可替换" autocomplete="off" /></label><a href="https://console.amap.com/dev/key/app" target="_blank" rel="noopener noreferrer">申请/管理高德 Key ↗</a><p class="key-help">保存后，规划点会优先使用已经保存的坐标，不会因为重新绘制地图重复查询。</p><div class="modal-actions"><button type="button" class="primary" :disabled="settingsSaving" @click="saveMapKeys">{{ settingsSaving ? '保存中…' : '保存地图 Key 到数据库' }}</button></div></section><section class="settings-section"><h3>地点检索</h3><label>优先 Provider<select v-model="poiProviderPriority"><option value="amap">高德优先</option><option value="baidu">百度优先</option></select></label><p class="key-help">当前策略会先查询本地地点目录；未命中后使用所选 Provider，Provider 不可用时自动尝试另一家。新搜索结果只保留 7 天。</p><p class="key-status">本地地点记录：<strong>{{ localDirectoryCount }}</strong> 条</p><div class="modal-actions"><button type="button" @click="savePOIPreferences">保存检索优先级</button><button type="button" @click="clearLocalDirectory">清除本地记录</button></div></section><section class="settings-section"><h3>MCP</h3><p>MCP 地址：{{ capabilities?.mcp?.http_endpoint || '/mcp' }}</p><p class="key-help">Docker 远程部署时设置 JOURNEYIN_MCP_TOKEN；本地 localhost 调试可不设置。</p></section></section></div>
       <div v-if="authOpen" class="modal-backdrop" @click.self="authOpen = false"><section class="modal-panel auth-panel" role="dialog" aria-modal="true" aria-labelledby="auth-title"><IonIcon class="auth-icon" :icon="logInOutline" /><h2 id="auth-title">登录 JourneyIn</h2><p>请输入 Docker 服务配置的账号和密码。登录成功后会在当前浏览器保存一个 HttpOnly 会话。</p><form class="auth-form" @submit.prevent="login"><label>账号<input v-model="loginUsername" type="text" autofocus autocomplete="username" /></label><label>密码<input v-model="loginPassword" type="password" autocomplete="current-password" /></label><p v-if="loginMessage" class="auth-error">{{ loginMessage }}</p><div class="modal-actions"><button type="button" @click="authOpen = false">稍后</button><button type="submit" class="primary" :disabled="loginLoading">{{ loginLoading ? '登录中…' : '登录' }}</button></div></form></section></div>
+      <TripPosterModal
+        :is-open="posterModalOpen"
+        :trip="tripDocument"
+        :share-url="shareURL"
+        :current-theme="effectiveTheme"
+        @close="posterModalOpen = false"
+        @create-share="createShare"
+      />
     </div>
   </IonApp>
 </template>
