@@ -106,7 +106,18 @@ func main() {
 	mux.Handle("/mcp", mcptransport.RequireBearer(mcpServer.HTTPHandler(), mcpToken))
 	apiHandler := httpapi.RequireAPIAuthWithAuthenticator(api.Handler(), authenticator)
 	mux.Handle("/", apiHandler)
-	server := &http.Server{Addr: listen, Handler: mux, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
+	readTimeout := durationEnv("JOURNEYIN_READ_TIMEOUT", 120*time.Second)
+	readHeaderTimeout := durationEnv("JOURNEYIN_READ_HEADER_TIMEOUT", 30*time.Second)
+	writeTimeout := durationEnv("JOURNEYIN_WRITE_TIMEOUT", 120*time.Second)
+	idleTimeout := durationEnv("JOURNEYIN_IDLE_TIMEOUT", 120*time.Second)
+	server := &http.Server{
+		Addr:              listen,
+		Handler:           mux,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
+	}
 	logger.Info("JourneyIn listening", "addr", listen, "data", dataPath, "version", version)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
@@ -156,6 +167,18 @@ func intEnv(name string, fallback int) int {
 		return fallback
 	}
 	return value
+}
+
+func durationEnv(name string, fallback time.Duration) time.Duration {
+	if val := strings.TrimSpace(os.Getenv(name)); val != "" {
+		if d, err := time.ParseDuration(val); err == nil && d > 0 {
+			return d
+		}
+		if sec, err := strconv.Atoi(val); err == nil && sec > 0 {
+			return time.Duration(sec) * time.Second
+		}
+	}
+	return fallback
 }
 
 func defaultDataPath() string {
