@@ -151,7 +151,7 @@ func TestAMapProviderWeatherAndReverseGeocode(t *testing.T) {
 			if r.URL.Query().Get("location") != "120.150000,30.250000" {
 				t.Fatalf("reverse query=%s", r.URL.RawQuery)
 			}
-			_, _ = w.Write([]byte(`{"status":"1","info":"OK","infocode":"10000","regeocode":{"formatted_address":"北京市海淀区"}}`))
+			_, _ = w.Write([]byte(`{"status":"1","info":"OK","infocode":"10000","regeocode":{"formatted_address":"北京市海淀区","addressComponent":{"adcode":"110108","citycode":"010"}}}`))
 		default:
 			t.Fatalf("path=%s", r.URL.Path)
 		}
@@ -161,6 +161,11 @@ func TestAMapProviderWeatherAndReverseGeocode(t *testing.T) {
 	weather, err := provider.Weather(context.Background(), WeatherRequest{LocalDate: "2026-04-18", AdCode: "110108"})
 	if err != nil || !weather.Available || weather.Condition != "晴" || weather.TemperatureC == nil || *weather.TemperatureC != 20 {
 		t.Fatalf("weather=%+v err=%v", weather, err)
+	}
+	// Test weather with missing adcode but valid location (auto-reverse geocodes)
+	weatherWithLoc, err := provider.Weather(context.Background(), WeatherRequest{LocalDate: "2026-04-18", Location: GeoPoint{Lat: 30.25, Lng: 120.15, CRS: CRSGCJ02}})
+	if err != nil || !weatherWithLoc.Available || weatherWithLoc.Condition != "晴" || weatherWithLoc.TemperatureC == nil || *weatherWithLoc.TemperatureC != 20 {
+		t.Fatalf("weatherWithLoc=%+v err=%v", weatherWithLoc, err)
 	}
 	address, err := provider.ReverseGeocode(context.Background(), GeoPoint{Lat: 30.25, Lng: 120.15, CRS: CRSGCJ02})
 	if err != nil || address != "北京市海淀区" {

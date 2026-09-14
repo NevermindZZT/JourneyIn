@@ -25,11 +25,11 @@ func TestDefaultMapProviderSettingControlsCapabilitiesAndPlanning(t *testing.T) 
 	if err := json.NewDecoder(settingsResponse.Body).Decode(&settings); err != nil {
 		t.Fatal(err)
 	}
-	if settings.Map.DefaultProvider != "baidu" {
-		t.Fatalf("initial default provider=%q, want baidu", settings.Map.DefaultProvider)
+	if settings.Map.DefaultProvider != "amap" {
+		t.Fatalf("initial default provider=%q, want amap", settings.Map.DefaultProvider)
 	}
 
-	preferenceRequest, err := http.NewRequest(http.MethodPut, server.URL+"/api/v1/settings/map", strings.NewReader(`{"default_provider":"amap"}`))
+	preferenceRequest, err := http.NewRequest(http.MethodPut, server.URL+"/api/v1/settings/map", strings.NewReader(`{"default_provider":"baidu"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,8 +54,23 @@ func TestDefaultMapProviderSettingControlsCapabilitiesAndPlanning(t *testing.T) 
 	if err := json.NewDecoder(capabilitiesResponse.Body).Decode(&capabilities); err != nil {
 		t.Fatal(err)
 	}
-	if capabilities.DefaultProvider != "amap" {
-		t.Fatalf("capabilities default provider=%q, want amap", capabilities.DefaultProvider)
+	if capabilities.DefaultProvider != "baidu" {
+		t.Fatalf("capabilities default provider=%q, want baidu", capabilities.DefaultProvider)
+	}
+
+	// Switch back to amap for the planning test
+	revertRequest, err := http.NewRequest(http.MethodPut, server.URL+"/api/v1/settings/map", strings.NewReader(`{"default_provider":"amap"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	revertRequest.Header.Set("Content-Type", "application/json")
+	revertResponse, err := http.DefaultClient.Do(revertRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer revertResponse.Body.Close()
+	if revertResponse.StatusCode != http.StatusOK {
+		t.Fatalf("revert status=%d, want %d", revertResponse.StatusCode, http.StatusOK)
 	}
 
 	trip := `{"schema_version":1,"title":"default provider planning","status":"draft","timezone":"Asia/Shanghai","date_range":{"start":"2026-04-18","end":"2026-04-18"},"map":{"enabled_providers":["amap"]},"days":[{"id":"day-1","date":"2026-04-18","stops":[{"id":"stop-a","sequence":1,"title":"A","location":{"preferred":"gcj02","coordinates":{"gcj02":{"lat":30.2,"lng":120.1,"crs":"gcj02"}}}},{"id":"stop-b","sequence":2,"title":"B","location":{"preferred":"gcj02","coordinates":{"gcj02":{"lat":30.21,"lng":120.11,"crs":"gcj02"}}}}]}]}`

@@ -87,7 +87,7 @@ func main() {
 	api.SetMapRegistry(mapRegistry, baiduBrowserKey)
 	defaultMapProvider := journeymaps.ProviderID(strings.TrimSpace(settingValue(ctx, database, "map.default_provider", os.Getenv("JOURNEYIN_MAP_PROVIDER"))))
 	if defaultMapProvider != journeymaps.ProviderAMap && defaultMapProvider != journeymaps.ProviderBaidu {
-		defaultMapProvider = journeymaps.ProviderBaidu
+		defaultMapProvider = journeymaps.ProviderAMap
 	}
 	api.SetDefaultMapProvider(defaultMapProvider)
 	api.SetAMapBrowserKey(amapJSKey)

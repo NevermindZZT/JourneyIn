@@ -569,23 +569,31 @@ type amapReverseGeocodeResponse struct {
 	Regeocode struct {
 		FormattedAddress string `json:"formatted_address"`
 		AddressComponent struct {
-			Province string `json:"province"`
-			City     string `json:"city"`
-			District string `json:"district"`
-			Township string `json:"township"`
-			Street   string `json:"street"`
-			Number   string `json:"number"`
+			Province string     `json:"province"`
+			City     amapScalar `json:"city"`
+			District string     `json:"district"`
+			Township string     `json:"township"`
+			Street   string     `json:"street"`
+			Number   string     `json:"number"`
+			CityCode amapScalar `json:"citycode"`
+			AdCode   amapScalar `json:"adcode"`
 		} `json:"addressComponent"`
 	} `json:"regeocode"`
 }
 
-func (p *AMapProvider) ReverseGeocode(ctx context.Context, point GeoPoint) (string, error) {
+type amapRegeoResult struct {
+	FormattedAddress string
+	AdCode           string
+	CityCode         string
+}
+
+func (p *AMapProvider) reverseGeocodeDetails(ctx context.Context, point GeoPoint) (amapRegeoResult, error) {
 	if p.serverKey() == "" {
-		return "", unavailable(p.ID())
+		return amapRegeoResult{}, unavailable(p.ID())
 	}
 	converted, err := toAMapPoint(point)
 	if err != nil {
-		return "", err
+		return amapRegeoResult{}, err
 	}
 	params := url.Values{
 		"location":   {formatAMapPoint(converted)},
@@ -600,17 +608,29 @@ func (p *AMapProvider) ReverseGeocode(ctx context.Context, point GeoPoint) (stri
 		}
 		return nil
 	}); err != nil {
-		return "", err
-	}
-	if address := strings.TrimSpace(response.Regeocode.FormattedAddress); address != "" {
-		return address, nil
+		return amapRegeoResult{}, err
 	}
 	component := response.Regeocode.AddressComponent
-	address := strings.TrimSpace(strings.Join([]string{component.Province, component.City, component.District, component.Township, component.Street, component.Number}, ""))
+	address := strings.TrimSpace(response.Regeocode.FormattedAddress)
 	if address == "" {
+		address = strings.TrimSpace(strings.Join([]string{component.Province, component.City.String(), component.District, component.Township, component.Street, component.Number}, ""))
+	}
+	return amapRegeoResult{
+		FormattedAddress: address,
+		AdCode:           component.AdCode.String(),
+		CityCode:         component.CityCode.String(),
+	}, nil
+}
+
+func (p *AMapProvider) ReverseGeocode(ctx context.Context, point GeoPoint) (string, error) {
+	details, err := p.reverseGeocodeDetails(ctx, point)
+	if err != nil {
+		return "", err
+	}
+	if details.FormattedAddress == "" {
 		return "", errors.New("amap reverse geocode returned no address")
 	}
-	return address, nil
+	return details.FormattedAddress, nil
 }
 
 type amapWeatherResponse struct {
@@ -633,8 +653,13 @@ func (p *AMapProvider) Weather(ctx context.Context, request WeatherRequest) (Wea
 		return WeatherSnapshot{Provider: p.ID(), LocalDate: request.LocalDate, Available: false}, unavailable(p.ID())
 	}
 	adcode := strings.TrimSpace(request.AdCode)
+	if adcode == "" && validatePoint(request.Location) == nil {
+		if details, err := p.reverseGeocodeDetails(ctx, request.Location); err == nil && strings.TrimSpace(details.AdCode) != "" {
+			adcode = strings.TrimSpace(details.AdCode)
+		}
+	}
 	if adcode == "" {
-		return WeatherSnapshot{Provider: p.ID(), LocalDate: request.LocalDate, Available: false}, errors.New("amap weather requires an adcode")
+		return WeatherSnapshot{Provider: p.ID(), LocalDate: request.LocalDate, Available: false}, errors.New("amap weather requires an adcode or valid location")
 	}
 	params := url.Values{
 		"city":       {adcode},

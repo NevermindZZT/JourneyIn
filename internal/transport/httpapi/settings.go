@@ -41,7 +41,7 @@ func (s *Server) defaultMapProviderFor(ctx context.Context) (journeymaps.Provide
 		}
 	}
 	if !isSupportedMapProvider(provider) {
-		provider = journeymaps.ProviderBaidu
+		provider = journeymaps.ProviderAMap
 	}
 	return provider, nil
 }

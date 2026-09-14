@@ -257,6 +257,63 @@ docker compose up --build -d
 
 数据默认保存于 Docker named volume `journeyin-data`；如果设置 `JOURNEYIN_DATA_PATH`，则保存于指定的宿主机目录或 named volume。生产环境请将服务放在 HTTPS 反向代理后，并注入地图服务商的 Key；使用高德 JS API 2.0 时还需配置 JOURNEYIN_AMAP_SECURITY_JS_CODE，服务端会通过 /_AMapService/ 仅代理受限的高德 Web API 路径，不代理瓦片或任意主机。
 
+### 反向代理与网络穿透（FRP / Nginx 配置建议）
+
+在将 JourneyIn 部署于家庭 NAS、私有云并配合 FRP 内网穿透与 Nginx 反向代理时，请注意以下网络配置建议：
+
+#### 1. Nginx 代理配置建议
+
+当行程较长（包含多天日程、规划点、天气快照与稠密的路线经纬度点阵）时，行程保存（`PATCH` / `PUT`）请求体通常达到数十至数百 KB。为避免弱网环境下请求体流式转发超时或磁盘缓冲阻塞，建议配置：
+
+~~~nginx
+server {
+    listen 443 ssl;
+    server_name your-journeyin-domain.com;
+
+    # 调大内存请求体缓冲区，避免 Nginx 将 JSON 写入磁盘临时文件后再慢速分块转发
+    client_max_body_size 50m;
+    client_body_buffer_size 16m;
+    client_body_timeout 120s;
+
+    location / {
+        proxy_pass http://127.0.0.1:10092; # 指向 FRP 本地穿透端口
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # 保持长连接，避免普通 HTTP 请求被误设为 upgrade
+        proxy_set_header Connection "";
+
+        # 确保完整接收请求体后再高速转发至上游穿透隧道
+        proxy_request_buffering on;
+        proxy_buffering off; # 响应体关闭缓冲，便于后续流式传输
+
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 120s;
+        proxy_read_timeout 120s;
+    }
+}
+~~~
+
+#### 2. FRP 模式与多路复用建议
+
+- 建议 FRP 代理使用 `type = tcp`，由云端 Nginx 统一终结 TLS 并进行 HTTP 解析，避免 FRP 内部 HTTP 解析层对大包或分块传输产生不必要的延迟。
+- 若穿透隧道经过带宽受限或高延迟的家庭宽带，在 `frpc` 配置中可尝试增加连接池或关闭单 TCP 连接复用（`tcp_mux = false` 或 `pool_count = 3`），降低并发传输大包时的排队拥塞。
+
+#### 3. 服务端超时环境变量
+
+JourneyIn 原生 HTTP 服务端默认提供更宽裕的网络读取窗口，亦可通过环境变量自定义：
+
+| 环境变量 | 默认值 | 说明 |
+| :--- | :--- | :--- |
+| `JOURNEYIN_READ_TIMEOUT` | `120s` | 读取完整 HTTP 请求体（含 Request Body）的最大允许时长 |
+| `JOURNEYIN_READ_HEADER_TIMEOUT` | `30s` | 读取 HTTP 请求头的最大允许时长 |
+| `JOURNEYIN_WRITE_TIMEOUT` | `120s` | 写入 HTTP 响应的最大允许时长 |
+| `JOURNEYIN_IDLE_TIMEOUT` | `120s` | 空闲 Keep-Alive 连接最大保持时长 |
+
 ## 开源协议
 
 JourneyIn 采用 [MIT License](LICENSE) 开源协议。完整许可文本见仓库根目录的 [`LICENSE`](LICENSE) 文件。

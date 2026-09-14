@@ -61,7 +61,7 @@ type CommitResult struct {
 }
 
 func NewTripService(s *store.Store) *TripService {
-	return &TripService{store: s, previews: make(map[string]preview), planLocks: make(map[string]chan struct{}), defaultMapProvider: journeymaps.ProviderBaidu}
+	return &TripService{store: s, previews: make(map[string]preview), planLocks: make(map[string]chan struct{}), defaultMapProvider: journeymaps.ProviderAMap}
 }
 func (s *TripService) SetMapService(service *MapService) { s.mapService = service }
 
@@ -79,7 +79,7 @@ func (s *TripService) DefaultMapProvider() journeymaps.ProviderID {
 	provider := s.defaultMapProvider
 	s.defaultProviderMu.RUnlock()
 	if provider != journeymaps.ProviderAMap && provider != journeymaps.ProviderBaidu {
-		return journeymaps.ProviderBaidu
+		return journeymaps.ProviderAMap
 	}
 	return provider
 }

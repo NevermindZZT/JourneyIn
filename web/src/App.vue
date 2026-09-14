@@ -33,8 +33,8 @@ type PlaceCandidate = { id?: string; name: string; address?: string; location: C
 type TravelMode = 'driving' | 'walking' | 'cycling' | 'transit'
 
 const mapProviderOptions = [
-  { value: 'baidu', label: '百度地图', description: 'Baidu Maps' },
   { value: 'amap', label: '高德地图', description: 'AMap' },
+  { value: 'baidu', label: '百度地图', description: 'Baidu Maps' },
 ]
 const travelModeOptions = [
   { value: 'walking', label: '步行' },
@@ -219,7 +219,7 @@ const newTimezone = ref('Asia/Shanghai')
 const newDescription = ref('')
 const settingsMessage = ref('')
 const settingsData = ref<KeySettings | null>(null)
-const defaultMapProvider = ref<'baidu' | 'amap'>(localStorage.getItem('journeyin.mapProvider') === 'amap' ? 'amap' : 'baidu')
+const defaultMapProvider = ref<'baidu' | 'amap'>(localStorage.getItem('journeyin.mapProvider') === 'baidu' ? 'baidu' : 'amap')
 const baiduBrowserKeyInput = ref('')
 const baiduServerKeyInput = ref('')
 const amapJSKeyInput = ref('')
@@ -277,8 +277,8 @@ const locationSearchTargetDayID = ref('')
 const locationSearchTitleDraft = ref('')
 const planningMode = ref<TravelMode>('walking')
 const planningStrategy = ref('32')
-const planningProvider = ref<'baidu' | 'amap'>(localStorage.getItem('journeyin.planningProvider') === 'amap' ? 'amap' : 'baidu')
-const selectedMapProvider = ref<'baidu' | 'amap'>(localStorage.getItem('journeyin.mapProvider') === 'amap' ? 'amap' : 'baidu')
+const planningProvider = ref<'baidu' | 'amap'>(localStorage.getItem('journeyin.planningProvider') === 'baidu' ? 'baidu' : 'amap')
+const selectedMapProvider = ref<'baidu' | 'amap'>(localStorage.getItem('journeyin.mapProvider') === 'baidu' ? 'baidu' : 'amap')
 const supportsDrivingStrategy = computed(() => planningProvider.value === 'amap')
 const availableDrivingStrategyOptions = computed(() => supportsDrivingStrategy.value ? drivingStrategyOptions : [])
 const planningLoading = ref(false)
