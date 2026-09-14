@@ -54,7 +54,7 @@ description: 将 AI 生成的单次旅行规划整理为 JourneyIn Trip JSON，�
 
 使用 JourneyIn Trip Schema v1，而不是自定义临时字段。最小结构如下：
 
-~~~json
+```json
 {
   "$schema": "https://journeyin.local/schema/trip/v1.json",
   "schema_version": 1,
@@ -69,8 +69,8 @@ description: 将 AI 生成的单次旅行规划整理为 JourneyIn Trip JSON，�
   "description_markdown": "总体说明",
   "links": [],
   "map": {
-    "preferred_provider": "baidu",
-    "enabled_providers": ["baidu"],
+    "preferred_provider": "amap",
+    "enabled_providers": ["amap", "baidu"],
     "default_mode": "walking"
   },
   "days": [
@@ -107,7 +107,7 @@ description: 将 AI 生成的单次旅行规划整理为 JourneyIn Trip JSON，�
     "source": "human|ai|import|mixed"
   }
 }
-~~~
+```
 
 上面 0.0 坐标只是结构示意，不能原样使用。实际草案必须替换为可靠坐标；如果查询不到坐标，先停止并请求用户明确允许本次以 draft 保存待解析点，不能仅凭 Agent 自己判断后删除 location。
 
@@ -141,7 +141,7 @@ description: 将 AI 生成的单次旅行规划整理为 JourneyIn Trip JSON，�
 
 调用：
 
-~~~json
+```json
 {
   "name": "journeyin.validate_trip",
   "arguments": {
@@ -149,7 +149,7 @@ description: 将 AI 生成的单次旅行规划整理为 JourneyIn Trip JSON，�
     "check_external_refs": false
   }
 }
-~~~
+```
 
 检查并修复：
 
@@ -166,7 +166,7 @@ description: 将 AI 生成的单次旅行规划整理为 JourneyIn Trip JSON，�
 
 创建新行程：
 
-~~~json
+```json
 {
   "name": "journeyin.preview_save_trip",
   "arguments": {
@@ -174,13 +174,13 @@ description: 将 AI 生成的单次旅行规划整理为 JourneyIn Trip JSON，�
     "operation": "create"
   }
 }
-~~~
+```
 
 更新已有行程时，先读取目标 Trip 的完整 document 和当前 revision，然后按变更范围选择操作：
 
 **完整结构变更使用 replace：**
 
-~~~json
+```json
 {
   "name": "journeyin.preview_save_trip",
   "arguments": {
@@ -190,11 +190,11 @@ description: 将 AI 生成的单次旅行规划整理为 JourneyIn Trip JSON，�
     "expected_revision": 7
   }
 }
-~~~
+```
 
 **只修改说明、Markdown 或来源时使用 merge：**
 
-~~~json
+```json
 {
   "name": "journeyin.preview_save_trip",
   "arguments": {
@@ -230,7 +230,7 @@ description: 将 AI 生成的单次旅行规划整理为 JourneyIn Trip JSON，�
     }
   }
 }
-~~~
+```
 
 merge 不得传 trip_json。Day/Stop 必须按稳定 day_id/stop_id 定位，不能按数组下标、标题或日期定位。省略字段保持原值；空字符串显式清空 Markdown。只允许修改 Trip.description_markdown、Trip.links 的 add/remove、Day.notes_markdown、Stop.description_markdown 和 Stop.links；不得修改标题、日期、地点、坐标、时间窗、天气、地图、legs、route snapshot、geometry、顺序或任何未知字段。服务端会把 patch 应用到当前完整文档，并保留所有未修改路线数据。
 
@@ -238,7 +238,7 @@ merge 不得传 trip_json。Day/Stop 必须按稳定 day_id/stop_id 定位，不
 
 向用户展示简明但完整的预览：
 
-~~~text
+```text
 将保存到：<server URL 的可读名称>
 操作：创建新行程 / 完整替换已有行程 / 受限 merge 更新已有行程
 标题：...
@@ -251,7 +251,7 @@ merge 不得传 trip_json。Day/Stop 必须按稳定 day_id/stop_id 定位，不
 未解析/过期/未核实项：...
 冲突：无 / ...
 预览有效期：...
-~~~
+```
 
 ### 8. 获取明确确认
 
@@ -275,7 +275,7 @@ merge 不得传 trip_json。Day/Stop 必须按稳定 day_id/stop_id 定位，不
 
 提交时不重新从聊天拼接 JSON，使用预览绑定的值：
 
-~~~json
+```json
 {
   "name": "journeyin.commit_save_trip",
   "arguments": {
@@ -285,7 +285,7 @@ merge 不得传 trip_json。Day/Stop 必须按稳定 day_id/stop_id 定位，不
     "expected_revision": 7
   }
 }
-~~~
+```
 
 - 新建和更新各生成一个新的 idempotency_key。
 - 网络超时后重试必须复用原 key，不能先猜测是否已写入再创建新 key。
@@ -294,17 +294,17 @@ merge 不得传 trip_json。Day/Stop 必须按稳定 day_id/stop_id 定位，不
 
 如果用户明确要求生成地图路线，commit 成功后再调用 `journeyin.plan_trip`：
 
-~~~json
+```json
 {
   "name": "journeyin.plan_trip",
   "arguments": {
     "trip_id": "trip_<commit 返回的 id>",
     "expected_revision": <commit 返回的 revision>,
-    "provider": "baidu",
+    "provider": "amap",
     "mode": "walking"
   }
 }
-~~~
+```
 
 该工具按每个 Day 的相邻主规划点生成独立路线段，并保存 provider、CRS、geometry、距离、耗时和有效期。它会产生新的 Trip revision；如果某个点没有可靠 location 或 Provider 不可用，必须报告具体错误，不能用直线或猜测结果补齐。
 
