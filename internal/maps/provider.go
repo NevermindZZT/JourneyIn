@@ -103,13 +103,21 @@ type WeatherRequest struct {
 }
 
 type WeatherSnapshot struct {
-	Provider     ProviderID `json:"provider"`
-	LocalDate    string     `json:"local_date"`
-	Condition    string     `json:"condition,omitempty"`
-	TemperatureC *float64   `json:"temperature_c,omitempty"`
-	FetchedAt    time.Time  `json:"fetched_at"`
-	ExpiresAt    time.Time  `json:"expires_at"`
-	Available    bool       `json:"available"`
+	Provider         ProviderID `json:"provider"`
+	LocalDate        string     `json:"local_date"`
+	Condition        string     `json:"condition,omitempty"`
+	TemperatureC     *float64   `json:"temperature_c,omitempty"`
+	TempMinC         *float64   `json:"temp_min_c,omitempty"`
+	TempMaxC         *float64   `json:"temp_max_c,omitempty"`
+	CurrentCondition string     `json:"current_condition,omitempty"`
+	CurrentTempC     *float64   `json:"current_temp_c,omitempty"`
+	HumidityPercent  *float64   `json:"humidity_percent,omitempty"`
+	WindDirection    string     `json:"wind_direction,omitempty"`
+	WindPower        string     `json:"wind_power,omitempty"`
+	PressureHPa      *float64   `json:"pressure_hpa,omitempty"`
+	FetchedAt        time.Time  `json:"fetched_at"`
+	ExpiresAt        time.Time  `json:"expires_at"`
+	Available        bool       `json:"available"`
 }
 
 type NavTarget struct {

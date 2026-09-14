@@ -143,10 +143,19 @@ func TestAMapProviderWeatherAndReverseGeocode(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/v3/weather/weatherInfo":
-			if r.URL.Query().Get("city") != "110108" || r.URL.Query().Get("extensions") != "all" {
+			if r.URL.Query().Get("city") != "110108" {
 				t.Fatalf("weather query=%s", r.URL.RawQuery)
 			}
-			_, _ = w.Write([]byte(`{"status":"1","info":"OK","infocode":"10000","forecasts":[{"casts":[{"date":"2026-04-18","dayweather":"晴","nightweather":"多云","daytemp":"25","nighttemp":"15"}]}]}`))
+			ext := r.URL.Query().Get("extensions")
+			if ext == "base" {
+				_, _ = w.Write([]byte(`{"status":"1","info":"OK","infocode":"10000","lives":[{"weather":"晴","temperature":"22","humidity":"45","winddirection":"东","windpower":"≤3"}]}`))
+				return
+			}
+			if ext == "all" {
+				_, _ = w.Write([]byte(`{"status":"1","info":"OK","infocode":"10000","forecasts":[{"casts":[{"date":"2026-04-18","dayweather":"晴","nightweather":"多云","daytemp":"25","nighttemp":"15"}]}]}`))
+				return
+			}
+			t.Fatalf("unexpected extensions=%s", ext)
 		case "/v3/geocode/regeo":
 			if r.URL.Query().Get("location") != "120.150000,30.250000" {
 				t.Fatalf("reverse query=%s", r.URL.RawQuery)
@@ -159,12 +168,22 @@ func TestAMapProviderWeatherAndReverseGeocode(t *testing.T) {
 	defer server.Close()
 	provider := NewAMapProviderWithConfig("test", AMapConfig{ServerKey: "test-key", BaseURL: server.URL})
 	weather, err := provider.Weather(context.Background(), WeatherRequest{LocalDate: "2026-04-18", AdCode: "110108"})
-	if err != nil || !weather.Available || weather.Condition != "晴" || weather.TemperatureC == nil || *weather.TemperatureC != 20 {
+	if err != nil || !weather.Available || weather.Condition != "晴转多云" || weather.TemperatureC == nil || *weather.TemperatureC != 20 {
 		t.Fatalf("weather=%+v err=%v", weather, err)
 	}
+	if weather.TempMinC == nil || *weather.TempMinC != 15 || weather.TempMaxC == nil || *weather.TempMaxC != 25 {
+		t.Fatalf("weather range=%+v", weather)
+	}
+	if weather.CurrentCondition != "晴" || weather.CurrentTempC == nil || *weather.CurrentTempC != 22 {
+		t.Fatalf("weather current=%+v", weather)
+	}
+	if weather.HumidityPercent == nil || *weather.HumidityPercent != 45 || weather.WindDirection != "东" || weather.WindPower != "≤3" {
+		t.Fatalf("weather extra=%+v", weather)
+	}
+
 	// Test weather with missing adcode but valid location (auto-reverse geocodes)
 	weatherWithLoc, err := provider.Weather(context.Background(), WeatherRequest{LocalDate: "2026-04-18", Location: GeoPoint{Lat: 30.25, Lng: 120.15, CRS: CRSGCJ02}})
-	if err != nil || !weatherWithLoc.Available || weatherWithLoc.Condition != "晴" || weatherWithLoc.TemperatureC == nil || *weatherWithLoc.TemperatureC != 20 {
+	if err != nil || !weatherWithLoc.Available || weatherWithLoc.Condition != "晴转多云" || weatherWithLoc.TemperatureC == nil || *weatherWithLoc.TemperatureC != 20 {
 		t.Fatalf("weatherWithLoc=%+v err=%v", weatherWithLoc, err)
 	}
 	address, err := provider.ReverseGeocode(context.Background(), GeoPoint{Lat: 30.25, Lng: 120.15, CRS: CRSGCJ02})

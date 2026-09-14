@@ -206,6 +206,53 @@ async function shareNative() {
     }
   }
 }
+
+function formatWeatherBadge(stop: Stop): string {
+  const weather = stop.weather || {}
+  if (!weather || Object.keys(weather).length === 0) return ''
+  const condition = String(weather.condition || weather.text_day || weather.text || '')
+  const tempMin = weather.temp_min_c ?? weather.low
+  const tempMax = weather.temp_max_c ?? weather.high
+  const tempAvg = weather.temperature_c ?? weather.temp
+  const currentCondition = weather.current_condition ? String(weather.current_condition) : ''
+  const currentTemp = weather.current_temp_c
+
+  let rangeText = ''
+  if (tempMin !== undefined && tempMax !== undefined && tempMin !== null && tempMax !== null) {
+    rangeText = Math.round(Number(tempMin)) + '~' + Math.round(Number(tempMax)) + '°C'
+  } else if (tempAvg !== undefined && tempAvg !== null) {
+    rangeText = Math.round(Number(tempAvg)) + '°C'
+  }
+
+  let liveText = ''
+  if (currentCondition || currentTemp !== undefined) {
+    if (currentCondition && currentTemp !== undefined && currentTemp !== null) {
+      liveText = currentCondition + ' ' + Math.round(Number(currentTemp)) + '°C'
+    } else if (currentCondition) {
+      liveText = currentCondition
+    } else if (currentTemp !== undefined && currentTemp !== null) {
+      liveText = Math.round(Number(currentTemp)) + '°C'
+    }
+  }
+
+  let wind = ''
+  if (weather.wind_direction || weather.wind_power) {
+    const dir = weather.wind_direction ? String(weather.wind_direction) : ''
+    const pwr = weather.wind_power ? String(weather.wind_power) : ''
+    wind = [dir, pwr ? (pwr.includes('级') ? pwr : pwr + '级') : ''].filter(Boolean).join('')
+  }
+  const humidity = weather.humidity_percent !== undefined && weather.humidity_percent !== null ? Math.round(Number(weather.humidity_percent)) + '%' : ''
+
+  const extras = [wind, humidity ? '湿' + humidity : ''].filter(Boolean).join(' ')
+
+  if (liveText && rangeText && condition) {
+    return '实时 ' + liveText + ' · ' + condition + ' ' + rangeText + (extras ? ' · ' + extras : '')
+  }
+  if (condition && rangeText) {
+    return condition + ' ' + rangeText + (extras ? ' · ' + extras : '')
+  }
+  return [liveText, condition, rangeText, extras].filter(Boolean).join(' · ')
+}
 </script>
 
 <template>
@@ -373,9 +420,14 @@ async function shareNative() {
                   <div class="step-content">
                     <div class="step-header">
                       <strong class="stop-name">{{ stop.title }}</strong>
-                      <span v-if="stop.time_window?.arrival" class="stop-time">
-                        {{ stop.time_window.arrival }} 到达
-                      </span>
+                      <div class="step-tags-row">
+                        <span v-if="formatWeatherBadge(stop)" class="stop-weather-tag">
+                          {{ formatWeatherBadge(stop) }}
+                        </span>
+                        <span v-if="stop.time_window?.arrival" class="stop-time">
+                          {{ stop.time_window.arrival }} 到达
+                        </span>
+                      </div>
                     </div>
                     <p v-if="stop.address" class="stop-address">{{ stop.address }}</p>
                     <p v-if="stop.description_markdown" class="stop-desc" :class="'clamp-' + descLinesMode">
@@ -841,11 +893,35 @@ async function shareNative() {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
 }
 
 .stop-name {
   font-size: 0.9375rem;
   font-weight: 700;
+}
+
+.step-tags-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.stop-weather-tag {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: #0284c7;
+  background: rgba(2, 132, 199, 0.1);
+  padding: 1px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.poster-card.dark .stop-weather-tag {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.15);
 }
 
 .stop-time {

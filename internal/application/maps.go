@@ -288,18 +288,35 @@ func (s *MapService) Route(ctx context.Context, providerID journeymaps.ProviderI
 }
 
 func (s *MapService) Weather(ctx context.Context, providerID journeymaps.ProviderID, request journeymaps.WeatherRequest) (journeymaps.WeatherSnapshot, error) {
+	return s.WeatherWithCache(ctx, providerID, request, true)
+}
+
+func (s *MapService) WeatherWithCache(ctx context.Context, providerID journeymaps.ProviderID, request journeymaps.WeatherRequest, useCache bool) (journeymaps.WeatherSnapshot, error) {
 	provider, err := s.provider(providerID)
 	if err != nil {
 		return journeymaps.WeatherSnapshot{}, err
 	}
 	cacheKey := mapCacheKey(request)
-	data, err := s.cached(ctx, providerID, "weather", cacheKey, 6*time.Hour, func() ([]byte, error) {
+	fetch := func() ([]byte, error) {
 		result, err := s.call(ctx, providerID, func() (any, error) { return provider.Weather(ctx, request) })
 		if err != nil {
 			return nil, err
 		}
 		return json.Marshal(result)
-	})
+	}
+
+	var data []byte
+	if useCache {
+		data, err = s.cached(ctx, providerID, "weather", cacheKey, 6*time.Hour, fetch)
+	} else {
+		// 显式刷新天气时，强制穿透并更新底层 SQLite 缓存
+		data, err = fetch()
+		if err == nil && s.store != nil {
+			s.cacheWriteMu.Lock()
+			_ = s.store.PutMapCache(ctx, string(providerID), "weather", cacheKey, data, time.Now().UTC().Add(6*time.Hour), time.Now().UTC())
+			s.cacheWriteMu.Unlock()
+		}
+	}
 	if err != nil {
 		return journeymaps.WeatherSnapshot{}, err
 	}

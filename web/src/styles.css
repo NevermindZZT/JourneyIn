@@ -474,7 +474,10 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .detail-weather { display: flex; min-height: 54px; align-items: center; gap: 9px; margin-top: 16px; padding: 10px 11px; border-radius: 14px; color: var(--p); background: color-mix(in srgb, #4f7fa3 12%, var(--surface)); }
 .detail-weather > ion-icon { flex: 0 0 auto; font-size: 20px; }
 .detail-weather > span { display: grid; min-width: 0; flex: 1; gap: 3px; }
-.detail-weather strong { color: var(--ink); font-size: 12px; }
+.detail-weather strong { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--ink); font-size: 12px; line-height: 1.4; }
+.weather-live-chip { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 6px; color: #0284c7; background: color-mix(in srgb, #0284c7 14%, var(--surface)); font-size: 10px; font-weight: 800; white-space: nowrap; }
+:root[data-theme="dark"] .weather-live-chip { color: #38bdf8; background: color-mix(in srgb, #38bdf8 18%, var(--surface)); }
+.weather-metrics-line { color: var(--ink); font-size: 10px; font-weight: 600; opacity: 0.85; }
 .detail-weather small { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .detail-weather button { border: 0; color: var(--p); background: transparent; font-size: 10px; font-weight: 900; }
 .detail-section { margin-top: 20px; padding-top: 17px; border-top: 1px solid var(--line); }

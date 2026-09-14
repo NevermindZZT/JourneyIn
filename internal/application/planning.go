@@ -852,7 +852,7 @@ func (s *TripService) RefreshWeather(ctx context.Context, tripID string, expecte
 	if localDate == "" {
 		localDate = dayDate
 	}
-	snapshot, err := s.mapService.Weather(ctx, provider, journeymaps.WeatherRequest{Location: locationData.Point, LocalDate: localDate, Timezone: trip.Timezone, CityCode: locationData.CityCode, AdCode: locationData.AdCode})
+	snapshot, err := s.mapService.WeatherWithCache(ctx, provider, journeymaps.WeatherRequest{Location: locationData.Point, LocalDate: localDate, Timezone: trip.Timezone, CityCode: locationData.CityCode, AdCode: locationData.AdCode}, false)
 	if err != nil {
 		return store.TripRecord{}, err
 	}

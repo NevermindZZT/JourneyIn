@@ -2404,7 +2404,69 @@ async function openNavigation(provider: 'baidu' | 'amap') {
     error.value = cause instanceof Error ? cause.message : '导航失败'
   }
 }
-function weatherText(stop: Stop | SubStop) { const weather = stop.weather || {}; const condition = weather.condition || weather.text_day || weather.text || '暂无天气快照'; const temperature = weather.temperature_c ?? weather.temp; return temperature === undefined ? String(condition) : String(condition) + ' · ' + String(temperature) + '°C' }
+function weatherDetails(stop: Stop | SubStop) {
+  const weather = stop.weather || {}
+  if (!weather || Object.keys(weather).length === 0) return null
+  const condition = String(weather.condition || weather.text_day || weather.text || '')
+  const tempMin = weather.temp_min_c ?? weather.low
+  const tempMax = weather.temp_max_c ?? weather.high
+  const tempAvg = weather.temperature_c ?? weather.temp
+  const currentCondition = weather.current_condition ? String(weather.current_condition) : ''
+  const currentTemp = weather.current_temp_c
+
+  let rangeText = ''
+  if (tempMin !== undefined && tempMax !== undefined && tempMin !== null && tempMax !== null) {
+    rangeText = Math.round(Number(tempMin)) + '°C ~ ' + Math.round(Number(tempMax)) + '°C'
+  } else if (tempAvg !== undefined && tempAvg !== null) {
+    rangeText = Math.round(Number(tempAvg)) + '°C'
+  }
+
+  let liveText = ''
+  if (currentCondition || currentTemp !== undefined) {
+    if (currentCondition && currentTemp !== undefined && currentTemp !== null) {
+      liveText = currentCondition + ' ' + Math.round(Number(currentTemp)) + '°C'
+    } else if (currentCondition) {
+      liveText = currentCondition
+    } else if (currentTemp !== undefined && currentTemp !== null) {
+      liveText = Math.round(Number(currentTemp)) + '°C'
+    }
+  }
+
+  // 更多气象指标：湿度、风向、风力、气压
+  const metrics: string[] = []
+  if (weather.humidity_percent !== undefined && weather.humidity_percent !== null) {
+    metrics.push('湿度 ' + Math.round(Number(weather.humidity_percent)) + '%')
+  }
+  const windParts: string[] = []
+  if (weather.wind_direction) windParts.push(String(weather.wind_direction))
+  if (weather.wind_power) {
+    const power = String(weather.wind_power)
+    windParts.push(power.includes('级') ? power : power + '级')
+  }
+  if (windParts.length > 0) {
+    metrics.push(windParts.join(' '))
+  }
+  if (weather.pressure_hpa !== undefined && weather.pressure_hpa !== null) {
+    metrics.push(Math.round(Number(weather.pressure_hpa)) + ' hPa')
+  }
+
+  return {
+    condition: condition || '天气预报',
+    rangeText,
+    liveText,
+    metricsText: metrics.join(' · '),
+    provider: weather.provider === 'amap' ? '高德天气' : weather.provider === 'baidu' ? '百度天气' : '',
+  }
+}
+function weatherText(stop: Stop | SubStop) {
+  const details = weatherDetails(stop)
+  if (!details) return '暂无天气快照'
+  const parts: string[] = []
+  if (details.liveText) parts.push('当前 ' + details.liveText)
+  if (details.condition) parts.push(String(details.condition))
+  if (details.rangeText) parts.push(details.rangeText)
+  return parts.join(' · ')
+}
 function weatherUpdatedAt(stop: Stop | SubStop) { const value = stop.weather?.fetched_at; return value ? formatDateTime(String(value)) : '' }
 async function refreshWeather() {
   if (readOnlyView.value || !selected.value || !tripDocument.value || !selectedTarget.value) { error.value = '请先选择一个有坐标的规划点'; return }
@@ -2792,7 +2854,22 @@ onUnmounted(() => {
                 <h1>{{ selectedTarget?.title }}</h1><p class="detail-address">{{ selectedTarget?.address || '地址待解析' }}</p><div class="detail-date-row"><p class="detail-date">{{ stopDate(selectedTarget || selectedStop) }}<span v-if="stopTime(selectedTarget || selectedStop)"> · {{ stopTime(selectedTarget || selectedStop) }}</span></p><button v-if="!readOnlyView && !selectedSubStop" class="text-action detail-date-edit" type="button" @click="beginEditStopDate">修改日期</button><span v-if="selectedSubStop" class="detail-date-follow-note">跟随主规划点</span></div><div v-if="stopDateEditing && !selectedSubStop && !readOnlyView" class="detail-date-editor"><label class="select-field">移动到日期<UiSelect v-model="stopDateDraftDayID" aria-label="规划点目标日期" :options="tripDayOptions" /></label><div class="editor-actions"><button class="secondary-action compact-action" type="button" @click="cancelEditStopDate">取消</button><button class="primary-action compact-action" type="button" :disabled="stopDateSaving" @click="saveStopDate">{{ stopDateSaving ? '保存中…' : '保存日期' }}</button></div></div>
                 <div class="detail-location" :class="{ 'location-missing': !pointFor(selectedTarget || selectedStop) }"><div class="detail-location-heading"><span><span class="location-status-icon" :class="{ missing: !pointFor(selectedTarget || selectedStop) }" aria-hidden="true">{{ pointFor(selectedTarget || selectedStop) ? '●' : '!' }}</span>{{ locationStatus(selectedTarget || selectedStop) }}</span><span class="location-state-label">{{ pointFor(selectedTarget || selectedStop) ? '可用于路线与导航' : '需要处理' }}</span></div><small v-if="pointFor(selectedTarget || selectedStop)">{{ pointFor(selectedTarget || selectedStop)?.crs }} · {{ pointFor(selectedTarget || selectedStop)?.lat.toFixed(6) }}, {{ pointFor(selectedTarget || selectedStop)?.lng.toFixed(6) }}</small><small v-else>暂无可靠坐标，路线和导航暂不可用。</small><small v-if="pointFor(selectedTarget || selectedStop)">来源：{{ locationSource(selectedTarget || selectedStop) }}</small><div v-if="!readOnlyView" class="detail-location-actions"><button class="text-action" type="button" @click="beginEditPoint">编辑名称/地址</button><button class="text-action" type="button" @click="openPointSearch(selectedTarget || selectedStop)">重新搜索</button><button class="text-action" type="button" :disabled="!mapReady" @click="startMapPickForPoint(selectedTarget || selectedStop)">地图选点</button></div></div>
                 <div class="detail-primary-actions"><button class="detail-navigation-button" type="button" :disabled="!pointFor(selectedTarget || selectedStop)" @click="openNavigation('amap')"><IonIcon :icon="navigateOutline" /> 高德导航</button><button class="detail-navigation-button" type="button" :disabled="!pointFor(selectedTarget || selectedStop)" @click="openNavigation('baidu')"><IonIcon :icon="navigateOutline" /> 百度导航</button></div>
-                <div class="detail-weather"><IonIcon :icon="sunnyOutline" /><span><strong>{{ weatherText(selectedTarget || selectedStop) }}</strong><small v-if="weatherUpdatedAt(selectedTarget || selectedStop)">更新于 {{ weatherUpdatedAt(selectedTarget || selectedStop) }}</small></span><button v-if="!readOnlyView" type="button" :disabled="weatherLoading || !pointFor(selectedTarget || selectedStop)" @click="refreshWeather">{{ weatherLoading ? '查询中…' : '刷新' }}</button></div>
+                <div class="detail-weather">
+                  <IonIcon :icon="sunnyOutline" />
+                  <span class="weather-text-wrap">
+                    <strong class="weather-title">
+                      <span v-if="weatherDetails(selectedTarget || selectedStop)?.liveText" class="weather-live-chip">当前 {{ weatherDetails(selectedTarget || selectedStop)?.liveText }}</span>
+                      <span class="weather-forecast-str">{{ weatherDetails(selectedTarget || selectedStop) ? (weatherDetails(selectedTarget || selectedStop)?.condition + (weatherDetails(selectedTarget || selectedStop)?.rangeText ? ' · ' + weatherDetails(selectedTarget || selectedStop)?.rangeText : '')) : '暂无天气快照' }}</span>
+                    </strong>
+                    <span v-if="weatherDetails(selectedTarget || selectedStop)?.metricsText" class="weather-metrics-line">
+                      {{ weatherDetails(selectedTarget || selectedStop)?.metricsText }}
+                    </span>
+                    <small v-if="weatherUpdatedAt(selectedTarget || selectedStop)">
+                      <span v-if="weatherDetails(selectedTarget || selectedStop)?.provider">{{ weatherDetails(selectedTarget || selectedStop)?.provider }} · </span>更新于 {{ weatherUpdatedAt(selectedTarget || selectedStop) }}
+                    </small>
+                  </span>
+                  <button v-if="!readOnlyView" type="button" :disabled="weatherLoading || !pointFor(selectedTarget || selectedStop)" @click="refreshWeather">{{ weatherLoading ? '查询中…' : '刷新' }}</button>
+                </div>
                 <section v-if="!selectedSubStop" class="detail-section"><div class="section-title-row"><h2>子规划点 <span>{{ selectedStop.children?.length || 0 }}</span></h2><button v-if="!readOnlyView" class="text-action" type="button" @click="openChildSearch(selectedStop)">添加</button></div><p v-if="selectedStop.children?.length" class="detail-section-help">点击子点进入下一层，返回箭头会回到主规划点。</p><div v-if="selectedStop.children?.length" class="detail-child-list"><button v-for="child in selectedStop.children" :key="child.id" type="button" class="detail-child-row" @click="selectSubStop(child, selectedStop)"><span class="child-number">{{ child.sequence }}</span><span><strong>{{ child.title }}</strong><small>{{ stopDate(child) }} · {{ child.address || '地址待补充' }}</small><em class="stop-location-badge" :class="{ missing: !pointFor(child) }">{{ locationStatus(child) }}</em></span><span>›</span></button></div><button v-if="!readOnlyView" class="add-place-action" type="button" @click="openChildSearch(selectedStop)"><IonIcon :icon="searchOutline" /> 添加子规划点</button></section>
                 <button v-else class="detail-parent-button" type="button" @click="navigateBackFromSubStop">‹ 返回主规划点：{{ selectedStop.title }}</button>
                 <section class="detail-section"><div class="section-title-row"><h2>地点说明与时间</h2><div v-if="!readOnlyView" class="section-actions"><button class="text-action" type="button" @click="beginEditDescription">{{ descriptionEditing ? '编辑中' : '编辑规划点' }}</button><button v-if="descriptionEditing" class="text-action" type="button" @click="openDescriptionFullscreen">全屏</button></div></div><template v-if="descriptionEditing && !readOnlyView"><div class="detail-time-editor"><div class="detail-time-editor-heading"><strong>时间窗口</strong><small>到达和离开时间均为可选，留空表示未设置</small></div><div class="detail-time-fields"><label>到达<input v-model="arrivalTimeDraft" type="time" /></label><label>离开<input v-model="departureTimeDraft" type="time" /></label></div></div><MarkdownEditor v-model="descriptionDraft" v-model:mode="descriptionEditorMode" :preview-html="renderMarkdown(descriptionDraft)" :rows="7" editor-label="MARKDOWN" preview-label="地点说明预览" editor-aria-label="地点说明 Markdown 原始文本" placeholder="补充门票、开放时间、行程备注等信息" /><div class="editor-actions"><button class="secondary-action compact-action" type="button" @click="cancelEditDescription">取消</button><button class="primary-action compact-action" type="button" :disabled="descriptionSaving" @click="saveDescription">{{ descriptionSaving ? '保存中…' : '保存规划点' }}</button></div></template><div v-else-if="selectedTarget?.description_markdown" class="markdown" v-html="renderMarkdown(selectedTarget.description_markdown)"></div><p v-else class="muted">{{ shareMode ? '暂无地点说明。' : '暂无地点说明，点击“编辑说明与时间”添加。' }}</p></section>
@@ -2876,7 +2953,7 @@ onUnmounted(() => {
               <section v-else-if="settingsSection === 'maps'" class="settings-page-section">
                 <div class="settings-section-heading"><span class="eyebrow">MAP PROVIDERS</span><h3>地图与路线</h3><p>选择默认 Provider，并分别管理浏览器端和服务端能力。</p></div>
                 <div class="settings-card"><div class="settings-card-heading"><div><strong>默认地图 Provider</strong><small>用于没有单独地图偏好的新行程</small></div><span class="settings-status-dot"></span></div><label class="select-field">默认地图 Provider<UiSelect v-model="defaultMapProvider" aria-label="默认地图 Provider" :options="mapProviderOptions" /></label><p class="settings-help">单个行程已保存的地图偏好不会被覆盖；地图工作区仍可临时切换底图。</p><button class="primary-action" type="button" :disabled="settingsSaving" @click="saveDefaultMapProvider">{{ settingsSaving ? '保存中…' : '保存默认地图' }}</button></div>
-                <div class="settings-provider-grid"><article class="settings-card provider-card"><div class="settings-card-heading"><div><strong>百度地图</strong><small>JSAPI 4.0 / Web Service</small></div><span class="provider-status">{{ baiduKey ? '浏览器已配置' : '待配置' }}</span></div><p class="settings-status-line">浏览器端 Key：<strong>{{ baiduKey ? '已配置' : '未配置' }}</strong><br />服务端 Key：<strong>{{ settingsData?.map?.baidu?.server_key_configured ? '已配置' : '未配置' }}</strong></p><label>浏览器端 Key<input v-model="baiduBrowserKeyInput" type="password" :placeholder="settingsData?.map?.baidu?.browser_key_configured ? '已配置，输入新 Key 可替换' : '用于浏览器端地图'" autocomplete="off" /></label><label>服务端 Key<input v-model="baiduServerKeyInput" type="password" placeholder="留空保持当前值" autocomplete="off" /></label><a href="https://lbsyun.baidu.com/apiconsole/key" target="_blank" rel="noopener noreferrer">申请/管理百度 Key ↗</a></article><article class="settings-card provider-card"><div class="settings-card-heading"><div><strong>高德地图</strong><small>JS API 2.0 / Web Service</small></div><span class="provider-status">{{ settingsData?.map?.amap?.js_key_configured ? 'JS 已配置' : '待配置' }}</span></div><p class="settings-status-line">JS Key：<strong>{{ settingsData?.map?.amap?.js_key_configured ? '已配置' : '未配置' }}</strong><br />服务端 Key：<strong>{{ settingsData?.map?.amap?.server_key_configured ? '已配置' : '未配置' }}</strong><br />安全密钥：<strong>{{ settingsData?.map?.amap?.security_js_code_configured ? '已配置' : '未配置' }}</strong></p><label>JS Key<input v-model="amapJSKeyInput" type="password" placeholder="用于浏览器端地图" autocomplete="off" /></label><label>服务端 Key<input v-model="amapServerKeyInput" type="password" placeholder="留空保持当前值" autocomplete="off" /></label><label>JS 安全密钥<input v-model="amapSecurityJSCodeInput" type="password" placeholder="用于安全代理" autocomplete="off" /></label><a href="https://console.amap.com/dev/key/app" target="_blank" rel="noopener noreferrer">申请/管理高德 Key ↗</a></article></div><p class="settings-help">保存地图 Key 到数据库后，浏览器端 Key 会立即生效；服务端 Key 和安全密钥只返回配置状态，不会回显原文。</p><div class="settings-actions"><button class="primary-action" type="button" :disabled="settingsSaving" @click="saveMapKeys">{{ settingsSaving ? '保存中…' : '保存地图 Key 到数据库' }}</button></div><p v-if="settingsMessage" class="settings-feedback">{{ settingsMessage }}</p>
+                <div class="settings-provider-grid"><article class="settings-card provider-card"><div class="settings-card-heading"><div><strong>高德地图</strong><small>JS API 2.0 / Web Service</small></div><span class="provider-status">{{ settingsData?.map?.amap?.js_key_configured ? 'JS 已配置' : '待配置' }}</span></div><p class="settings-status-line">JS Key：<strong>{{ settingsData?.map?.amap?.js_key_configured ? '已配置' : '未配置' }}</strong><br />服务端 Key：<strong>{{ settingsData?.map?.amap?.server_key_configured ? '已配置' : '未配置' }}</strong><br />安全密钥：<strong>{{ settingsData?.map?.amap?.security_js_code_configured ? '已配置' : '未配置' }}</strong></p><label>JS Key<input v-model="amapJSKeyInput" type="password" placeholder="用于浏览器端地图" autocomplete="off" /></label><label>服务端 Key<input v-model="amapServerKeyInput" type="password" placeholder="留空保持当前值" autocomplete="off" /></label><label>JS 安全密钥<input v-model="amapSecurityJSCodeInput" type="password" placeholder="用于安全代理" autocomplete="off" /></label><a href="https://console.amap.com/dev/key/app" target="_blank" rel="noopener noreferrer">申请/管理高德 Key ↗</a></article><article class="settings-card provider-card"><div class="settings-card-heading"><div><strong>百度地图</strong><small>JSAPI 4.0 / Web Service</small></div><span class="provider-status">{{ baiduKey ? '浏览器已配置' : '待配置' }}</span></div><p class="settings-status-line">浏览器端 Key：<strong>{{ baiduKey ? '已配置' : '未配置' }}</strong><br />服务端 Key：<strong>{{ settingsData?.map?.baidu?.server_key_configured ? '已配置' : '未配置' }}</strong></p><label>浏览器端 Key<input v-model="baiduBrowserKeyInput" type="password" :placeholder="settingsData?.map?.baidu?.browser_key_configured ? '已配置，输入新 Key 可替换' : '用于浏览器端地图'" autocomplete="off" /></label><label>服务端 Key<input v-model="baiduServerKeyInput" type="password" placeholder="留空保持当前值" autocomplete="off" /></label><a href="https://lbsyun.baidu.com/apiconsole/key" target="_blank" rel="noopener noreferrer">申请/管理百度 Key ↗</a></article></div><p class="settings-help">保存地图 Key 到数据库后，浏览器端 Key 会立即生效；服务端 Key 和安全密钥只返回配置状态，不会回显原文。</p><div class="settings-actions"><button class="primary-action" type="button" :disabled="settingsSaving" @click="saveMapKeys">{{ settingsSaving ? '保存中…' : '保存地图 Key 到数据库' }}</button></div><p v-if="settingsMessage" class="settings-feedback">{{ settingsMessage }}</p>
               </section>
 
               <section v-else-if="settingsSection === 'search'" class="settings-page-section">

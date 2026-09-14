@@ -648,6 +648,19 @@ type amapWeatherResponse struct {
 	} `json:"forecasts"`
 }
 
+type amapLiveWeatherResponse struct {
+	Status   string `json:"status"`
+	Info     string `json:"info"`
+	InfoCode string `json:"infocode"`
+	Lives    []struct {
+		Weather       string     `json:"weather"`
+		Temperature   amapScalar `json:"temperature"`
+		WindDirection string     `json:"winddirection"`
+		WindPower     string     `json:"windpower"`
+		Humidity      amapScalar `json:"humidity"`
+	} `json:"lives"`
+}
+
 func (p *AMapProvider) Weather(ctx context.Context, request WeatherRequest) (WeatherSnapshot, error) {
 	if p.serverKey() == "" {
 		return WeatherSnapshot{Provider: p.ID(), LocalDate: request.LocalDate, Available: false}, unavailable(p.ID())
@@ -676,6 +689,37 @@ func (p *AMapProvider) Weather(ctx context.Context, request WeatherRequest) (Wea
 	}); err != nil {
 		return WeatherSnapshot{Provider: p.ID(), LocalDate: request.LocalDate, Available: false}, err
 	}
+
+	// 尝试获取当前实时天气（extensions=base）
+	var currentCondition string
+	var currentTemp *float64
+	var humidity *float64
+	var windDirection, windPower string
+	liveParams := url.Values{
+		"city":       {adcode},
+		"extensions": {"base"},
+		"output":     {"json"},
+		"key":        {p.serverKey()},
+	}
+	var liveResponse amapLiveWeatherResponse
+	if err := p.getWithRetry(ctx, "/v3/weather/weatherInfo", liveParams, &liveResponse, func() error {
+		if liveResponse.Status != "1" {
+			return amapStatusError(liveResponse.InfoCode, liveResponse.Info)
+		}
+		return nil
+	}); err == nil && len(liveResponse.Lives) > 0 {
+		live := liveResponse.Lives[0]
+		currentCondition = strings.TrimSpace(live.Weather)
+		if val, err := live.Temperature.Float(); err == nil {
+			currentTemp = &val
+		}
+		if h, err := live.Humidity.Float(); err == nil {
+			humidity = &h
+		}
+		windDirection = strings.TrimSpace(live.WindDirection)
+		windPower = strings.TrimSpace(live.WindPower)
+	}
+
 	now := time.Now().UTC()
 	for _, forecast := range response.Forecasts {
 		for _, cast := range forecast.Casts {
@@ -683,8 +727,21 @@ func (p *AMapProvider) Weather(ctx context.Context, request WeatherRequest) (Wea
 				continue
 			}
 			var temperature *float64
+			var minTemp, maxTemp *float64
 			dayTemp, dayErr := cast.DayTemp.Float()
 			nightTemp, nightErr := cast.NightTemp.Float()
+			if dayErr == nil && cast.DayTemp.String() != "" {
+				val := dayTemp
+				maxTemp = &val
+			}
+			if nightErr == nil && cast.NightTemp.String() != "" {
+				val := nightTemp
+				minTemp = &val
+			}
+			if maxTemp != nil && minTemp != nil && *minTemp > *maxTemp {
+				minTemp, maxTemp = maxTemp, minTemp
+			}
+
 			switch {
 			case dayErr == nil && nightErr == nil && (cast.DayTemp.String() != "" || cast.NightTemp.String() != ""):
 				average := (dayTemp + nightTemp) / 2
@@ -694,11 +751,32 @@ func (p *AMapProvider) Weather(ctx context.Context, request WeatherRequest) (Wea
 			case nightErr == nil && cast.NightTemp.String() != "":
 				temperature = &nightTemp
 			}
-			condition := strings.TrimSpace(cast.DayWeather)
-			if condition == "" {
-				condition = strings.TrimSpace(cast.NightWeather)
+
+			dayWeather := strings.TrimSpace(cast.DayWeather)
+			nightWeather := strings.TrimSpace(cast.NightWeather)
+			condition := dayWeather
+			if dayWeather != "" && nightWeather != "" && dayWeather != nightWeather {
+				condition = dayWeather + "转" + nightWeather
+			} else if condition == "" {
+				condition = nightWeather
 			}
-			return WeatherSnapshot{Provider: p.ID(), LocalDate: request.LocalDate, Condition: condition, TemperatureC: temperature, FetchedAt: now, ExpiresAt: now.Add(6 * time.Hour), Available: true}, nil
+
+			return WeatherSnapshot{
+				Provider:         p.ID(),
+				LocalDate:        request.LocalDate,
+				Condition:        condition,
+				TemperatureC:     temperature,
+				TempMinC:         minTemp,
+				TempMaxC:         maxTemp,
+				CurrentCondition: currentCondition,
+				CurrentTempC:     currentTemp,
+				HumidityPercent:  humidity,
+				WindDirection:    windDirection,
+				WindPower:        windPower,
+				FetchedAt:        now,
+				ExpiresAt:        now.Add(6 * time.Hour),
+				Available:        true,
+			}, nil
 		}
 	}
 	return WeatherSnapshot{Provider: p.ID(), LocalDate: request.LocalDate, FetchedAt: now, ExpiresAt: now.Add(time.Hour), Available: false}, nil

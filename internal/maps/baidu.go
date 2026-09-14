@@ -251,10 +251,46 @@ func (p *BaiduProvider) Weather(ctx context.Context, request WeatherRequest) (We
 		return WeatherSnapshot{Provider: p.ID(), LocalDate: request.LocalDate, Available: false}, baiduStatusError(response.Status, response.Message)
 	}
 	now := time.Now().UTC()
+	currentCondition := strings.TrimSpace(response.Result.Now.Text)
+	currentTemp := response.Result.Now.Temp
 	for _, forecast := range response.Result.Forecasts {
 		if forecast.Date == request.LocalDate {
-			average := (forecast.High + forecast.Low) / 2
-			return WeatherSnapshot{Provider: p.ID(), LocalDate: request.LocalDate, Condition: forecast.TextDay, TemperatureC: &average, FetchedAt: now, ExpiresAt: now.Add(6 * time.Hour), Available: true}, nil
+			high := forecast.High
+			low := forecast.Low
+			average := (high + low) / 2
+			condition := strings.TrimSpace(forecast.TextDay)
+			if condition == "" {
+				condition = strings.TrimSpace(forecast.TextNight)
+			}
+			windDirection := strings.TrimSpace(response.Result.Now.WindDir)
+			if windDirection == "" {
+				windDirection = strings.TrimSpace(forecast.WdDay)
+			}
+			windPower := strings.TrimSpace(response.Result.Now.WindClass)
+			if windPower == "" {
+				windPower = strings.TrimSpace(forecast.WcDay)
+			}
+			pressure := response.Result.Now.Pressure
+			if pressure == nil {
+				pressure = forecast.Pressure
+			}
+			return WeatherSnapshot{
+				Provider:         p.ID(),
+				LocalDate:        request.LocalDate,
+				Condition:        condition,
+				TemperatureC:     &average,
+				TempMinC:         &low,
+				TempMaxC:         &high,
+				CurrentCondition: currentCondition,
+				CurrentTempC:     currentTemp,
+				HumidityPercent:  response.Result.Now.Rh,
+				WindDirection:    windDirection,
+				WindPower:        windPower,
+				PressureHPa:      pressure,
+				FetchedAt:        now,
+				ExpiresAt:        now.Add(6 * time.Hour),
+				Available:        true,
+			}, nil
 		}
 	}
 	return WeatherSnapshot{Provider: p.ID(), LocalDate: request.LocalDate, FetchedAt: now, ExpiresAt: now.Add(time.Hour), Available: false}, nil
@@ -442,11 +478,23 @@ type baiduWeatherResponse struct {
 	Status  int    `json:"status"`
 	Message string `json:"message"`
 	Result  struct {
+		Now struct {
+			Text      string   `json:"text"`
+			Temp      *float64 `json:"temp"`
+			Rh        *float64 `json:"rh"`
+			WindDir   string   `json:"wind_dir"`
+			WindClass string   `json:"wind_class"`
+			Pressure  *float64 `json:"pressure"`
+		} `json:"now"`
 		Forecasts []struct {
-			Date    string  `json:"date"`
-			High    float64 `json:"high"`
-			Low     float64 `json:"low"`
-			TextDay string  `json:"text_day"`
+			Date      string  `json:"date"`
+			High      float64 `json:"high"`
+			Low       float64 `json:"low"`
+			TextDay   string  `json:"text_day"`
+			TextNight string  `json:"text_night"`
+			WdDay     string  `json:"wd_day"`
+			WcDay     string  `json:"wc_day"`
+			Pressure  *float64 `json:"pressure"`
 		} `json:"forecasts"`
 	} `json:"result"`
 }
