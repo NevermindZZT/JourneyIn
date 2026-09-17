@@ -2351,7 +2351,7 @@ async function renderAtlasAMap() {
     })
 
     // 2. 绘制代表性地标节点
-    if (!hasSelection || isSelected) {
+    if (mapLabelMode.value !== 'none' && (!hasSelection || isSelected)) {
       (tripItem.key_stops || []).forEach(stop => {
         if (!stop.point) return
         const pt = pointForProvider({ location: { coordinates: { [stop.point.crs || 'gcj02']: stop.point }, preferred: stop.point.crs || 'gcj02' } } as any, 'amap')
@@ -2438,7 +2438,7 @@ async function renderAtlasBaidu() {
       }
     })
 
-    if (!hasSelection || isSelected) {
+    if (mapLabelMode.value !== 'none' && (!hasSelection || isSelected)) {
       (tripItem.key_stops || []).forEach(stop => {
         if (!stop.point) return
         const pt = mapPointFor({ location: { coordinates: { [stop.point.crs || 'bd09ll']: stop.point }, preferred: stop.point.crs || 'bd09ll' } } as any)

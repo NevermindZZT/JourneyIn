@@ -930,6 +930,12 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
   .redesign-map-canvas .map-fallback { padding: 40px 40px 40px min(430px, 35vw); }
   .workspace-topbar { right: 18px; left: auto; }
   .workspace-back, .workspace-title { display: none; }
+  .atlas-topbar .atlas-back-btn { display: none !important; }
+  .atlas-floating-panel .atlas-panel-head .collapse-action { display: none !important; }
+
+  /* 桌面端地图选项采用非模糊背景，保留地图清晰度；移动端仍保留磨砂遮罩 */
+  .map-tools-backdrop { background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .map-tools-card { backdrop-filter: none; -webkit-backdrop-filter: none; }
 
   /* 规划点详情面板打开时，右上角工具栏、状态胶囊、地图选项卡片平滑向左避让，杜绝遮挡 */
   .workspace-topbar, .workspace-status, .map-tools-card, .redesign-notices {
