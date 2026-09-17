@@ -163,20 +163,20 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 8px;
-  padding: 14px 18px 10px;
+  padding: 10px 18px 8px;
 }
 
 .atlas-metric-card {
-  padding: 10px 12px;
+  padding: 8px 12px;
   border-radius: 12px;
   background: color-mix(in srgb, var(--surface) 75%, transparent);
   border: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
   display: grid;
   gap: 2px;
+  min-width: 0;
 }
 
 .atlas-metric-card.highlight {
-  grid-column: span 2;
   background: color-mix(in srgb, var(--p) 10%, var(--surface));
   border-color: color-mix(in srgb, var(--p) 35%, transparent);
 }
@@ -185,17 +185,23 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
   font-size: 10px;
   font-weight: 800;
   color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .atlas-metric-card strong {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 800;
   color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .atlas-metric-card.highlight strong {
   color: var(--p);
-  font-size: 18px;
+  font-size: 15px;
 }
 
 .atlas-metric-card em {
