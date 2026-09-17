@@ -19,14 +19,16 @@ var ErrTripDetailsEmpty = errors.New("at least one trip detail field is required
 var ErrIdempotencyKeyRequired = errors.New("idempotency key is required")
 
 type UpdateTripDetailsInput struct {
-	Title     *string
-	DateRange *domain.DateRange
+	Title       *string
+	DateRange   *domain.DateRange
+	ShowInAtlas *bool
 }
 
 type TripDetailsChangeSummary struct {
 	Changed             bool `json:"changed"`
 	TitleChanged        bool `json:"title_changed"`
 	DateRangeChanged    bool `json:"date_range_changed"`
+	ShowInAtlasChanged  bool `json:"show_in_atlas_changed"`
 	AddedDays           int  `json:"added_days"`
 	RemovedDays         int  `json:"removed_days"`
 	ClearedWeatherStops int  `json:"cleared_weather_stops"`
@@ -50,7 +52,7 @@ func (e *DateRangeConflictError) Error() string {
 }
 
 func (s *TripService) UpdateTripDetails(ctx context.Context, tripID string, expectedRevision int, input UpdateTripDetailsInput, source string) (store.TripRecord, TripDetailsChangeSummary, error) {
-	if input.Title == nil && input.DateRange == nil {
+	if input.Title == nil && input.DateRange == nil && input.ShowInAtlas == nil {
 		return store.TripRecord{}, TripDetailsChangeSummary{}, ErrTripDetailsEmpty
 	}
 
@@ -100,7 +102,15 @@ func (s *TripService) UpdateTripDetails(ctx context.Context, tripID string, expe
 		}
 	}
 
-	if !changes.TitleChanged && !changes.DateRangeChanged {
+	if input.ShowInAtlas != nil {
+		if trip.ShowInAtlas == nil || *trip.ShowInAtlas != *input.ShowInAtlas {
+			val := *input.ShowInAtlas
+			trip.ShowInAtlas = &val
+			changes.ShowInAtlasChanged = true
+		}
+	}
+
+	if !changes.TitleChanged && !changes.DateRangeChanged && !changes.ShowInAtlasChanged {
 		return record, changes, nil
 	}
 

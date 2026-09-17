@@ -5,7 +5,7 @@ import {
 } from '@ionic/vue'
 import BMapLoader from '@baidumap/jsapi-loader'
 import AMapLoader from '@amap/amap-jsapi-loader'
-import { addOutline, chevronDownOutline, chevronUpOutline, closeOutline, cloudOfflineOutline, createOutline, imageOutline, linkOutline, logInOutline, mapOutline, menuOutline, navigateOutline, searchOutline, settingsOutline, sunnyOutline } from 'ionicons/icons'
+import { addOutline, chevronDownOutline, chevronUpOutline, closeOutline, cloudOfflineOutline, createOutline, footstepsOutline, imageOutline, linkOutline, logInOutline, mapOutline, menuOutline, navigateOutline, searchOutline, settingsOutline, sunnyOutline } from 'ionicons/icons'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 import PrototypePreview from './PrototypePreview.vue'
@@ -22,9 +22,9 @@ type Stop = { id: string; sequence: number; kind?: string; title: string; addres
 type SubStop = { id: string; sequence: number; kind?: string; title: string; address?: string; location?: LocationData; time_window?: { arrival?: string; departure?: string }; description_markdown?: string; links?: LinkData[]; weather?: Record<string, unknown> }
 type Leg = { id: string; from_stop_id: string; to_stop_id: string; mode?: string; snapshots?: Array<{ provider?: string; coordinate_system?: string; mode?: string; strategy?: string; source?: string; geometry?: Array<[number, number]> | Array<Coord>; distance_m?: number; duration_s?: number; fetched_at?: string }> }
 type Day = { id: string; date: string; title?: string; notes_markdown?: string; stops: Stop[]; legs?: Leg[] }
-type TripDocument = { title: string; date_range?: { start: string; end: string }; timezone: string; description_markdown?: string; links?: LinkData[]; map?: { preferred_provider?: 'baidu' | 'amap'; enabled_providers?: Array<'baidu' | 'amap'>; default_mode?: TravelMode }; days: Day[] }
+type TripDocument = { title: string; show_in_atlas?: boolean; date_range?: { start: string; end: string }; timezone: string; description_markdown?: string; links?: LinkData[]; map?: { preferred_provider?: 'baidu' | 'amap'; enabled_providers?: Array<'baidu' | 'amap'>; default_mode?: TravelMode }; days: Day[] }
 type SharedBootstrap = { trip: TripDocument & { id?: string; status?: string }; browser_key?: string; amap_browser_key?: string; amap_security_proxy_path?: string; amap_security_js_code_configured?: boolean; default_map_provider?: 'baidu' | 'amap'; revision?: number }
-type TripSummary = { id: string; title: string; status: string; start_date: string; end_date: string; timezone: string; revision: number; days?: number; stops?: number; updated_at?: string }
+type TripSummary = { id: string; title: string; status: string; start_date: string; end_date: string; timezone: string; revision: number; days?: number; stops?: number; show_in_atlas?: boolean; updated_at?: string }
 type TripHistoryEntry = { id: string; history_id?: string; trip_id: string; source_revision: number; title: string; start_date: string; end_date: string; label?: string; content_hash: string; created_at: string; read_only?: boolean }
 type TripSortMode = 'updated' | 'date'
 type Capabilities = { version?: string; default_map_provider?: 'baidu' | 'amap'; map_providers?: { baidu?: { browser_key_configured?: boolean; browser_key?: string }; amap?: { browser_key_configured?: boolean; browser_key?: string; security_proxy_path?: string; security_js_code_configured?: boolean } }; features?: { planning_point_edit?: boolean; coordinate_repair?: boolean }; mcp?: { http_endpoint?: string } }
@@ -163,6 +163,60 @@ const tripDetailsEditing = ref(false)
 const tripDetailsTitleDraft = ref('')
 const tripDetailsStartDateDraft = ref('')
 const tripDetailsEndDateDraft = ref('')
+const tripDetailsShowInAtlasDraft = ref(true)
+
+type AtlasStopSummary = {
+  id: string
+  sequence: number
+  title: string
+  day_index: number
+  point?: Coord & { crs?: string }
+}
+type AtlasLegSummary = {
+  id: string
+  from_stop_id: string
+  to_stop_id: string
+  mode?: string
+  distance_m?: number
+  duration_s?: number
+  geometry?: Array<[number, number]>
+  crs?: string
+}
+type AtlasTripItem = {
+  id: string
+  title: string
+  start_date: string
+  end_date: string
+  days_count: number
+  stops_count: number
+  distance_m: number
+  duration_s: number
+  key_stops: AtlasStopSummary[]
+  legs: AtlasLegSummary[]
+}
+type AtlasSummaryResponse = {
+  total_trips: number
+  total_days: number
+  total_stops: number
+  total_distance_m: number
+  total_duration_s: number
+  trips: AtlasTripItem[]
+}
+
+const atlasLoading = ref(false)
+const atlasData = ref<AtlasSummaryResponse | null>(null)
+const selectedAtlasTripID = ref<string>('')
+const ATLAS_PALETTE = [
+  '#24695c',
+  '#e56a4d',
+  '#0284c7',
+  '#8b5cf6',
+  '#d97706',
+  '#059669',
+  '#db2777',
+  '#4f46e5',
+]
+
 const tripDetailsSaving = ref(false)
 const tripDetailsIdempotencyKey = ref('')
 const tripDetailsTitleInput = ref<HTMLInputElement | null>(null)
@@ -259,7 +313,7 @@ const panelOpen = ref(localStorage.getItem('journeyin.panelOpen') !== 'false')
 const panelCollapsed = ref(localStorage.getItem('journeyin.panelCollapsed') === 'true')
 const mobileMapToolsOpen = ref(false)
 const detailCollapsed = ref(localStorage.getItem('journeyin.detailCollapsed') === 'true')
-const tripView = ref<'list' | 'detail'>('list')
+const tripView = ref<'list' | 'detail' | 'atlas'>('list')
 type SheetBreakpoint = 'peek' | 'half' | 'expanded'
 type JourneyLayer = 'list' | 'trip' | 'stop' | 'substop'
 const sheetBreakpoint = ref<SheetBreakpoint>('half')
@@ -571,14 +625,19 @@ function ensureNavigationHistory() {
 }
 
 const SHEET_PEEK_HEIGHT = 154
+const ATLAS_PEEK_HEIGHT = 74
 const SHEET_TOP_OFFSET = 60
 const SHEET_BOTTOM_OFFSET = 8
 function sheetViewportHeight() { return window.visualViewport?.height || window.innerHeight }
+function currentSheetPeekHeight() {
+  return tripView.value === 'atlas' ? ATLAS_PEEK_HEIGHT : SHEET_PEEK_HEIGHT
+}
 function sheetHeightBounds() {
   const viewportHeight = sheetViewportHeight()
-  const max = Math.max(SHEET_PEEK_HEIGHT, viewportHeight - SHEET_TOP_OFFSET - SHEET_BOTTOM_OFFSET)
-  const half = Math.min(max, Math.max(SHEET_PEEK_HEIGHT, Math.round(viewportHeight * 0.53)))
-  return { min: SHEET_PEEK_HEIGHT, half, max }
+  const peekHeight = currentSheetPeekHeight()
+  const max = Math.max(peekHeight, viewportHeight - SHEET_TOP_OFFSET - SHEET_BOTTOM_OFFSET)
+  const half = Math.min(max, Math.max(peekHeight, Math.round(viewportHeight * 0.53)))
+  return { min: peekHeight, half, max }
 }
 function sheetHeightForBreakpoint(breakpoint: SheetBreakpoint) {
   const bounds = sheetHeightBounds()
@@ -688,7 +747,7 @@ function startSheetDrag(event: PointerEvent) {
     window.clearTimeout(sheetDragReleaseTimer)
     sheetDragReleaseTimer = null
   }
-  const panel = (event.currentTarget as HTMLElement | null)?.closest<HTMLElement>('.workspace-panel, .stop-detail-panel')
+  const panel = (event.currentTarget as HTMLElement | null)?.closest<HTMLElement>('.workspace-panel, .stop-detail-panel, .atlas-floating-panel')
   const startHeight = panel?.getBoundingClientRect().height || sheetHeightForBreakpoint(sheetBreakpoint.value)
   const startY = event.clientY
   let moved = false
@@ -1614,6 +1673,7 @@ function beginEditTripDetails() {
   tripDetailsTitleDraft.value = tripDocument.value.title || selected.value.title
   tripDetailsStartDateDraft.value = range.start
   tripDetailsEndDateDraft.value = range.end
+  tripDetailsShowInAtlasDraft.value = tripDocument.value.show_in_atlas !== false
   tripDetailsIdempotencyKey.value = makeID('trip-details')
   tripDetailsNotice.value = ''
   tripDetailsEditing.value = true
@@ -1635,6 +1695,38 @@ function tripDetailsConflictMessage(days: Array<{ day_id?: string; date?: string
     return (day.date ? formatDate(day.date) : day.day_id || '目标日期') + '（' + count + ' 个规划点）'
   }).join('、')
   return '不能缩短日期范围：' + detail + '仍有规划点，请先移动规划点或恢复结束日期。'
+}
+async function toggleTripAtlasFromList(trip: TripSummary) {
+  tripMenuID.value = ''
+  const nextVal = trip.show_in_atlas === false
+  actionLoading.value = true
+  try {
+    const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(trip.id), {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'If-Match': 'revision-' + trip.revision,
+        'Idempotency-Key': makeID('toggle-atlas'),
+      },
+      body: JSON.stringify({ show_in_atlas: nextVal }),
+    })
+    if (!response.ok) {
+      const payload = (await response.json()) as { error?: { message?: string } }
+      throw new Error(payload.error?.message || '设置足迹状态失败')
+    }
+    const payload = (await response.json()) as { revision?: number; document?: TripDocument }
+    trip.show_in_atlas = nextVal
+    if (payload.revision !== undefined) trip.revision = payload.revision
+    if (selected.value?.id === trip.id) {
+      selected.value.show_in_atlas = nextVal
+      if (tripDocument.value) tripDocument.value.show_in_atlas = nextVal
+    }
+    tripDetailsNotice.value = nextVal ? '已将“' + trip.title + '”加入足迹漫游' : '已从足迹漫游中移除“' + trip.title + '”'
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '设置足迹状态失败'
+  } finally {
+    actionLoading.value = false
+  }
 }
 async function editTripDetailsFromList(trip: TripSummary) {
   tripMenuID.value = ''
@@ -1667,7 +1759,7 @@ async function saveTripDetails() {
   tripDetailsSaving.value = true
   error.value = ''
   try {
-    const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(tripID), { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + revision, 'Idempotency-Key': tripDetailsIdempotencyKey.value || makeID('trip-details') }, body: JSON.stringify({ title, date_range: { start: tripDetailsStartDateDraft.value, end: tripDetailsEndDateDraft.value } }) })
+    const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(tripID), { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + revision, 'Idempotency-Key': tripDetailsIdempotencyKey.value || makeID('trip-details') }, body: JSON.stringify({ title, date_range: { start: tripDetailsStartDateDraft.value, end: tripDetailsEndDateDraft.value }, show_in_atlas: tripDetailsShowInAtlasDraft.value }) })
     const payload = await response.json() as { document?: TripDocument; title?: string; start_date?: string; end_date?: string; revision?: number; stops?: number; days?: number; updated_at?: string; changes?: { added_days?: number; removed_days?: number; cleared_weather_stops?: number }; error?: { code?: string; message?: string; details?: { days?: Array<{ day_id?: string; date?: string; stop_count?: number }> } } }
     if (!response.ok) {
       if (response.status === 409 && payload.error?.code === 'date_range_conflict') throw new Error(tripDetailsConflictMessage(payload.error.details?.days || []))
@@ -1879,7 +1971,7 @@ async function loadAMap() {
     } else {
       delete (window as any)._AMapSecurityConfig
     }
-    amapScriptPromise = AMapLoader.load({ key: currentKey, version: '2.0', plugins: ['AMap.Scale'] }).then(namespace => {
+    amapScriptPromise = AMapLoader.load({ key: currentKey, version: '2.0', plugins: ['AMap.Scale', 'AMap.TileLayer.Satellite'] }).then(namespace => {
       mapAPI = namespace
       loadedAMapKey = currentKey
     })
@@ -2107,11 +2199,277 @@ async function renderAMapMap() {
   }
 }
 async function renderMap() {
-  if (!mapContainer.value || !tripDocument.value) return
+  if (!mapContainer.value) return
+  if (tripView.value === 'atlas') return renderAtlasMap()
+  if (!tripDocument.value) return
   if (!key.value) { resetMapSDK(); return }
   if (selectedMapProvider.value === 'amap') return renderAMapMap()
   return renderBaiduMap()
 }
+
+function toggleAtlasSheetBreakpoint() {
+  const next: SheetBreakpoint = sheetBreakpoint.value === 'peek' ? 'half' : 'peek'
+  setSheetBreakpoint(next)
+}
+const atlasPanelCollapsed = computed(() => sheetBreakpoint.value === 'peek')
+
+async function loadAtlasData() {
+  atlasLoading.value = true
+  try {
+    const resp = await apiFetch('/api/v1/atlas')
+    if (!resp.ok) throw new Error('无法读取足迹漫游数据')
+    atlasData.value = (await resp.json()) as AtlasSummaryResponse
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '读取足迹数据失败'
+  } finally {
+    atlasLoading.value = false
+  }
+}
+
+function navigateToAtlas() {
+  historyOpen.value = false
+  historyView.value = null
+  selected.value = null
+  tripDocument.value = null
+  tripView.value = 'atlas'
+  selectedStopId.value = ''
+  selectedSubStopId.value = ''
+  panelOpen.value = false
+  mobileMapToolsOpen.value = false
+  tripMenuID.value = ''
+  detailMoreOpen.value = false
+  resetMapSDK()
+  void loadAtlasData().then(() => {
+    void nextTick().then(() => renderAtlasMap())
+  })
+}
+
+function selectAtlasTrip(item: AtlasTripItem) {
+  if (selectedAtlasTripID.value === item.id) {
+    clearSelectedAtlasTrip()
+    return
+  }
+  selectedAtlasTripID.value = item.id
+  void renderAtlasMap()
+}
+
+function clearSelectedAtlasTrip() {
+  selectedAtlasTripID.value = ''
+  void renderAtlasMap()
+}
+
+async function gotoTripFromAtlas(tripID: string) {
+  const trip = trips.value.find(t => t.id === tripID)
+  if (trip) {
+    navigateToTrip(trip)
+  } else {
+    try {
+      const resp = await apiFetch('/api/v1/trips/' + encodeURIComponent(tripID))
+      if (!resp.ok) throw new Error('无法读取行程')
+      const payload = (await resp.json()) as { document: TripDocument; revision: number; id: string; title: string; start_date: string; end_date: string; timezone: string }
+      const summaryItem: TripSummary = {
+        id: payload.id,
+        title: payload.title,
+        status: 'draft',
+        start_date: payload.start_date,
+        end_date: payload.end_date,
+        timezone: payload.timezone,
+        revision: payload.revision,
+      }
+      navigateToTrip(summaryItem)
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : '跳转行程失败'
+    }
+  }
+}
+
+async function renderAtlasMap() {
+  if (tripView.value !== 'atlas' || !mapContainer.value) return
+  const currentKey = selectedMapProvider.value === 'amap' ? amapKey.value.trim() : baiduKey.value.trim()
+  if (!currentKey) {
+    resetMapSDK()
+    return
+  }
+  if (selectedMapProvider.value === 'amap') {
+    await renderAtlasAMap()
+  } else {
+    await renderAtlasBaidu()
+  }
+}
+
+async function renderAtlasAMap() {
+  if (!mapContainer.value) return
+  await loadAMap()
+  if (!mapAPI || typeof mapAPI.Map !== 'function') return
+  if (!mapInstance || loadedMapKey) {
+    if (mapInstance) { try { mapInstance.destroy?.() } catch {} }
+    mapReady.value = false
+    mapInstance = new mapAPI.Map(mapContainer.value, { viewMode: '2D', zoom: 5, center: [105, 35], resizeEnable: true })
+    mapInstance.on?.('complete', () => { mapReady.value = true; mapError.value = ''; mapWarning.value = '' })
+    loadedMapKey = ''
+  }
+  mapInstance.resize?.()
+  clearAMapOverlays()
+
+  const allPoints: any[] = []
+  const tripsToRender = atlasData.value?.trips || []
+
+  tripsToRender.forEach((tripItem, tIdx) => {
+    const isSelected = selectedAtlasTripID.value === tripItem.id
+    const hasSelection = Boolean(selectedAtlasTripID.value)
+    const baseColor = ATLAS_PALETTE[tIdx % ATLAS_PALETTE.length]
+    const strokeColor = hasSelection ? (isSelected ? baseColor : '#94a3b8') : baseColor
+    const strokeOpacity = hasSelection ? (isSelected ? 0.95 : 0.25) : 0.82
+    const strokeWeight = hasSelection ? (isSelected ? 6 : 3) : 5
+    const zIndex = isSelected ? 80 : 30
+
+    // 1. 绘制路线
+    tripItem.legs.forEach(leg => {
+      if (!leg.geometry || leg.geometry.length < 2) return
+      const line = leg.geometry.map(val => {
+        const pt = mapRoutePointFor(val, leg.crs || 'gcj02', 'amap')
+        return pt ? amapPointToArray(pt) : null
+      }).filter(Boolean)
+
+      if (line.length >= 2) {
+        if (!hasSelection || isSelected) {
+          line.forEach(p => allPoints.push(p))
+        }
+        const polyline = addAMapOverlay(new mapAPI.Polyline({
+          path: line,
+          strokeColor,
+          strokeWeight,
+          strokeOpacity,
+          lineJoin: 'round',
+          showDir: false,
+          zIndex,
+        }))
+        polyline.on?.('click', () => {
+          selectAtlasTrip(tripItem)
+        })
+      }
+    })
+
+    // 2. 绘制代表性地标节点
+    if (!hasSelection || isSelected) {
+      (tripItem.key_stops || []).forEach(stop => {
+        if (!stop.point) return
+        const pt = pointForProvider({ location: { coordinates: { [stop.point.crs || 'gcj02']: stop.point }, preferred: stop.point.crs || 'gcj02' } } as any, 'amap')
+        if (!pt) return
+        const mapPt = amapPointToArray(pt)
+        allPoints.push(mapPt)
+        
+        const markerContent = '<div style="display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:' + baseColor + ';color:#fff;font-size:11px;font-weight:800;border:2px solid #fff;box-shadow:0 3px 8px rgba(0,0,0,0.3);cursor:pointer;">' + stop.day_index + '</div>'
+        const marker = addAMapOverlay(new mapAPI.Marker({
+          position: mapPt,
+          title: tripItem.title + ' · ' + stop.title,
+          content: markerContent,
+          offset: new mapAPI.Pixel(-11, -11),
+          zIndex: zIndex + 5,
+        }))
+        marker.on?.('click', () => {
+          selectAtlasTrip(tripItem)
+        })
+
+        if (isSelected) {
+          const labelContent = '<span style="display:inline-block;padding:3px 8px;border-radius:6px;background:#173f47ee;color:#fff;font-size:11px;font-weight:700;box-shadow:0 3px 10px rgba(0,0,0,0.3);border:1px solid ' + baseColor + ';">' + escapeHTML(stop.title) + '</span>'
+          marker.setLabel({ content: labelContent, direction: 'right', offset: new mapAPI.Pixel(10, -6) })
+        }
+      })
+    }
+  })
+
+  if (allPoints.length > 0) {
+    try {
+      mapInstance.setFitView?.(mapOverlays.filter(Boolean), false, [60, 60, 60, 60])
+    } catch {
+      mapInstance.setCenter?.(allPoints[0])
+    }
+  } else {
+    mapInstance.setCenter?.([105, 35])
+    mapInstance.setZoom?.(4)
+  }
+  applyMapType()
+}
+
+async function renderAtlasBaidu() {
+  if (!mapContainer.value) return
+  await loadBaiduMap()
+  if (!mapAPI || typeof mapAPI.Map !== 'function') return
+  if (!mapInstance) {
+    mapReady.value = false
+    mapInstance = new mapAPI.Map(mapContainer.value, { enableIconClick: false, fixCenterWhenResize: true })
+    mapInstance.enableScrollWheelZoom()
+    mapInstance.addEventListener?.('tilesloaded', () => { mapReady.value = true; mapError.value = ''; mapWarning.value = '' })
+  }
+  mapInstance.clearOverlays()
+
+  const allPoints: any[] = []
+  const tripsToRender = atlasData.value?.trips || []
+
+  tripsToRender.forEach((tripItem, tIdx) => {
+    const isSelected = selectedAtlasTripID.value === tripItem.id
+    const hasSelection = Boolean(selectedAtlasTripID.value)
+    const baseColor = ATLAS_PALETTE[tIdx % ATLAS_PALETTE.length]
+    const strokeColor = hasSelection ? (isSelected ? baseColor : '#94a3b8') : baseColor
+    const strokeOpacity = hasSelection ? (isSelected ? 0.95 : 0.25) : 0.82
+    const strokeWeight = hasSelection ? (isSelected ? 6 : 3) : 5
+
+    tripItem.legs.forEach(leg => {
+      if (!leg.geometry || leg.geometry.length < 2) return
+      const line = leg.geometry.map(val => {
+        const pt = mapRoutePoint(val, leg.crs || 'bd09ll')
+        return pt ? new mapAPI.Point(pt.lng, pt.lat) : null
+      }).filter(Boolean)
+
+      if (line.length >= 2) {
+        if (!hasSelection || isSelected) {
+          line.forEach(p => allPoints.push(p))
+        }
+        const polyline = new mapAPI.Polyline(line, {
+          strokeColor,
+          strokeWeight,
+          strokeOpacity,
+        })
+        polyline.addEventListener?.('click', () => {
+          selectAtlasTrip(tripItem)
+        })
+        mapInstance.addOverlay(polyline)
+      }
+    })
+
+    if (!hasSelection || isSelected) {
+      (tripItem.key_stops || []).forEach(stop => {
+        if (!stop.point) return
+        const pt = mapPointFor({ location: { coordinates: { [stop.point.crs || 'bd09ll']: stop.point }, preferred: stop.point.crs || 'bd09ll' } } as any)
+        if (!pt) return
+        const mapPt = new mapAPI.Point(pt.lng, pt.lat)
+        allPoints.push(mapPt)
+        const marker = new mapAPI.Marker(mapPt)
+        marker.addEventListener?.('click', () => {
+          selectAtlasTrip(tripItem)
+        })
+        mapInstance.addOverlay(marker)
+        if (isSelected) {
+          const label = new mapAPI.Label(stop.title, { offset: new mapAPI.Size(14, -18) })
+          label.setStyle?.({ color: '#fff', backgroundColor: '#173f47ee', border: '1px solid ' + baseColor, borderRadius: '6px', padding: '3px 7px', fontSize: '11px', fontWeight: '700' })
+          marker.setLabel(label)
+        }
+      })
+    }
+  })
+
+  if (allPoints.length > 0) {
+    try {
+      const view = mapInstance.getViewport?.(allPoints)
+      if (view) mapInstance.centerAndZoom(view.center, view.zoom)
+    } catch {}
+  } else {
+    mapInstance.centerAndZoom('中国', 4)
+  }
+  applyMapType()
+}
+
 function setMapProvider(provider: 'baidu' | 'amap') {
   if (provider !== 'baidu' && provider !== 'amap') return
   if (selectedMapProvider.value === provider) return
@@ -2144,9 +2502,15 @@ function applyMapType() {
   if (!mapInstance || !mapAPI) return
   if (selectedMapProvider.value === 'amap') {
     if (typeof mapAPI.TileLayer?.Satellite !== 'function') return
-    if (!amapSatelliteLayer) amapSatelliteLayer = new mapAPI.TileLayer.Satellite({ zIndex: 10 })
-    if (mapType.value === 'satellite') mapInstance.add?.(amapSatelliteLayer)
-    else mapInstance.remove?.(amapSatelliteLayer)
+    if (mapType.value === 'satellite') {
+      if (!amapSatelliteLayer) {
+        amapSatelliteLayer = new mapAPI.TileLayer.Satellite({ zIndex: 10 })
+      }
+      mapInstance.add?.(amapSatelliteLayer)
+    } else if (amapSatelliteLayer) {
+      mapInstance.remove?.(amapSatelliteLayer)
+      amapSatelliteLayer = null
+    }
     return
   }
   if (typeof mapInstance.setMapType !== 'function') return
@@ -2962,13 +3326,14 @@ onUnmounted(() => {
   <IonApp v-else>
     <div class="journey-page redesign-page">
       <div class="redesign-content">
-        <main class="journey-redesign" :class="{ 'is-list-view': tripView === 'list', 'is-detail-view': tripView === 'detail', 'has-stop-selection': Boolean(selectedStop), 'is-shared-view': shareMode, 'is-history-view': Boolean(historyView) }">
+        <main class="journey-redesign" :class="{ 'is-list-view': tripView === 'list', 'is-detail-view': tripView === 'detail', 'is-atlas-view': tripView === 'atlas', 'has-stop-selection': Boolean(selectedStop), 'is-shared-view': shareMode, 'is-history-view': Boolean(historyView) }">
           <input ref="fileInput" class="visually-hidden" type="file" accept="application/json,.json" aria-hidden="true" tabindex="-1" @change="importTrip" />
           <aside class="journey-rail" aria-label="JourneyIn 主导航">
             <button class="rail-brand" type="button" aria-label="返回行程列表" @click="navigateToList()"><BrandLogo :size="38" variant="mark" shape="squircle" class="rail-brand-mark-logo" /><span class="rail-brand-name">JourneyIn</span></button>
             <nav class="rail-nav" aria-label="工作区">
               <button class="rail-nav-item" :class="{ selected: tripView === 'list' }" type="button" @click="navigateToList()"><IonIcon :icon="menuOutline" /><span>行程</span></button>
               <button class="rail-nav-item" :class="{ selected: tripView === 'detail' }" type="button" :disabled="!selected" @click="selected ? navigateToTrip(selected, 'replace') : undefined"><IonIcon :icon="mapOutline" /><span>地图</span></button>
+              <button class="rail-nav-item" :class="{ selected: tripView === 'atlas' }" type="button" @click="navigateToAtlas()"><IonIcon :icon="footstepsOutline" /><span>足迹</span></button>
             </nav>
             <div class="rail-spacer"></div>
             <a v-if="!readOnlyView" class="rail-nav-item rail-link" :href="GITHUB_URL" target="_blank" rel="noopener noreferrer"><IonIcon :icon="linkOutline" /><span>项目</span></a>
@@ -2984,6 +3349,7 @@ onUnmounted(() => {
                 <p class="list-page-subtitle">把下一段旅程放在地图上</p>
               </div>
               <div class="list-page-actions">
+                <button class="secondary-action" type="button" @click="navigateToAtlas()"><IonIcon :icon="footstepsOutline" /> 足迹漫游</button>
                 <button class="secondary-action" type="button" @click="openImportPicker"><IonIcon :icon="linkOutline" /> 导入 Trip</button>
                 <button class="primary-action" type="button" @click="newTripOpen = true"><IonIcon :icon="addOutline" /> 新建行程</button>
               </div>
@@ -3001,14 +3367,161 @@ onUnmounted(() => {
               <article v-for="(trip, index) in sortedTrips" :key="trip.id" class="trip-list-card" :class="{ active: selected?.id === trip.id }">
                 <button class="trip-card-main" type="button" @click="selectTrip(trip)">
                   <span class="trip-card-visual" :class="'trip-card-visual-' + (index % 4)" aria-hidden="true"><span>{{ trip.title.slice(0, 2) }}</span></span>
-                  <span class="trip-card-copy"><strong>{{ trip.title }}</strong><span>{{ formatDateRange(trip.start_date, trip.end_date) }}</span><small>{{ trip.days ?? '—' }} 天 · {{ trip.stops ?? '—' }} 个规划点 · revision {{ trip.revision }}</small><small v-if="trip.updated_at" class="trip-card-updated">最后修改 {{ formatDateTime(trip.updated_at) }}</small></span>
+                  <span class="trip-card-copy"><strong>{{ trip.title }}</strong><span>{{ formatDateRange(trip.start_date, trip.end_date) }}</span><small>
+                    {{ trip.days ?? '—' }} 天 · {{ trip.stops ?? '—' }} 个规划点 · revision {{ trip.revision }}
+                    <span v-if="trip.show_in_atlas !== false" class="trip-atlas-tag" title="已汇聚在足迹漫游地图"><IonIcon :icon="footstepsOutline" /><span>足迹</span></span>
+                  </small><small v-if="trip.updated_at" class="trip-card-updated">最后修改 {{ formatDateTime(trip.updated_at) }}</small></span>
                   <span class="trip-card-arrow">›</span>
                 </button>
                 <button class="trip-card-menu-button" type="button" :aria-expanded="tripMenuID === trip.id" :aria-label="'打开 ' + trip.title + ' 更多操作'" @click.stop="toggleTripMenu(trip.id)">⋯</button>
-                <div v-if="tripMenuID === trip.id" class="trip-card-menu" role="menu"><button type="button" role="menuitem" @click="openPosterForTrip(trip)"><IonIcon :icon="imageOutline" /> 分享行程海报</button><button type="button" role="menuitem" @click="editTripDetailsFromList(trip)"><IonIcon :icon="createOutline" /> 编辑行程信息</button><button type="button" role="menuitem" @click="openTripHistoryFromList(trip)"><span aria-hidden="true">↶</span> 版本历史</button><button type="button" role="menuitem" class="danger-menu-item" @click="tripMenuID = ''; deleteTrip(trip)"><IonIcon :icon="closeOutline" /> 删除行程</button></div>
+                <div v-if="tripMenuID === trip.id" class="trip-card-menu" role="menu"><button type="button" role="menuitem" @click="openPosterForTrip(trip)"><IonIcon :icon="imageOutline" /> 分享行程海报</button><button type="button" role="menuitem" @click="toggleTripAtlasFromList(trip)"><IonIcon :icon="footstepsOutline" /> {{ trip.show_in_atlas === false ? '加入足迹漫游' : '从足迹中隐藏' }}</button><button type="button" role="menuitem" @click="editTripDetailsFromList(trip)"><IonIcon :icon="createOutline" /> 编辑行程信息</button><button type="button" role="menuitem" @click="openTripHistoryFromList(trip)"><span aria-hidden="true">↶</span> 版本历史</button><button type="button" role="menuitem" class="danger-menu-item" @click="tripMenuID = ''; deleteTrip(trip)"><IonIcon :icon="closeOutline" /> 删除行程</button></div>
               </article>
             </div>
             </div>
+          </section>
+
+          <!-- 足迹漫游 (Atlas) 汇总全景视图 -->
+          <section v-else-if="tripView === 'atlas'" class="journey-workspace atlas-workspace" aria-label="足迹漫游工作区">
+            <div class="map-canvas redesign-map-canvas">
+              <div v-if="keyConfigured && !mapError" :key="selectedMapProvider + '_atlas'" ref="mapContainer" id="map"></div>
+              <div v-if="!keyConfigured || mapError" class="map-fallback">
+                <IonIcon :icon="footstepsOutline" />
+                <strong>{{ mapError || (mapProviderLabel + '未配置') }}</strong>
+                <span>配置 {{ mapProviderLabel }} 浏览器端 Key 后即可呈现所有历史行程路线与足迹网络。</span>
+              </div>
+              <div v-if="keyConfigured && !mapError && !mapReady && !mapWarning" class="map-loading"><IonIcon :icon="footstepsOutline" /><span>正在渲染足迹漫游地图…</span></div>
+              <div v-if="mapWarning" class="map-warning"><span>{{ mapWarning }}</span><button type="button" @click="retryMap">重新加载</button></div>
+            </div>
+
+            <!-- 足迹漫游顶栏：左侧返回按钮与右侧地图选项/设置操作 -->
+            <header class="workspace-topbar atlas-topbar">
+              <button class="workspace-back atlas-back-btn" type="button" aria-label="返回行程列表" @click="navigateToList()">
+                <span>‹</span><small>行程</small>
+              </button>
+              <div class="workspace-top-actions">
+                <button class="workspace-tool-trigger" type="button" :aria-expanded="mobileMapToolsOpen" aria-label="打开地图选项" @click="toggleMobileMapTools">
+                  <IonIcon :icon="mapOutline" /><span>地图选项</span>
+                </button>
+                <button v-if="!readOnlyView" class="workspace-more" type="button" aria-label="打开更多操作" @click="openSettings">
+                  <span>⋯</span>
+                </button>
+              </div>
+            </header>
+
+            <div v-if="mobileMapToolsOpen" class="map-tools-backdrop" @click="mobileMapToolsOpen = false"></div>
+            <div v-if="mobileMapToolsOpen" class="map-tools-card" role="dialog" aria-label="地图选项">
+              <div class="map-tools-heading"><div><span class="eyebrow">MAP OPTIONS</span><strong>地图选项</strong></div><button type="button" aria-label="关闭地图选项" @click="toggleMobileMapTools"><IonIcon :icon="closeOutline" /></button></div>
+              <div class="map-tool-row"><span>底图 Provider</span><div class="provider-segment"><button type="button" :class="{ active: selectedMapProvider === 'amap' }" @click="setMapProvider('amap')">高德</button><button type="button" :class="{ active: selectedMapProvider === 'baidu' }" @click="setMapProvider('baidu')">百度</button></div></div>
+              <div class="map-tool-row"><span>图层</span><div class="provider-segment layer-segment" role="group" aria-label="地图图层"><button type="button" :class="{ active: mapType === 'normal' }" :aria-pressed="mapType === 'normal'" @click="setMapType('normal')">标准图</button><button type="button" :class="{ active: mapType === 'satellite' }" :aria-pressed="mapType === 'satellite'" @click="setMapType('satellite')">卫星图</button></div></div>
+              <div class="map-tool-row"><span>地图标签</span><div class="provider-segment label-segment" role="group" aria-label="地图标签显示模式"><button type="button" :class="{ active: mapLabelMode === 'auto' }" @click="setMapLabelMode('auto')">自动</button><button type="button" :class="{ active: mapLabelMode === 'always' }" @click="setMapLabelMode('always')">全部</button><button type="button" :class="{ active: mapLabelMode === 'none' }" @click="setMapLabelMode('none')">隐藏</button></div></div>
+              <p class="map-tool-hint">{{ mapLabelMode === 'auto' ? '自动：有空间时显示，密集时自动防重叠' : mapLabelMode === 'always' ? '全部：始终展开全部地名与路线标签' : '隐藏：仅保留图钉，隐藏浮动文字' }}</p>
+            </div>
+
+            <!-- 足迹漫游浮层：成就看板与行程高亮列表 (完全复用 workspace-panel / stop-detail-panel 的设计与结构) -->
+            <aside
+              class="floating-panel workspace-panel atlas-floating-panel"
+              :class="['sheet-' + sheetBreakpoint, { 'is-sheet-dragging': sheetDragActive }]"
+              :style="sheetDragStyle"
+              aria-label="足迹漫游看板"
+            >
+              <!-- 移动端拖拽手柄 (复用与行程卡片完全一致的 sheet-handle) -->
+              <button
+                class="sheet-handle"
+                type="button"
+                :aria-label="sheetBreakpoint === 'peek' ? '展开足迹面板' : '收起足迹面板'"
+                @pointerdown="startSheetDrag"
+                @click="cycleSheetBreakpoint"
+              >
+                <span></span>
+              </button>
+
+              <header class="workspace-panel-head atlas-panel-head">
+                <div class="atlas-brand-badge">
+                  <div class="atlas-badge-icon-wrap">
+                    <IonIcon :icon="footstepsOutline" />
+                  </div>
+                  <div>
+                    <div class="workspace-panel-kicker">
+                      <p class="eyebrow">JOURNEYIN ATLAS</p>
+                      <span class="history-status-tag">全景</span>
+                    </div>
+                    <h1>足迹漫游</h1>
+                  </div>
+                </div>
+                <div class="panel-head-actions">
+                  <button
+                    type="button"
+                    class="panel-action-button collapse-action"
+                    :aria-label="sheetBreakpoint === 'peek' ? '展开面板' : '收起面板'"
+                    @click="setSheetBreakpoint(sheetBreakpoint === 'peek' ? 'half' : 'peek')"
+                  >
+                    <IonIcon :icon="sheetBreakpoint === 'peek' ? chevronUpOutline : chevronDownOutline" />
+                  </button>
+                  <button type="button" class="panel-action-button" aria-label="返回行程列表" @click="navigateToList()">
+                    <IonIcon :icon="closeOutline" />
+                  </button>
+                </div>
+              </header>
+
+              <!-- 成就数据卡片 -->
+              <div class="atlas-metrics-grid">
+                <div class="atlas-metric-card">
+                  <span>点亮行程</span>
+                  <strong>{{ atlasData?.total_trips || 0 }} <em>次</em></strong>
+                </div>
+                <div class="atlas-metric-card">
+                  <span>累计天数</span>
+                  <strong>{{ atlasData?.total_days || 0 }} <em>天</em></strong>
+                </div>
+                <div class="atlas-metric-card">
+                  <span>规划地点</span>
+                  <strong>{{ atlasData?.total_stops || 0 }} <em>处</em></strong>
+                </div>
+                <div class="atlas-metric-card highlight">
+                  <span>足迹总里程</span>
+                  <strong>{{ formatDistance(atlasData?.total_distance_m) || '0 km' }}</strong>
+                </div>
+              </div>
+
+              <!-- 行程列表与筛选 -->
+              <div class="atlas-trip-scroll">
+                <div class="atlas-list-title">
+                  <span>全部足迹路线</span>
+                  <small v-if="selectedAtlasTripID">已聚焦 1 条路线 · <a href="javascript:void(0)" @click="clearSelectedAtlasTrip">重置全景</a></small>
+                </div>
+
+                <div v-if="atlasLoading" class="atlas-loading">
+                  <span class="loading-dot"></span>
+                  <span>正在汇总各行程轨迹…</span>
+                </div>
+                <div v-else-if="!atlasData?.trips?.length" class="atlas-empty">
+                  <span>暂无纳入足迹漫游的行程</span>
+                  <small>在行程卡片菜单或行程编辑中勾选“在足迹漫游中汇总显示”即可汇聚到此</small>
+                </div>
+                <div v-else class="atlas-trip-cards">
+                  <article
+                    v-for="(item, idx) in atlasData.trips"
+                    :key="item.id"
+                    class="atlas-trip-card"
+                    :class="{ active: selectedAtlasTripID === item.id }"
+                    :style="{ '--trip-accent': ATLAS_PALETTE[idx % ATLAS_PALETTE.length] }"
+                    @click="selectAtlasTrip(item)"
+                  >
+                    <span class="atlas-color-indicator"></span>
+                    <div class="atlas-trip-info">
+                      <strong>{{ item.title }}</strong>
+                      <span>{{ formatDateRange(item.start_date, item.end_date) }} · {{ item.days_count }}天 · {{ item.stops_count }}点</span>
+                      <small v-if="item.distance_m > 0">路线里程 ~{{ formatDistance(item.distance_m) }}</small>
+                    </div>
+                    <div class="atlas-card-actions">
+                      <button type="button" class="atlas-goto-btn" title="进入该行程规划地图" @click.stop="gotoTripFromAtlas(item.id)">
+                        <span>直达</span>
+                      </button>
+                    </div>
+                  </article>
+                </div>
+              </div>
+            </aside>
           </section>
 
           <section v-else class="journey-workspace" aria-label="地图工作区">
@@ -3130,6 +3643,15 @@ onUnmounted(() => {
             <p v-if="tripDetailsDateError" class="trip-details-error" role="alert">{{ tripDetailsDateError }}</p>
             <div v-if="tripDetailsBlockingDays.length" class="trip-details-error" role="alert"><strong>不能缩短到当前日期范围</strong><span v-for="day in tripDetailsBlockingDays" :key="day.id">{{ formatDate(day.date) }} 仍有 {{ planningPointCount(day) }} 个规划点。</span><small>请先移动这些规划点，或恢复结束日期。</small></div>
             <p v-if="tripDetailsDateHint" class="trip-details-hint"><IonIcon :icon="createOutline" /> {{ tripDetailsDateHint }}</p>
+            <div class="trip-details-atlas-toggle">
+              <label class="atlas-checkbox-label">
+                <input type="checkbox" v-model="tripDetailsShowInAtlasDraft" />
+                <span class="atlas-checkbox-text">
+                  <strong>在足迹漫游中汇总显示此行程</strong>
+                  <small>开启后，本行程的轨迹路线与代表性地标将汇聚在全景“足迹漫游”总图中</small>
+                </span>
+              </label>
+            </div>
             <p v-if="tripDetailsDateChanged" class="trip-details-note">日期变化后，受影响规划点的天气快照会清除；已有路线不会自动重新规划。</p>
             <div class="modal-actions"><button type="button" :disabled="tripDetailsSaving" @click="cancelEditTripDetails">取消</button><button class="primary" type="submit" :disabled="!tripDetailsCanSave">{{ tripDetailsSaving ? '保存中…' : '保存更改' }}</button></div>
           </form>

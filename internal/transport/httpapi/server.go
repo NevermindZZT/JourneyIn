@@ -85,6 +85,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/schema/trip/v1.json", s.schemaTrip)
 	mux.HandleFunc("POST /api/v1/validate", s.validateTrip)
 	mux.HandleFunc("GET /api/v1/trips", s.listTrips)
+	mux.HandleFunc("GET /api/v1/atlas", s.getAtlasSummary)
 	mux.HandleFunc("POST /api/v1/trips", s.createTrip)
 	mux.HandleFunc("POST /api/v1/import", s.importTrip)
 	mux.HandleFunc("GET /api/v1/trips/{id}", s.getTrip)
@@ -357,6 +358,7 @@ func (s *Server) staticHandler() http.Handler {
 }
 func tripSummary(r store.TripRecord) map[string]any {
 	var document struct {
+		ShowInAtlas *bool `json:"show_in_atlas"`
 		Days []struct {
 			Stops []any `json:"stops"`
 		} `json:"days"`
@@ -366,7 +368,11 @@ func tripSummary(r store.TripRecord) map[string]any {
 	for _, day := range document.Days {
 		stops += len(day.Stops)
 	}
-	return map[string]any{"id": r.ID, "title": r.Title, "status": r.Status, "start_date": r.StartDate, "end_date": r.EndDate, "timezone": r.Timezone, "revision": r.Revision, "days": len(document.Days), "stops": stops, "content_hash": r.ContentHash, "created_at": r.CreatedAt, "updated_at": r.UpdatedAt}
+	showInAtlas := true
+	if document.ShowInAtlas != nil {
+		showInAtlas = *document.ShowInAtlas
+	}
+	return map[string]any{"id": r.ID, "title": r.Title, "status": r.Status, "start_date": r.StartDate, "end_date": r.EndDate, "timezone": r.Timezone, "revision": r.Revision, "days": len(document.Days), "stops": stops, "show_in_atlas": showInAtlas, "content_hash": r.ContentHash, "created_at": r.CreatedAt, "updated_at": r.UpdatedAt}
 }
 func tripResponse(r store.TripRecord) map[string]any {
 	result := tripSummary(r)

@@ -22,6 +22,7 @@
       "additionalProperties": false
     },
     "description_markdown": { "type": "string", "maxLength": 20000 },
+    "show_in_atlas": { "type": "boolean" },
     "links": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/link" } },
     "map": { "$ref": "#/$defs/map_config" },
     "days": {

@@ -22,6 +22,7 @@ type Trip struct {
 	Timezone            string    `json:"timezone"`
 	DateRange           DateRange `json:"date_range"`
 	DescriptionMarkdown string    `json:"description_markdown,omitempty"`
+	ShowInAtlas         *bool     `json:"show_in_atlas,omitempty"`
 	Links               []Link    `json:"links,omitempty"`
 	Map                 MapConfig `json:"map,omitempty"`
 	Days                []Day     `json:"days"`

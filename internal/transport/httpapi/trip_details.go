@@ -11,8 +11,9 @@ import (
 )
 
 type updateTripDetailsBody struct {
-	Title     *string           `json:"title"`
-	DateRange *domain.DateRange `json:"date_range"`
+	Title       *string           `json:"title"`
+	DateRange   *domain.DateRange `json:"date_range"`
+	ShowInAtlas *bool             `json:"show_in_atlas"`
 }
 
 func (s *Server) updateTripDetails(w http.ResponseWriter, r *http.Request) {
@@ -31,7 +32,7 @@ func (s *Server) updateTripDetails(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
 		return
 	}
-	record, changes, replayed, err := s.trips.UpdateTripDetailsIdempotent(r.Context(), r.PathValue("id"), expected, application.UpdateTripDetailsInput{Title: body.Title, DateRange: body.DateRange}, idempotencyKey, "rest:update_trip_details")
+	record, changes, replayed, err := s.trips.UpdateTripDetailsIdempotent(r.Context(), r.PathValue("id"), expected, application.UpdateTripDetailsInput{Title: body.Title, DateRange: body.DateRange, ShowInAtlas: body.ShowInAtlas}, idempotencyKey, "rest:update_trip_details")
 	if err != nil {
 		writeTripDetailsError(w, err)
 		return
