@@ -253,7 +253,9 @@ const sheetDragStyle = computed<Record<string, string> | undefined>(() => {
 const navigationApplying = ref(false)
 let navigationSequence = 0
 const mapType = ref<'normal' | 'satellite'>((localStorage.getItem('journeyin.mapType') as 'normal' | 'satellite') || 'normal')
-const showMapLabels = ref(localStorage.getItem('journeyin.mapLabels') !== 'false')
+type MapLabelMode = 'auto' | 'always' | 'none'
+const mapLabelMode = ref<MapLabelMode>((localStorage.getItem('journeyin.mapLabelMode') as MapLabelMode) || (localStorage.getItem('journeyin.mapLabels') === 'false' ? 'none' : 'auto'))
+const showMapLabels = computed(() => mapLabelMode.value !== 'none')
 const mapPickMode = ref(false)
 const mapPickOpen = ref(false)
 const mapPickTitle = ref('')
@@ -1728,6 +1730,7 @@ async function renderBaiduMap() {
       mapInstance = new mapAPI.Map(mapContainer.value, { enableIconClick: false, fixCenterWhenResize: true })
       mapInstance.enableScrollWheelZoom()
       mapInstance.addEventListener?.('click', handleMapClick)
+      mapInstance.addEventListener?.('zoomend', handleMapZoomChange)
       mapInstance.addEventListener?.('tilesloaded', () => { mapReady.value = true; mapError.value = ''; mapWarning.value = '' })
       if (mapReadyTimer !== null) window.clearTimeout(mapReadyTimer)
       mapReadyTimer = window.setTimeout(() => {
@@ -1736,6 +1739,7 @@ async function renderBaiduMap() {
     }
     mapInstance.clearOverlays()
     const points: any[] = []
+    const visibleLabelIDs = computeVisibleLabelStopIDs(mapStops.value)
     for (const stop of mapStops.value) {
       const point = mapPointFor(stop)
       if (!point || point.crs !== 'bd09ll') continue
@@ -1743,6 +1747,7 @@ async function renderBaiduMap() {
       points.push(mapPoint)
       const marker = new mapAPI.Marker(mapPoint)
       const carryOver = carryOverStop.value?.id === stop.id && selectedDay.value !== 'all'
+      const isTarget = selectedTarget.value?.id === stop.id
       marker.__journeyinStopId = stop.id
       marker.__journeyinCarryOver = carryOver
       marker.addEventListener?.('click', () => {
@@ -1754,18 +1759,25 @@ async function renderBaiduMap() {
         }
         selectStop(stop)
       })
-      attachMapLabel(marker, carryOver ? '前日终点 · ' + stop.title : stop.title, stopDate(stop))
+      const badge = stopDayBadge(stop)
+      const shouldShow = visibleLabelIDs.has(stop.id)
+      attachMapLabel(marker, carryOver ? '前日终点 · ' + stop.title : stop.title, carryOver ? '' : badge, isTarget, shouldShow)
       mapInstance.addOverlay(marker)
     }
-    if (selectedStop.value?.children?.length) for (const child of selectedStop.value.children) {
-      const point = mapPointFor(child)
-      if (!point || point.crs !== 'bd09ll') continue
-      const mapPoint = new mapAPI.Point(point.lng, point.lat)
-      const marker = new mapAPI.Marker(mapPoint)
-      marker.__journeyinSubStopId = child.id
-      marker.addEventListener?.('click', () => { if (mapPickMode.value) { handleMapClick({ point: mapPoint }); return }; selectSubStop(child, selectedStop.value!) })
-      attachMapLabel(marker, child.title, stopDate(child))
-      mapInstance.addOverlay(marker)
+    if (selectedStop.value?.children?.length) {
+      const childVisibleIDs = computeVisibleLabelStopIDs(selectedStop.value.children)
+      for (const child of selectedStop.value.children) {
+        const point = mapPointFor(child)
+        if (!point || point.crs !== 'bd09ll') continue
+        const mapPoint = new mapAPI.Point(point.lng, point.lat)
+        const marker = new mapAPI.Marker(mapPoint)
+        const isChildTarget = selectedTarget.value?.id === child.id
+        marker.__journeyinSubStopId = child.id
+        marker.addEventListener?.('click', () => { if (mapPickMode.value) { handleMapClick({ point: mapPoint }); return }; selectSubStop(child, selectedStop.value!) })
+        const shouldShow = childVisibleIDs.has(child.id)
+        attachMapLabel(marker, child.title, '', isChildTarget, shouldShow)
+        mapInstance.addOverlay(marker)
+      }
     }
     for (const day of visibleDays.value) for (const leg of day.legs || []) {
       const snapshot = chooseSnapshot(leg, 'baidu', planningMode.value)
@@ -1776,7 +1788,7 @@ async function renderBaiduMap() {
         polyline.__journeyinLegId = leg.id
         polyline.addEventListener?.('click', () => { selectedLegId.value = leg.id })
         mapInstance.addOverlay(polyline)
-        attachRouteLabel(snapshot)
+        attachRouteLabel(snapshot, leg.id)
       }
     }
     const focusTarget = selectedTarget.value
@@ -1851,18 +1863,46 @@ function safeMapError(cause: unknown, fallback: string) { const message = cause 
 function amapPointToArray(point: Coord) { return [point.lng, point.lat] }
 function addAMapOverlay(overlay: any) { mapInstance?.add?.(overlay); mapOverlays.push(overlay); return overlay }
 function clearAMapOverlays() { mapInstance?.clearMap?.(); mapOverlays = [] }
-function attachAMapLabel(marker: any, title: string, date: string) {
-  if (!showMapLabels.value || typeof marker.setLabel !== 'function') return
-  const content = '<span style="display:inline-block;padding:5px 9px;border:1px solid #0b2f35;border-radius:8px;color:#ffffff;background:#173f47ee;box-shadow:0 3px 10px #0006;font-size:12px;font-weight:700;line-height:16px;white-space:nowrap;text-shadow:0 1px 2px #0008;">' + escapeHTML(title + ' · ' + date) + '</span>'
+function attachAMapLabel(marker: any, title: string, dayBadge = '', isTarget = false, shouldShow = true) {
+  if (typeof marker.setLabel !== 'function') return
+  if (!shouldShow) {
+    try { marker.setLabel({ content: '' }) } catch { /* best effort */ }
+    return
+  }
+  const badgeHtml = dayBadge ? '<span style="display:inline-block;margin-left:5px;padding:1px 5px;background:#0284c7;color:#fff;border-radius:4px;font-size:10px;line-height:13px;font-weight:700;">' + escapeHTML(dayBadge) + '</span>' : ''
+  const highlightStyle = isTarget ? 'border-color:#ff9a78;background:#13373fee;box-shadow:0 0 0 2px #ff9a7888, 0 4px 14px #0008;z-index:999;' : ''
+  const content = '<span class="journey-map-marker-label' + (isTarget ? ' is-target' : '') + '" style="display:inline-flex;align-items:center;padding:4px 8px;border:1px solid #0b2f35;border-radius:8px;color:#ffffff;background:#173f47ee;box-shadow:0 3px 10px #0006;font-size:12px;font-weight:700;line-height:16px;white-space:nowrap;text-shadow:0 1px 2px #0008;' + highlightStyle + '">' + escapeHTML(title) + badgeHtml + '</span>'
   marker.setLabel({ content, direction: 'right', offset: new mapAPI.Pixel(12, -6) })
+  if (isTarget && typeof marker.setTop === 'function') {
+    marker.setTop(true)
+  }
 }
-function attachAMapRouteLabel(snapshot: { geometry?: Array<[number, number]> | Array<Coord>; coordinate_system?: string; distance_m?: number; duration_s?: number }) {
-  if (!showMapLabels.value || !snapshot.geometry?.length || typeof mapAPI?.Text !== 'function') return
+function attachAMapRouteLabel(snapshot: { geometry?: Array<[number, number]> | Array<Coord>; coordinate_system?: string; distance_m?: number; duration_s?: number }, legId = '') {
+  if (!snapshot.geometry?.length || typeof mapAPI?.Text !== 'function') return
+  const isLegSelected = Boolean(legId && selectedLegId.value === legId)
+  if (!shouldShowRouteLabel(snapshot.distance_m, isLegSelected)) return
   const text = [formatDistance(snapshot.distance_m), formatDuration(snapshot.duration_s)].filter(Boolean).join(' · ')
   if (!text) return
   const middle = mapRoutePointFor(snapshot.geometry[Math.floor(snapshot.geometry.length / 2)], snapshot.coordinate_system || 'gcj02', 'amap')
   if (!middle) return
-  addAMapOverlay(new mapAPI.Text({ text, position: amapPointToArray(middle), style: { backgroundColor: '#24695cdd', color: '#ffffff', border: '0', borderRadius: '999px', padding: '4px 8px', fontSize: '12px', lineHeight: '16px', whiteSpace: 'nowrap', boxShadow: '0 3px 10px #0003' } }))
+  addAMapOverlay(new mapAPI.Text({
+    text,
+    position: amapPointToArray(middle),
+    collision: true,
+    allowCollision: false,
+    zIndex: isLegSelected ? 120 : 60,
+    style: {
+      backgroundColor: isLegSelected ? '#e56a4ded' : '#24695cdd',
+      color: '#ffffff',
+      border: '0',
+      borderRadius: '999px',
+      padding: '4px 8px',
+      fontSize: '11px',
+      lineHeight: '15px',
+      whiteSpace: 'nowrap',
+      boxShadow: '0 3px 10px #0003',
+    }
+  }))
 }
 function focusAMapPoint(stop: Stop | SubStop) {
   if (!mapInstance || selectedMapProvider.value !== 'amap') return
@@ -1965,6 +2005,7 @@ async function renderAMapMap() {
         const lat = Number(lnglat?.lat ?? lnglat?.getLat?.())
         if (Number.isFinite(lng) && Number.isFinite(lat)) handleMapClick({ point: { lng, lat, crs: 'gcj02' } })
       })
+      mapInstance.on?.('zoomend', handleMapZoomChange)
       mapInstance.on?.('complete', () => { mapReady.value = true; mapError.value = ''; mapWarning.value = '' })
       mapInstance.on?.('error', (err: any) => {
         console.error('AMap runtime error:', err)
@@ -1977,6 +2018,7 @@ async function renderAMapMap() {
     mapInstance.resize?.()
     clearAMapOverlays()
     const points: any[] = []
+    const visibleLabelIDs = computeVisibleLabelStopIDs(mapStops.value)
     for (const stop of mapStops.value) {
       const point = pointForProvider(stop, 'amap')
       if (!point) continue
@@ -1984,6 +2026,7 @@ async function renderAMapMap() {
       points.push(mapPoint)
       const marker = addAMapOverlay(new mapAPI.Marker({ position: mapPoint, title: stop.title, anchor: 'bottom-center' }))
       const carryOver = carryOverStop.value?.id === stop.id && selectedDay.value !== 'all'
+      const isTarget = selectedTarget.value?.id === stop.id
       marker.__journeyinStopId = stop.id
       marker.__journeyinCarryOver = carryOver
       marker.on?.('click', () => {
@@ -1995,16 +2038,23 @@ async function renderAMapMap() {
         }
         selectStop(stop)
       })
-      attachAMapLabel(marker, carryOver ? '前日终点 · ' + stop.title : stop.title, stopDate(stop))
+      const badge = stopDayBadge(stop)
+      const shouldShow = visibleLabelIDs.has(stop.id)
+      attachAMapLabel(marker, carryOver ? '前日终点 · ' + stop.title : stop.title, carryOver ? '' : badge, isTarget, shouldShow)
     }
-    if (selectedStop.value?.children?.length) for (const child of selectedStop.value.children) {
-      const point = pointForProvider(child, 'amap')
-      if (!point) continue
-      const mapPoint = amapPointToArray(point)
-      const marker = addAMapOverlay(new mapAPI.Marker({ position: mapPoint, title: child.title, anchor: 'bottom-center' }))
-      marker.__journeyinSubStopId = child.id
-      marker.on?.('click', () => { if (mapPickMode.value) { handleMapClick({ point: { lng: point.lng, lat: point.lat, crs: 'gcj02' } }); return }; selectSubStop(child, selectedStop.value!) })
-      attachAMapLabel(marker, child.title, stopDate(child))
+    if (selectedStop.value?.children?.length) {
+      const childVisibleIDs = computeVisibleLabelStopIDs(selectedStop.value.children)
+      for (const child of selectedStop.value.children) {
+        const point = pointForProvider(child, 'amap')
+        if (!point) continue
+        const mapPoint = amapPointToArray(point)
+        const marker = addAMapOverlay(new mapAPI.Marker({ position: mapPoint, title: child.title, anchor: 'bottom-center' }))
+        const isChildTarget = selectedTarget.value?.id === child.id
+        marker.__journeyinSubStopId = child.id
+        marker.on?.('click', () => { if (mapPickMode.value) { handleMapClick({ point: { lng: point.lng, lat: point.lat, crs: 'gcj02' } }); return }; selectSubStop(child, selectedStop.value!) })
+        const shouldShow = childVisibleIDs.has(child.id)
+        attachAMapLabel(marker, child.title, '', isChildTarget, shouldShow)
+      }
     }
     for (const day of visibleDays.value) for (const leg of day.legs || []) {
       const snapshot = chooseSnapshot(leg, 'amap', planningMode.value)
@@ -2014,7 +2064,7 @@ async function renderAMapMap() {
       const polyline = addAMapOverlay(new mapAPI.Polyline({ path: line, strokeColor: '#24695c', strokeWeight: 5, strokeOpacity: .82, lineJoin: 'round', showDir: true, zIndex: 50 }))
       polyline.__journeyinLegId = leg.id
       polyline.on?.('click', () => { selectedLegId.value = leg.id })
-      attachAMapRouteLabel(snapshot)
+      attachAMapRouteLabel(snapshot, leg.id)
     }
     const focusTarget = selectedTarget.value
     if (focusTarget) { await nextTick(); if (renderVersion !== mapRenderVersion) return; focusAMapPoint(focusTarget) }
@@ -2082,7 +2132,129 @@ function setMapType(type: 'normal' | 'satellite') {
   localStorage.setItem('journeyin.mapType', mapType.value)
   applyMapType()
 }
-function toggleMapLabels() { showMapLabels.value = !showMapLabels.value; localStorage.setItem('journeyin.mapLabels', String(showMapLabels.value)); void renderMap() }
+function isMobileViewport(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches
+}
+
+function stopDayBadge(stop: Stop | SubStop): string {
+  if (!tripDocument.value?.days?.length) return ''
+  const day = dayForStop(stop)
+  if (!day) return ''
+  const index = tripDocument.value.days.findIndex(d => d.id === day.id)
+  return index >= 0 ? 'D' + (index + 1) : ''
+}
+
+function getMapPointScreenPixel(point: Coord): { x: number; y: number } | null {
+  if (!mapInstance || !mapAPI) return null
+  try {
+    if (selectedMapProvider.value === 'amap') {
+      const lnglat = Array.isArray(point) ? new mapAPI.LngLat(Number(point[0]), Number(point[1])) : new mapAPI.LngLat(Number(point.lng), Number(point.lat))
+      const pixel = mapInstance.lngLatToContainer?.(lnglat)
+      if (Array.isArray(pixel)) return { x: Number(pixel[0]), y: Number(pixel[1]) }
+      if (pixel && typeof pixel.getX === 'function') return { x: Number(pixel.getX()), y: Number(pixel.getY()) }
+      return pixel && typeof pixel.x === 'number' ? { x: pixel.x, y: pixel.y } : null
+    }
+    const pt = new mapAPI.Point(point.lng, point.lat)
+    const pixel = mapInstance.pointToPixel?.(pt)
+    return pixel && typeof pixel.x === 'number' ? { x: pixel.x, y: pixel.y } : null
+  } catch {
+    return null
+  }
+}
+
+function computeVisibleLabelStopIDs(stops: (Stop | SubStop)[]): Set<string> {
+  const visibleIDs = new Set<string>()
+  if (mapLabelMode.value === 'none') {
+    return visibleIDs
+  }
+  if (mapLabelMode.value === 'always' || !isMobileViewport()) {
+    for (const stop of stops) visibleIDs.add(stop.id)
+    return visibleIDs
+  }
+
+  // 手机端 auto 模式：有空间就显示，空间不够就优化！
+  const targetID = selectedTarget.value?.id
+  if (targetID) {
+    visibleIDs.add(targetID)
+  }
+
+  // 如果点数较少（<= 7 个点），视野开阔，全量显示
+  if (stops.length <= 7) {
+    for (const stop of stops) visibleIDs.add(stop.id)
+    return visibleIDs
+  }
+
+  // 点数较多时，通过真实屏幕像素距离进行几何避让
+  const displayedPixels: { x: number; y: number }[] = []
+  if (targetID) {
+    const targetStop = stops.find(s => s.id === targetID)
+    if (targetStop) {
+      const pt = pointForProvider(targetStop, selectedMapProvider.value)
+      if (pt) {
+        const pix = getMapPointScreenPixel(pt)
+        if (pix) displayedPixels.push(pix)
+      }
+    }
+  }
+
+  for (const stop of stops) {
+    if (stop.id === targetID) continue
+    const pt = pointForProvider(stop, selectedMapProvider.value)
+    if (!pt) continue
+    const pix = getMapPointScreenPixel(pt)
+    if (!pix) {
+      visibleIDs.add(stop.id)
+      continue
+    }
+
+    let conflict = false
+    for (const occupied of displayedPixels) {
+      const dist = Math.hypot(pix.x - occupied.x, pix.y - occupied.y)
+      if (dist < 60) {
+        conflict = true
+        break
+      }
+    }
+
+    if (!conflict) {
+      visibleIDs.add(stop.id)
+      displayedPixels.push(pix)
+    }
+  }
+
+  return visibleIDs
+}
+
+function shouldShowRouteLabel(distanceM: number | undefined, isLegSelected: boolean): boolean {
+  if (mapLabelMode.value === 'none') return false
+  if (mapLabelMode.value === 'always') return true
+  if (isLegSelected) return true
+  if (!isMobileViewport()) return true
+  // 短程行程（< 500m）在小屏下避让，长途行程正常显示
+  const isShortDistance = typeof distanceM === 'number' && distanceM > 0 && distanceM < 500
+  return !isShortDistance
+}
+
+let mapZoomDebounceTimer: number | null = null
+function handleMapZoomChange() {
+  if (mapLabelMode.value !== 'auto' || !isMobileViewport()) return
+  if (mapZoomDebounceTimer !== null) window.clearTimeout(mapZoomDebounceTimer)
+  mapZoomDebounceTimer = window.setTimeout(() => {
+    void renderMap()
+  }, 120)
+}
+
+function setMapLabelMode(mode: MapLabelMode) {
+  mapLabelMode.value = mode
+  localStorage.setItem('journeyin.mapLabelMode', mode)
+  localStorage.setItem('journeyin.mapLabels', mode === 'none' ? 'false' : 'true')
+  void renderMap()
+}
+
+function toggleMapLabels() {
+  const nextMode: MapLabelMode = mapLabelMode.value === 'none' ? 'auto' : 'none'
+  setMapLabelMode(nextMode)
+}
 function toggleMapPick() {
   if (readOnlyView.value) return
   if (!mapReady.value || !tripDocument.value) { error.value = '地图加载完成后才能使用地图选点'; return }
@@ -2160,20 +2332,54 @@ async function saveMapPick() {
     actionLoading.value = false
   }
 }
-function attachMapLabel(marker: any, title: string, date: string) {
-  if (!showMapLabels.value || !mapAPI?.Label || !mapAPI?.Size || typeof marker.setLabel !== 'function') return
-  const label = new mapAPI.Label(title + ' · ' + date, { offset: new mapAPI.Size(16, -20) })
-  label.setStyle?.({ color: '#172624', backgroundColor: '#ffffffdd', border: '1px solid #6f797a', borderRadius: '8px', padding: '4px 7px', fontSize: '12px', lineHeight: '16px', whiteSpace: 'nowrap', boxShadow: '0 3px 10px #0003' })
+function attachMapLabel(marker: any, title: string, dayBadge = '', isTarget = false, shouldShow = true) {
+  if (!mapAPI?.Label || !mapAPI?.Size || typeof marker.setLabel !== 'function') return
+  if (!shouldShow) {
+    try { marker.setLabel(null) } catch { /* best effort */ }
+    return
+  }
+  const text = dayBadge ? title + ' · ' + dayBadge : title
+  const label = new mapAPI.Label(text, { offset: new mapAPI.Size(16, -20) })
+  const border = isTarget ? '2px solid #e56a4d' : '1px solid #6f797a'
+  label.setStyle?.({
+    color: '#172624',
+    backgroundColor: '#fffffffa',
+    border,
+    borderRadius: '8px',
+    padding: '4px 7px',
+    fontSize: '12px',
+    fontWeight: '700',
+    lineHeight: '16px',
+    whiteSpace: 'nowrap',
+    boxShadow: isTarget ? '0 0 0 2px #ff9a7855, 0 4px 12px #0004' : '0 3px 10px #0003',
+    zIndex: isTarget ? 999 : 10,
+  })
   marker.setLabel(label)
+  if (isTarget && typeof marker.setTop === 'function') {
+    marker.setTop(true)
+  }
 }
 function formatDistance(meters?: number) { if (!meters || meters < 0) return ''; return meters < 1000 ? Math.round(meters) + ' m' : (Math.round(meters / 100) / 10).toFixed(1).replace(/\.0$/, '') + ' km' }
 function formatDuration(seconds?: number) { if (!seconds || seconds < 0) return ''; const minutes = Math.max(1, Math.round(seconds / 60)); return minutes < 60 ? minutes + ' 分钟' : Math.floor(minutes / 60) + ' 小时' + (minutes % 60 ? ' ' + minutes % 60 + ' 分钟' : '') }
-function attachRouteLabel(snapshot: { geometry?: Array<[number, number]> | Array<Coord>; distance_m?: number; duration_s?: number; coordinate_system?: string }) {
-  if (!showMapLabels.value || !mapAPI?.Label || !mapAPI?.Size || !snapshot.geometry?.length) return
+function attachRouteLabel(snapshot: { geometry?: Array<[number, number]> | Array<Coord>; distance_m?: number; duration_s?: number; coordinate_system?: string }, legId = '') {
+  if (!mapAPI?.Label || !mapAPI?.Size || !snapshot.geometry?.length) return
+  const isLegSelected = Boolean(legId && selectedLegId.value === legId)
+  if (!shouldShowRouteLabel(snapshot.distance_m, isLegSelected)) return
   const text = [formatDistance(snapshot.distance_m), formatDuration(snapshot.duration_s)].filter(Boolean).join(' · '); if (!text) return
   const middle = mapRoutePoint(snapshot.geometry[Math.floor(snapshot.geometry.length / 2)], snapshot.coordinate_system || 'bd09ll'); if (!middle) return
   const label = new mapAPI.Label(text, { offset: new mapAPI.Size(-24, -10) })
-  label.setStyle?.({ color: '#ffffff', backgroundColor: '#24695cdd', border: '0', borderRadius: '999px', padding: '4px 8px', fontSize: '12px', lineHeight: '16px', whiteSpace: 'nowrap', boxShadow: '0 3px 10px #0003' })
+  label.setStyle?.({
+    color: '#ffffff',
+    backgroundColor: isLegSelected ? '#e56a4ded' : '#24695cdd',
+    border: '0',
+    borderRadius: '999px',
+    padding: '4px 8px',
+    fontSize: '11px',
+    lineHeight: '15px',
+    whiteSpace: 'nowrap',
+    boxShadow: '0 3px 10px #0003',
+    zIndex: isLegSelected ? 120 : 60,
+  })
   label.setPosition?.(new mapAPI.Point(middle.lng, middle.lat)); mapInstance.addOverlay(label)
 }
 function applyTripPayload(payload: { document?: TripDocument; title?: string; start_date?: string; end_date?: string; revision?: number; stops?: number; days?: number; updated_at?: string }) {
@@ -2802,9 +3008,10 @@ onUnmounted(() => {
               <div class="workspace-status"><span class="status-dot" :class="{ ready: keyConfigured && mapReady && !mapError }"></span><span>{{ !tripDocument ? '读取行程…' : !keyConfigured ? '离线数据可用' : mapError ? mapProviderLabel + '不可用' : mapReady ? mapProviderLabel + '已连接' : mapProviderLabel + '加载中' }} · {{ visibleStops.length }} 个规划点<span v-if="unlocatedMainStops.length"> · 待定位 {{ unlocatedMainStops.length }}</span></span></div>
               <div v-if="mobileMapToolsOpen" class="map-tools-card" role="dialog" aria-label="地图选项">
                 <div class="map-tools-heading"><div><span class="eyebrow">MAP OPTIONS</span><strong>地图选项</strong></div><button type="button" aria-label="关闭地图选项" @click="toggleMobileMapTools"><IonIcon :icon="closeOutline" /></button></div>
-                <div class="map-tool-row"><span>底图 Provider</span><div class="provider-segment"><button type="button" :class="{ active: selectedMapProvider === 'baidu' }" @click="setMapProvider('baidu')">百度</button><button type="button" :class="{ active: selectedMapProvider === 'amap' }" @click="setMapProvider('amap')">高德</button></div></div>
+                <div class="map-tool-row"><span>底图 Provider</span><div class="provider-segment"><button type="button" :class="{ active: selectedMapProvider === 'amap' }" @click="setMapProvider('amap')">高德</button><button type="button" :class="{ active: selectedMapProvider === 'baidu' }" @click="setMapProvider('baidu')">百度</button></div></div>
                 <div class="map-tool-row"><span>图层</span><div class="provider-segment layer-segment" role="group" aria-label="地图图层"><button type="button" :class="{ active: mapType === 'normal' }" :aria-pressed="mapType === 'normal'" @click="setMapType('normal')">标准图</button><button type="button" :class="{ active: mapType === 'satellite' }" :aria-pressed="mapType === 'satellite'" @click="setMapType('satellite')">卫星图</button></div></div>
-                <div class="map-tool-row"><span>地图标签</span><button class="tool-value-button" type="button" :class="{ active: showMapLabels }" @click="toggleMapLabels">{{ showMapLabels ? '已显示' : '已隐藏' }}</button></div>
+                <div class="map-tool-row"><span>地图标签</span><div class="provider-segment label-segment" role="group" aria-label="地图标签显示模式"><button type="button" :class="{ active: mapLabelMode === 'auto' }" @click="setMapLabelMode('auto')">自动</button><button type="button" :class="{ active: mapLabelMode === 'always' }" @click="setMapLabelMode('always')">全部</button><button type="button" :class="{ active: mapLabelMode === 'none' }" @click="setMapLabelMode('none')">隐藏</button></div></div>
+                <p class="map-tool-hint">{{ mapLabelMode === 'auto' ? '自动：有空间时显示，密集时自动防重叠' : mapLabelMode === 'always' ? '全部：始终展开全部地名与路线标签' : '隐藏：仅保留图钉，隐藏浮动文字' }}</p>
                 <button v-if="!readOnlyView" class="map-pick-action" type="button" :disabled="!mapReady || !tripDocument" @click="toggleMapPick"><IonIcon :icon="mapOutline" /> {{ mapPickMode ? mapPickTargetID ? '取消更新选点' : '取消地图选点' : '地图选点' }}</button>
               </div>
 
