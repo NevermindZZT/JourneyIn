@@ -68,16 +68,16 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .map-warning { position: absolute; z-index: 30; top: 70px; right: 16px; display: flex; max-width: min(460px, calc(100vw - 32px)); align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--line)); border-radius: 12px; color: var(--ink); background: color-mix(in srgb, var(--surface) 92%, transparent); box-shadow: 0 8px 24px color-mix(in srgb, var(--ink) 12%, transparent); backdrop-filter: blur(14px); font-size: 11px; }
 .map-warning span { min-width: 0; flex: 1; }
 .map-warning button { min-height: 30px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--p); background: var(--surface); font-size: 10px; font-weight: 800; }
-.map-notices { position: absolute; z-index: 50; top: 18px; right: 18px; width: min(470px, calc(100vw - 36px)); pointer-events: none; }
+.map-notices { position: absolute; z-index: 1000 !important; top: 18px; right: 18px; width: min(470px, calc(100vw - 36px)); pointer-events: none; }
 .map-notices > * { pointer-events: auto; }
-.global-error, .share-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 13px; box-shadow: 0 8px 24px color-mix(in srgb, var(--ink) 14%, transparent); backdrop-filter: blur(15px); font-size: 11px; }
-.global-error { color: var(--md-error); background: color-mix(in srgb, var(--md-error) 8%, var(--surface)); }
-.global-error span { min-width: 0; flex: 1; }
-.global-error button, .share-banner button { border: 0; color: inherit; background: transparent; font-size: 20px; }
-.global-notice { display: flex; align-items: center; justify-content: space-between; gap: 9px; margin-bottom: 8px; padding: 11px 13px; border: 1px solid color-mix(in srgb, var(--p) 35%, var(--line)); border-radius: 13px; color: var(--p); background: color-mix(in srgb, var(--p) 9%, var(--surface)); box-shadow: 0 8px 24px color-mix(in srgb, var(--ink) 14%, transparent); backdrop-filter: blur(15px); font-size: 11px; }
+.global-error, .share-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 13px; box-shadow: 0 12px 30px color-mix(in srgb, var(--ink) 20%, transparent); backdrop-filter: blur(18px); font-size: 11px; }
+.global-error { color: var(--md-error); background: color-mix(in srgb, var(--md-error) 10%, var(--surface)); border-color: color-mix(in srgb, var(--md-error) 40%, var(--line)); }
+.global-error span { min-width: 0; flex: 1; font-weight: 600; line-height: 1.4; }
+.notice-close-btn { display: grid; place-items: center; width: 28px; height: 28px; min-width: 28px; padding: 0; border: 0; border-radius: 50%; color: inherit; background: color-mix(in srgb, var(--ink) 10%, transparent); font-size: 18px; line-height: 1; cursor: pointer; transition: background 0.15s ease, transform 0.15s ease; }
+.notice-close-btn:hover { background: color-mix(in srgb, var(--ink) 20%, transparent); transform: scale(1.1); }
+.global-notice { display: flex; align-items: center; justify-content: space-between; gap: 9px; margin-bottom: 8px; padding: 11px 13px; border: 1px solid color-mix(in srgb, var(--p) 35%, var(--line)); border-radius: 13px; color: var(--p); background: color-mix(in srgb, var(--p) 9%, var(--surface)); box-shadow: 0 12px 30px color-mix(in srgb, var(--ink) 18%, transparent); backdrop-filter: blur(18px); font-size: 11px; }
 .global-notice ion-icon { flex: 0 0 auto; font-size: 17px; }
-.global-notice span { min-width: 0; flex: 1; }
-.global-notice button { border: 0; color: inherit; background: transparent; font-size: 20px; }
+.global-notice span { min-width: 0; flex: 1; font-weight: 600; line-height: 1.4; }
 .share-banner { color: var(--p); background: color-mix(in srgb, var(--p) 10%, var(--surface)); }
 .share-banner > span { min-width: 0; display: grid; gap: 3px; }
 .share-banner a { overflow-wrap: anywhere; color: var(--p); }
@@ -288,7 +288,8 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .workspace-status > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warning, #b77918); box-shadow: 0 0 0 4px color-mix(in srgb, var(--warning, #b77918) 16%, transparent); }
 .status-dot.ready { background: var(--p); box-shadow: 0 0 0 4px color-mix(in srgb, var(--p) 16%, transparent); }
-.map-tools-card { position: absolute; z-index: 40; top: 76px; right: 18px; width: min(320px, calc(100vw - 36px)); padding: 15px; border: 1px solid color-mix(in srgb, var(--line) 76%, transparent); border-radius: 18px; color: var(--ink); background: color-mix(in srgb, var(--panel) 96%, transparent); box-shadow: 0 18px 50px color-mix(in srgb, var(--ink) 22%, transparent); backdrop-filter: blur(22px); }
+.map-tools-backdrop { position: absolute; inset: 0; z-index: 490; background: rgba(0, 0, 0, 0.12); backdrop-filter: blur(1.5px); }
+.map-tools-card { position: absolute; z-index: 500; top: 76px; right: 18px; width: min(320px, calc(100vw - 36px)); padding: 15px; border: 1px solid color-mix(in srgb, var(--line) 76%, transparent); border-radius: 18px; color: var(--ink); background: color-mix(in srgb, var(--panel) 96%, transparent); box-shadow: 0 18px 50px color-mix(in srgb, var(--ink) 22%, transparent); backdrop-filter: blur(22px); }
 .map-tools-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-bottom: 11px; border-bottom: 1px solid var(--line); }
 .map-tools-heading > div { display: grid; gap: 3px; }
 .map-tools-heading strong { font-size: 15px; }
@@ -541,6 +542,38 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
   .redesign-map-canvas .map-fallback { padding: 40px 40px 40px min(430px, 35vw); }
   .workspace-topbar { right: 18px; left: auto; }
   .workspace-back, .workspace-title { display: none; }
+
+  /* 规划点详情面板打开时，右上角工具栏、状态胶囊、地图选项卡片平滑向左避让，杜绝遮挡 */
+  .workspace-topbar, .workspace-status, .map-tools-card, .redesign-notices {
+    transition: right 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .journey-redesign.has-stop-selection .workspace-topbar {
+    right: calc(420px + 36px);
+  }
+  .journey-redesign.has-stop-selection .workspace-status {
+    right: calc(420px + 36px);
+  }
+  .journey-redesign.has-stop-selection .map-tools-card {
+    right: calc(420px + 36px);
+  }
+  .journey-redesign.has-stop-selection .redesign-notices {
+    right: calc(420px + 36px);
+  }
+}
+
+@media (min-width: 901px) and (max-width: 1120px) {
+  .journey-redesign.has-stop-selection .workspace-topbar {
+    right: calc(360px + 36px);
+  }
+  .journey-redesign.has-stop-selection .workspace-status {
+    right: calc(360px + 36px);
+  }
+  .journey-redesign.has-stop-selection .map-tools-card {
+    right: calc(360px + 36px);
+  }
+  .journey-redesign.has-stop-selection .redesign-notices {
+    right: calc(360px + 36px);
+  }
 }
 
 @media (max-width: 1120px) {

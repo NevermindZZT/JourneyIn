@@ -186,6 +186,33 @@ const selectedDay = ref<number | 'all'>('all')
 const loading = ref(false)
 const detailLoading = ref(false)
 const error = ref('')
+let errorDismissTimer: number | null = null
+watch(error, (newVal) => {
+  if (errorDismissTimer !== null) window.clearTimeout(errorDismissTimer)
+  if (newVal) {
+    errorDismissTimer = window.setTimeout(() => {
+      error.value = ''
+    }, 7000)
+  }
+})
+function closeError() {
+  if (errorDismissTimer !== null) window.clearTimeout(errorDismissTimer)
+  error.value = ''
+}
+
+let noticeDismissTimer: number | null = null
+watch(tripDetailsNotice, (newVal) => {
+  if (noticeDismissTimer !== null) window.clearTimeout(noticeDismissTimer)
+  if (newVal) {
+    noticeDismissTimer = window.setTimeout(() => {
+      tripDetailsNotice.value = ''
+    }, 6000)
+  }
+})
+function closeNotice() {
+  if (noticeDismissTimer !== null) window.clearTimeout(noticeDismissTimer)
+  tripDetailsNotice.value = ''
+}
 const mapError = ref('')
 const mapWarning = ref('')
 const mapReady = ref(false)
@@ -2995,32 +3022,6 @@ onUnmounted(() => {
               </div>
               <div v-if="keyConfigured && tripDocument && !mapError && !mapReady && !mapWarning" class="map-loading"><IonIcon :icon="mapOutline" /><span>正在加载{{ mapProviderLabel }}…</span></div>
               <div v-if="mapWarning" class="map-warning"><span>{{ mapWarning }}</span><button type="button" @click="retryMap">重新加载</button></div>
-
-              <header class="workspace-topbar">
-                <button v-if="!readOnlyView" class="workspace-back" type="button" aria-label="返回行程列表" @click="navigateBackToList"><span>‹</span><small>行程</small></button>
-                <div class="workspace-title"><strong>{{ historyTitle }}</strong><span>{{ historyDateRange || '地图工作区' }}</span></div>
-                <div class="workspace-top-actions">
-                  <button class="workspace-tool-trigger" type="button" :aria-expanded="mobileMapToolsOpen" aria-label="打开地图选项" @click="toggleMobileMapTools"><IonIcon :icon="mapOutline" /><span>地图选项</span></button>
-                  <button v-if="!readOnlyView" class="workspace-more" type="button" aria-label="打开更多操作" @click="openSettings"><span>⋯</span></button>
-                </div>
-              </header>
-
-              <div class="workspace-status"><span class="status-dot" :class="{ ready: keyConfigured && mapReady && !mapError }"></span><span>{{ !tripDocument ? '读取行程…' : !keyConfigured ? '离线数据可用' : mapError ? mapProviderLabel + '不可用' : mapReady ? mapProviderLabel + '已连接' : mapProviderLabel + '加载中' }} · {{ visibleStops.length }} 个规划点<span v-if="unlocatedMainStops.length"> · 待定位 {{ unlocatedMainStops.length }}</span></span></div>
-              <div v-if="mobileMapToolsOpen" class="map-tools-card" role="dialog" aria-label="地图选项">
-                <div class="map-tools-heading"><div><span class="eyebrow">MAP OPTIONS</span><strong>地图选项</strong></div><button type="button" aria-label="关闭地图选项" @click="toggleMobileMapTools"><IonIcon :icon="closeOutline" /></button></div>
-                <div class="map-tool-row"><span>底图 Provider</span><div class="provider-segment"><button type="button" :class="{ active: selectedMapProvider === 'amap' }" @click="setMapProvider('amap')">高德</button><button type="button" :class="{ active: selectedMapProvider === 'baidu' }" @click="setMapProvider('baidu')">百度</button></div></div>
-                <div class="map-tool-row"><span>图层</span><div class="provider-segment layer-segment" role="group" aria-label="地图图层"><button type="button" :class="{ active: mapType === 'normal' }" :aria-pressed="mapType === 'normal'" @click="setMapType('normal')">标准图</button><button type="button" :class="{ active: mapType === 'satellite' }" :aria-pressed="mapType === 'satellite'" @click="setMapType('satellite')">卫星图</button></div></div>
-                <div class="map-tool-row"><span>地图标签</span><div class="provider-segment label-segment" role="group" aria-label="地图标签显示模式"><button type="button" :class="{ active: mapLabelMode === 'auto' }" @click="setMapLabelMode('auto')">自动</button><button type="button" :class="{ active: mapLabelMode === 'always' }" @click="setMapLabelMode('always')">全部</button><button type="button" :class="{ active: mapLabelMode === 'none' }" @click="setMapLabelMode('none')">隐藏</button></div></div>
-                <p class="map-tool-hint">{{ mapLabelMode === 'auto' ? '自动：有空间时显示，密集时自动防重叠' : mapLabelMode === 'always' ? '全部：始终展开全部地名与路线标签' : '隐藏：仅保留图钉，隐藏浮动文字' }}</p>
-                <button v-if="!readOnlyView" class="map-pick-action" type="button" :disabled="!mapReady || !tripDocument" @click="toggleMapPick"><IonIcon :icon="mapOutline" /> {{ mapPickMode ? mapPickTargetID ? '取消更新选点' : '取消地图选点' : '地图选点' }}</button>
-              </div>
-
-              <section v-if="error || tripDetailsNotice || historyView || (shareNoticeVisible && shareURL)" class="map-notices redesign-notices">
-                <div v-if="historyView" class="history-readonly-banner"><span><strong>历史版本 · 只读</strong><small>{{ historyView.label || '保存于 ' + formatDateTime(historyView.created_at) }} · 工作版本 {{ historyView.source_revision }}</small></span><button type="button" @click="exitTripHistory">返回当前版本</button></div>
-                 <div v-if="error" class="global-error"><IonIcon :icon="cloudOfflineOutline" /><span>{{ error }}</span><button aria-label="关闭错误" @click="error = ''">×</button></div>
-                <div v-if="tripDetailsNotice" class="global-notice"><IonIcon :icon="createOutline" /><span>{{ tripDetailsNotice }}</span><button aria-label="关闭行程更新提示" @click="tripDetailsNotice = ''">×</button></div>
-                <div v-if="shareNoticeVisible && shareURL" class="share-banner"><span><strong>只读分享已创建</strong><a :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><small v-if="shareExpiresAt">有效期至 {{ formatDateTime(shareExpiresAt) }}</small><small v-if="shareCopyMessage" class="share-copy-feedback">{{ shareCopyMessage }}</small></span><div class="share-actions"><button type="button" @click="copyShareURL">复制链接</button><button type="button" @click="openTripPoster">生成海报</button><button v-if="shareID" type="button" @click="revokeShare">撤销</button><button type="button" aria-label="关闭分享提示" @click="dismissShareNotice">×</button></div></div>
-              </section>
             </div>
 
             <aside v-if="tripDocument" class="floating-panel workspace-panel itinerary-panel" :class="['sheet-' + sheetBreakpoint, { 'panel-search-mode': panelMode === 'search', 'is-sheet-dragging': sheetDragActive }]" :style="sheetDragStyle" aria-label="行程时间线">
@@ -3083,6 +3084,34 @@ onUnmounted(() => {
                 <button v-if="!readOnlyView" class="detail-danger-button" type="button" @click="deletePlanningPoint(selectedTarget || selectedStop)">删除{{ selectedSubStop ? '子规划点' : '规划点' }}</button>
               </div>
             </aside>
+
+            <header class="workspace-topbar">
+              <button v-if="!readOnlyView" class="workspace-back" type="button" aria-label="返回行程列表" @click="navigateBackToList"><span>‹</span><small>行程</small></button>
+              <div class="workspace-title"><strong>{{ historyTitle }}</strong><span>{{ historyDateRange || '地图工作区' }}</span></div>
+              <div class="workspace-top-actions">
+                <button class="workspace-tool-trigger" type="button" :aria-expanded="mobileMapToolsOpen" aria-label="打开地图选项" @click="toggleMobileMapTools"><IonIcon :icon="mapOutline" /><span>地图选项</span></button>
+                <button v-if="!readOnlyView" class="workspace-more" type="button" aria-label="打开更多操作" @click="openSettings"><span>⋯</span></button>
+              </div>
+            </header>
+
+            <div class="workspace-status"><span class="status-dot" :class="{ ready: keyConfigured && mapReady && !mapError }"></span><span>{{ !tripDocument ? '读取行程…' : !keyConfigured ? '离线数据可用' : mapError ? mapProviderLabel + '不可用' : mapReady ? mapProviderLabel + '已连接' : mapProviderLabel + '加载中' }} · {{ visibleStops.length }} 个规划点<span v-if="unlocatedMainStops.length"> · 待定位 {{ unlocatedMainStops.length }}</span></span></div>
+
+            <div v-if="mobileMapToolsOpen" class="map-tools-backdrop" @click="mobileMapToolsOpen = false"></div>
+            <div v-if="mobileMapToolsOpen" class="map-tools-card" role="dialog" aria-label="地图选项">
+              <div class="map-tools-heading"><div><span class="eyebrow">MAP OPTIONS</span><strong>地图选项</strong></div><button type="button" aria-label="关闭地图选项" @click="toggleMobileMapTools"><IonIcon :icon="closeOutline" /></button></div>
+              <div class="map-tool-row"><span>底图 Provider</span><div class="provider-segment"><button type="button" :class="{ active: selectedMapProvider === 'amap' }" @click="setMapProvider('amap')">高德</button><button type="button" :class="{ active: selectedMapProvider === 'baidu' }" @click="setMapProvider('baidu')">百度</button></div></div>
+              <div class="map-tool-row"><span>图层</span><div class="provider-segment layer-segment" role="group" aria-label="地图图层"><button type="button" :class="{ active: mapType === 'normal' }" :aria-pressed="mapType === 'normal'" @click="setMapType('normal')">标准图</button><button type="button" :class="{ active: mapType === 'satellite' }" :aria-pressed="mapType === 'satellite'" @click="setMapType('satellite')">卫星图</button></div></div>
+              <div class="map-tool-row"><span>地图标签</span><div class="provider-segment label-segment" role="group" aria-label="地图标签显示模式"><button type="button" :class="{ active: mapLabelMode === 'auto' }" @click="setMapLabelMode('auto')">自动</button><button type="button" :class="{ active: mapLabelMode === 'always' }" @click="setMapLabelMode('always')">全部</button><button type="button" :class="{ active: mapLabelMode === 'none' }" @click="setMapLabelMode('none')">隐藏</button></div></div>
+              <p class="map-tool-hint">{{ mapLabelMode === 'auto' ? '自动：有空间时显示，密集时自动防重叠' : mapLabelMode === 'always' ? '全部：始终展开全部地名与路线标签' : '隐藏：仅保留图钉，隐藏浮动文字' }}</p>
+              <button v-if="!readOnlyView" class="map-pick-action" type="button" :disabled="!mapReady || !tripDocument" @click="toggleMapPick"><IonIcon :icon="mapOutline" /> {{ mapPickMode ? mapPickTargetID ? '取消更新选点' : '取消地图选点' : '地图选点' }}</button>
+            </div>
+
+            <section v-if="error || tripDetailsNotice || historyView || (shareNoticeVisible && shareURL)" class="map-notices redesign-notices">
+              <div v-if="historyView" class="history-readonly-banner"><span><strong>历史版本 · 只读</strong><small>{{ historyView.label || '保存于 ' + formatDateTime(historyView.created_at) }} · 工作版本 {{ historyView.source_revision }}</small></span><button type="button" @click="exitTripHistory">返回当前版本</button></div>
+              <div v-if="error" class="global-error"><IonIcon :icon="cloudOfflineOutline" /><span>{{ error }}</span><button type="button" class="notice-close-btn" aria-label="关闭错误提示" @click="closeError">×</button></div>
+              <div v-if="tripDetailsNotice" class="global-notice"><IonIcon :icon="createOutline" /><span>{{ tripDetailsNotice }}</span><button type="button" class="notice-close-btn" aria-label="关闭提示" @click="closeNotice">×</button></div>
+              <div v-if="shareNoticeVisible && shareURL" class="share-banner"><span><strong>只读分享已创建</strong><a :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><small v-if="shareExpiresAt">有效期至 {{ formatDateTime(shareExpiresAt) }}</small><small v-if="shareCopyMessage" class="share-copy-feedback">{{ shareCopyMessage }}</small></span><div class="share-actions"><button type="button" @click="copyShareURL">复制链接</button><button type="button" @click="openTripPoster">生成海报</button><button v-if="shareID" type="button" @click="revokeShare">撤销</button><button type="button" class="notice-close-btn" aria-label="关闭分享提示" @click="dismissShareNotice">×</button></div></div>
+            </section>
           </section>
         </main>
       </div>
