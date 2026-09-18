@@ -935,25 +935,76 @@ function mapVisibleRect(): { left: number; top: number; right: number; bottom: n
   const width = Number(size?.width) || container.clientWidth || containerRect.width
   const height = Number(size?.height) || container.clientHeight || containerRect.height
   if (!(width > 0) || !(height > 0)) return null
-  let left = 0; let top = 0; let right = width; let bottom = height
-  document.querySelectorAll<HTMLElement>('.floating-panel, .details-drawer').forEach(overlay => {
-    const rect = overlay.getBoundingClientRect()
-    const overlapWidth = Math.min(containerRect.right, rect.right) - Math.max(containerRect.left, rect.left)
-    const overlapHeight = Math.min(containerRect.bottom, rect.bottom) - Math.max(containerRect.top, rect.top)
-    if (overlapWidth <= 0 || overlapHeight <= 0) return
-    const touchesLeft = rect.left <= containerRect.left + 16
-    const touchesRight = rect.right >= containerRect.right - 16
-    const touchesTop = rect.top <= containerRect.top + 16
-    const touchesBottom = rect.bottom >= containerRect.bottom - 16
-    if (overlapWidth / width >= .75) {
-      if (touchesBottom) bottom = Math.min(bottom, rect.top - containerRect.top)
-      else if (touchesTop) top = Math.max(top, rect.bottom - containerRect.top)
-    } else if (overlapHeight / height >= .75) {
-      if (touchesLeft) left = Math.max(left, rect.right - containerRect.left)
-      if (touchesRight) right = Math.min(right, rect.left - containerRect.left)
+
+  let left = 0
+  let top = 0
+  let right = width
+  let bottom = height
+
+  const isMobile = isMobileViewport()
+
+  if (isMobile) {
+    // 手机端避让：
+    // 1. 顶部避让：.workspace-topbar 和 .workspace-status
+    const topbar = document.querySelector<HTMLElement>('.workspace-topbar')
+    if (topbar && topbar.offsetHeight > 0) {
+      const topbarRect = topbar.getBoundingClientRect()
+      top = Math.max(top, topbarRect.bottom - containerRect.top + 8)
     }
-  })
-  if (right <= left || bottom <= top) return { left: 0, top: 0, right: width, bottom: height }
+    const statusPill = document.querySelector<HTMLElement>('.workspace-status')
+    if (statusPill && statusPill.offsetHeight > 0) {
+      const statusRect = statusPill.getBoundingClientRect()
+      top = Math.max(top, statusRect.bottom - containerRect.top + 8)
+    }
+    if (top < 70) top = 88
+
+    // 2. 底部避让：底部抽屉 (.stop-detail-panel 或 .workspace-panel)
+    const activeSheet = document.querySelector<HTMLElement>('.stop-detail-panel, .workspace-panel')
+    if (activeSheet && activeSheet.offsetHeight > 0) {
+      const sheetRect = activeSheet.getBoundingClientRect()
+      if (sheetRect.top < containerRect.bottom) {
+        bottom = Math.min(bottom, sheetRect.top - containerRect.top - 10)
+      }
+    } else {
+      bottom = height - 16
+    }
+    left = 12
+    right = width - 12
+  } else {
+    // PC / 桌面端避让：
+    // 1. 左侧避让：行程规划卡片 .workspace-panel
+    const leftPanel = document.querySelector<HTMLElement>('.workspace-panel.itinerary-panel, .workspace-panel.atlas-floating-panel')
+    if (leftPanel && leftPanel.offsetWidth > 0 && panelOpen.value) {
+      const panelRect = leftPanel.getBoundingClientRect()
+      if (panelRect.right > containerRect.left) {
+        // 卡片右侧边缘 + 24px 呼吸间距，避免贴边
+        left = Math.max(left, panelRect.right - containerRect.left + 24)
+      }
+    } else {
+      left = 24
+    }
+
+    // 2. 右侧避让：若右侧地点详情抽屉打开 (.stop-detail-panel)
+    const rightPanel = document.querySelector<HTMLElement>('.stop-detail-panel')
+    if (rightPanel && rightPanel.offsetWidth > 0) {
+      const rightRect = rightPanel.getBoundingClientRect()
+      if (rightRect.left < containerRect.right) {
+        right = Math.min(right, rightRect.left - containerRect.left - 24)
+      }
+    } else {
+      right = width - 24
+    }
+
+    // 3. 上下安全边距
+    top = 24
+    bottom = height - 24
+  }
+
+  // 兜底安全校验，确保有效可视尺寸至少有 100px
+  if (right <= left + 100 || bottom <= top + 100) {
+    return { left: 0, top: 0, right: width, bottom: height }
+  }
+
   return { left, top, right, bottom }
 }
 
@@ -961,14 +1012,32 @@ function visibleMapPoints(): any[] {
   if (!mapAPI) return []
   const provider = selectedMapProvider.value
   const points: any[] = []
-  const pushPoint = (stop: Stop | SubStop) => {
-    const point = pointForProvider(stop, provider)
-    if (!point) return
+  const pushPoint = (point: Coord | null) => {
+    if (!point || !Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return
     if (provider === 'amap') points.push([point.lng, point.lat])
     else if (typeof mapAPI.Point === 'function') points.push(new mapAPI.Point(point.lng, point.lat))
   }
-  for (const stop of mapStops.value) pushPoint(stop)
-  for (const child of selectedStop.value?.children || []) pushPoint(child)
+  for (const stop of mapStops.value) {
+    pushPoint(pointForProvider(stop, provider))
+  }
+  for (const child of selectedStop.value?.children || []) {
+    pushPoint(pointForProvider(child, provider))
+  }
+  // 采样加入可见路段的关键坐标，确保路线弧度也能被纳入视野
+  for (const day of visibleDays.value) {
+    for (const leg of day.legs || []) {
+      const snapshot = chooseSnapshot(leg, provider, planningMode.value)
+      if (!snapshot?.geometry?.length) continue
+      const geo = snapshot.geometry
+      const step = Math.max(1, Math.floor(geo.length / 8))
+      for (let i = 0; i < geo.length; i += step) {
+        const pt = mapRoutePointFor(geo[i], snapshot.coordinate_system || (provider === 'amap' ? 'gcj02' : 'bd09ll'), provider)
+        if (pt) pushPoint(pt)
+      }
+      const lastPt = mapRoutePointFor(geo[geo.length - 1], snapshot.coordinate_system || (provider === 'amap' ? 'gcj02' : 'bd09ll'), provider)
+      if (lastPt) pushPoint(lastPt)
+    }
+  }
   return points
 }
 
@@ -979,11 +1048,62 @@ function fitVisibleMapContent() {
   const container = mapContainer.value
   const fullW = container?.clientWidth || 0
   const fullH = container?.clientHeight || 0
-  const visibleW = rect.right - rect.left
-  const visibleH = rect.bottom - rect.top
   const points = visibleMapPoints()
   if (!points.length) return
   const provider = selectedMapProvider.value
+
+  const isMobile = isMobileViewport()
+  let padTop = 24
+  let padBottom = 24
+  let padLeft = 24
+  let padRight = 24
+
+  if (isMobile) {
+    padTop = Math.max(20, Math.round(rect.top + 8))
+    // 手机端左右对称居中
+    padLeft = 24
+    padRight = 24
+    if (sheetBreakpoint.value === 'expanded') {
+      padBottom = 40
+    } else {
+      padBottom = Math.max(24, Math.round((fullH - rect.bottom) + 12))
+    }
+  } else {
+    // 桌面端：左侧避让行程卡片，右侧预留舒适边距
+    padTop = 32
+    padBottom = 32
+    padLeft = Math.max(36, Math.round(rect.left))
+    padRight = Math.max(48, Math.round(fullW - rect.right + 24))
+  }
+
+  if (provider === 'amap') {
+    const overlays = mapOverlays.filter(Boolean)
+    if (overlays.length && typeof mapInstance.setFitView === 'function') {
+      try {
+        // 高德 JSAPI 2.0 避让参数 avoid 为：[上, 下, 左, 右] (上下左右)
+        mapInstance.setFitView(overlays, false, [padTop, padBottom, padLeft, padRight])
+        return
+      } catch {
+        /* fallback to manual calculation */
+      }
+    }
+  } else if (provider === 'baidu') {
+    if (typeof mapInstance.getViewport === 'function' && points.length) {
+      try {
+        // 百度 JSAPI 4.0 margins 参数为：[上, 右, 下, 左] (上右下左)
+        const view = mapInstance.getViewport(points, { margins: [padTop, padRight, padBottom, padLeft] })
+        if (view) {
+          mapInstance.centerAndZoom(view.center, view.zoom)
+          return
+        }
+      } catch {
+        /* fallback to manual calculation */
+      }
+    }
+  }
+
+  const visibleW = rect.right - rect.left
+  const visibleH = rect.bottom - rect.top
   const readPixel = (value: any): { x: number; y: number } | null => {
     try {
       if (provider === 'amap') {
@@ -1007,18 +1127,9 @@ function fitVisibleMapContent() {
     }
     return Number.isFinite(minX) ? { minX, minY, maxX, maxY } : null
   }
-  if (visibleW >= fullW - 2 && visibleH >= fullH - 2) {
-    if (provider === 'amap') {
-      const overlays = mapOverlays.filter(Boolean)
-      if (overlays.length && typeof mapInstance.setFitView === 'function') {
-        mapInstance.setFitView(overlays, false, [24, 24, 24, 24])
-      }
-    } else mapInstance.setViewport?.(points)
-    return
-  }
   const first = measure()
   if (!first) return
-  const pad = 24
+  const pad = 36
   const contentW = Math.max(1, first.maxX - first.minX)
   const contentH = Math.max(1, first.maxY - first.minY)
   const targetW = Math.max(1, visibleW - pad * 2)
@@ -1457,33 +1568,16 @@ function chooseSnapshotMetadata(leg: Leg, provider: 'baidu' | 'amap' = selectedM
 }
 function chooseSnapshot(leg: Leg, provider: 'baidu' | 'amap' = selectedMapProvider.value, mode: TravelMode = planningMode.value, strategy: string = defaultRouteStrategy(provider, mode)) { return chooseSnapshotMetadata(leg, provider, mode, strategy)?.geometry && chooseSnapshotMetadata(leg, provider, mode, strategy)!.geometry!.length > 1 ? chooseSnapshotMetadata(leg, provider, mode, strategy) : null }
 function mapFocusViewport(): { width: number; height: number; x: number; y: number } | null {
-  const container = mapContainer.value
-  if (!container) return null
-  const containerRect = container.getBoundingClientRect()
-  const size = mapInstance?.getContainerSize?.()
-  const width = Number(size?.width) || container.clientWidth || containerRect.width
-  const height = Number(size?.height) || container.clientHeight || containerRect.height
-  if (!(width > 0) || !(height > 0)) return null
-  let left = 0; let top = 0; let right = width; let bottom = height
-  document.querySelectorAll<HTMLElement>('.floating-panel, .details-drawer').forEach(overlay => {
-    const rect = overlay.getBoundingClientRect()
-    const overlapWidth = Math.min(containerRect.right, rect.right) - Math.max(containerRect.left, rect.left)
-    const overlapHeight = Math.min(containerRect.bottom, rect.bottom) - Math.max(containerRect.top, rect.top)
-    if (overlapWidth <= 0 || overlapHeight <= 0) return
-    const touchesLeft = rect.left <= containerRect.left + 16
-    const touchesRight = rect.right >= containerRect.right - 16
-    const touchesTop = rect.top <= containerRect.top + 16
-    const touchesBottom = rect.bottom >= containerRect.bottom - 16
-    if (overlapWidth / width >= .75) {
-      if (touchesBottom) bottom = Math.min(bottom, rect.top - containerRect.top)
-      else if (touchesTop) top = Math.max(top, rect.bottom - containerRect.top)
-    } else if (overlapHeight / height >= .75) {
-      if (touchesLeft) left = Math.max(left, rect.right - containerRect.left)
-      if (touchesRight) right = Math.min(right, rect.left - containerRect.left)
-    }
-  })
-  if (right <= left || bottom <= top) return { width, height, x: width / 2, y: height / 2 }
-  return { width, height, x: (left + right) / 2, y: (top + bottom) / 2 }
+  const rect = mapVisibleRect()
+  if (!rect) return null
+  const width = rect.right - rect.left
+  const height = rect.bottom - rect.top
+  return {
+    width,
+    height,
+    x: (rect.left + rect.right) / 2,
+    y: (rect.top + rect.bottom) / 2
+  }
 }
 function focusMapOnPoint(stop: Stop | SubStop) {
   if (!mapInstance || !mapAPI || typeof mapAPI.Point !== 'function') return
@@ -2009,7 +2103,26 @@ function attachAMapLabel(marker: any, title: string, dayBadge = '', isTarget = f
   const badgeHtml = dayBadge ? '<span style="display:inline-block;margin-left:5px;padding:1px 5px;background:#0284c7;color:#fff;border-radius:4px;font-size:10px;line-height:13px;font-weight:700;">' + escapeHTML(dayBadge) + '</span>' : ''
   const highlightStyle = isTarget ? 'border-color:#ff9a78;background:#13373fee;box-shadow:0 0 0 2px #ff9a7888, 0 4px 14px #0008;z-index:999;' : ''
   const content = '<span class="journey-map-marker-label' + (isTarget ? ' is-target' : '') + '" style="display:inline-flex;align-items:center;padding:4px 8px;border:1px solid #0b2f35;border-radius:8px;color:#ffffff;background:#173f47ee;box-shadow:0 3px 10px #0006;font-size:12px;font-weight:700;line-height:16px;white-space:nowrap;text-shadow:0 1px 2px #0008;' + highlightStyle + '">' + escapeHTML(title) + badgeHtml + '</span>'
-  marker.setLabel({ content, direction: 'right', offset: new mapAPI.Pixel(12, -6) })
+
+  // 智能自适应展开方向：若图钉位于视口右侧边缘附近，自动改为向左展开
+  let direction: 'right' | 'left' = 'right'
+  let offset = new mapAPI.Pixel(12, -6)
+  try {
+    const pos = marker.getPosition?.()
+    if (pos && mapInstance?.lngLatToContainer) {
+      const pixel = mapInstance.lngLatToContainer(pos)
+      const px = Array.isArray(pixel) ? pixel[0] : typeof pixel?.getX === 'function' ? pixel.getX() : pixel?.x
+      const containerW = mapContainer.value?.clientWidth || window.innerWidth
+      const rect = mapVisibleRect()
+      const rightLimit = rect ? rect.right : containerW
+      if (typeof px === 'number' && px > rightLimit - 180) {
+        direction = 'left'
+        offset = new mapAPI.Pixel(-12, -6)
+      }
+    }
+  } catch {}
+
+  marker.setLabel({ content, direction, offset })
   if (isTarget && typeof marker.setTop === 'function') {
     marker.setTop(true)
   }
@@ -2045,9 +2158,26 @@ function focusAMapPoint(stop: Stop | SubStop) {
   if (!mapInstance || selectedMapProvider.value !== 'amap') return
   const point = pointForProvider(stop, 'amap')
   if (!point) return
+  const focusVersion = ++mapFocusVersion
   mapInstance.resize?.()
-  mapInstance.setCenter?.(amapPointToArray(point), true)
+  const pt = amapPointToArray(point)
+  mapInstance.setCenter?.(pt, true)
   mapInstance.setZoom?.(SELECTED_STOP_ZOOM, true)
+  const alignVisibleCenter = () => {
+    if (focusVersion !== mapFocusVersion || !mapAPI?.Pixel || !mapInstance?.containerToLngLat) return
+    const viewport = mapFocusViewport()
+    if (!viewport) return
+    const container = mapContainer.value
+    const fullW = container?.clientWidth || 0
+    const fullH = container?.clientHeight || 0
+    const offsetX = viewport.x - fullW / 2
+    const offsetY = viewport.y - fullH / 2
+    if (Math.abs(offsetX) < 2 && Math.abs(offsetY) < 2) return
+    const targetPixel = new mapAPI.Pixel(fullW / 2 - offsetX, fullH / 2 - offsetY)
+    const adjustedCenter = mapInstance.containerToLngLat(targetPixel)
+    if (adjustedCenter) mapInstance.setCenter(adjustedCenter, true)
+  }
+  window.requestAnimationFrame(alignVisibleCenter)
 }
 
 function searchResultMapPoint(result: PlaceCandidate, provider: 'baidu' | 'amap'): (Coord & { crs: string }) | null {
@@ -2405,7 +2535,20 @@ async function renderAtlasAMap(preserveView = false) {
 
         if (isSelected) {
           const labelContent = '<span style="display:inline-block;padding:3px 8px;border-radius:6px;background:#173f47ee;color:#fff;font-size:11px;font-weight:700;box-shadow:0 3px 10px rgba(0,0,0,0.3);border:1px solid ' + baseColor + ';">' + escapeHTML(stop.title) + '</span>'
-          marker.setLabel({ content: labelContent, direction: 'right', offset: new mapAPI.Pixel(10, -6) })
+          let dir: 'right' | 'left' = 'right'
+          let off = new mapAPI.Pixel(10, -6)
+          try {
+            const px = mapInstance.lngLatToContainer?.(new mapAPI.LngLat(mapPt[0], mapPt[1]))
+            const screenX = Array.isArray(px) ? px[0] : typeof px?.getX === 'function' ? px.getX() : px?.x
+            const containerW = mapContainer.value?.clientWidth || window.innerWidth
+            const rect = mapVisibleRect()
+            const rightLimit = rect ? rect.right : containerW
+            if (typeof screenX === 'number' && screenX > rightLimit - 180) {
+              dir = 'left'
+              off = new mapAPI.Pixel(-10, -6)
+            }
+          } catch {}
+          marker.setLabel({ content: labelContent, direction: dir, offset: off })
         }
       })
     }
@@ -2414,7 +2557,25 @@ async function renderAtlasAMap(preserveView = false) {
   if (!preserveView) {
     if (allPoints.length > 0) {
       try {
-        mapInstance.setFitView?.(mapOverlays.filter(Boolean), false, [60, 60, 60, 60])
+        const rect = mapVisibleRect()
+        const container = mapContainer.value
+        const fullW = container?.clientWidth || 0
+        const fullH = container?.clientHeight || 0
+        const isMobile = isMobileViewport()
+        let padTop = 32, padBottom = 32, padLeft = 32, padRight = 32
+        if (isMobile) {
+          padTop = rect ? Math.max(20, Math.round(rect.top + 8)) : 60
+          padBottom = rect ? (sheetBreakpoint.value === 'expanded' ? 40 : Math.max(24, Math.round((fullH - rect.bottom) + 12))) : 60
+          padLeft = 24
+          padRight = 24
+        } else {
+          padLeft = rect ? Math.max(36, Math.round(rect.left)) : 60
+          padRight = rect ? Math.max(48, Math.round(fullW - rect.right + 24)) : 60
+          padTop = 32
+          padBottom = 32
+        }
+        // 高德 JSAPI 2.0 避让参数 avoid 为：[上, 下, 左, 右]
+        mapInstance.setFitView?.(mapOverlays.filter(Boolean), false, [padTop, padBottom, padLeft, padRight])
       } catch {
         mapInstance.setCenter?.(allPoints[0])
       }
@@ -2485,7 +2646,19 @@ async function renderAtlasBaidu(preserveView = false) {
         })
         mapInstance.addOverlay(marker)
         if (isSelected) {
-          const label = new mapAPI.Label(stop.title, { offset: new mapAPI.Size(14, -18) })
+          let off = new mapAPI.Size(14, -18)
+          try {
+            const px = mapInstance.pointToPixel?.(mapPt)
+            const screenX = typeof px?.x === 'number' ? px.x : null
+            const containerW = mapContainer.value?.clientWidth || window.innerWidth
+            const rect = mapVisibleRect()
+            const rightLimit = rect ? rect.right : containerW
+            if (typeof screenX === 'number' && screenX > rightLimit - 180) {
+              const estWidth = Math.max(60, stop.title.length * 12 + 20)
+              off = new mapAPI.Size(-estWidth - 10, -18)
+            }
+          } catch {}
+          const label = new mapAPI.Label(stop.title, { offset: off })
           label.setStyle?.({ color: '#fff', backgroundColor: '#173f47ee', border: '1px solid ' + baseColor, borderRadius: '6px', padding: '3px 7px', fontSize: '11px', fontWeight: '700' })
           marker.setLabel(label)
         }
@@ -2496,7 +2669,25 @@ async function renderAtlasBaidu(preserveView = false) {
   if (!preserveView) {
     if (allPoints.length > 0) {
       try {
-        const view = mapInstance.getViewport?.(allPoints)
+        const rect = mapVisibleRect()
+        const container = mapContainer.value
+        const fullW = container?.clientWidth || 0
+        const fullH = container?.clientHeight || 0
+        const isMobile = isMobileViewport()
+        let padTop = 32, padBottom = 32, padLeft = 32, padRight = 32
+        if (isMobile) {
+          padTop = rect ? Math.max(20, Math.round(rect.top + 8)) : 60
+          padBottom = rect ? (sheetBreakpoint.value === 'expanded' ? 40 : Math.max(24, Math.round((fullH - rect.bottom) + 12))) : 60
+          padLeft = 24
+          padRight = 24
+        } else {
+          padLeft = rect ? Math.max(36, Math.round(rect.left)) : 60
+          padRight = rect ? Math.max(48, Math.round(fullW - rect.right + 24)) : 60
+          padTop = 32
+          padBottom = 32
+        }
+        // 百度 JSAPI 4.0 margins 参数为：[上, 右, 下, 左]
+        const view = mapInstance.getViewport?.(allPoints, { margins: [padTop, padRight, padBottom, padLeft] })
         if (view) mapInstance.centerAndZoom(view.center, view.zoom)
       } catch {}
     } else {
@@ -2790,7 +2981,25 @@ function attachMapLabel(marker: any, title: string, dayBadge = '', isTarget = fa
     return
   }
   const text = dayBadge ? title + ' · ' + dayBadge : title
-  const label = new mapAPI.Label(text, { offset: new mapAPI.Size(16, -20) })
+
+  // 智能自适应展开方向：若图钉位于视口右侧边缘附近，自动改为向左偏移
+  let offset = new mapAPI.Size(16, -20)
+  try {
+    const pos = marker.getPosition?.()
+    if (pos && mapInstance?.pointToPixel) {
+      const pixel = mapInstance.pointToPixel(pos)
+      const px = typeof pixel?.x === 'number' ? pixel.x : null
+      const containerW = mapContainer.value?.clientWidth || window.innerWidth
+      const rect = mapVisibleRect()
+      const rightLimit = rect ? rect.right : containerW
+      if (typeof px === 'number' && px > rightLimit - 180) {
+        const estWidth = Math.max(70, text.length * 13 + 24)
+        offset = new mapAPI.Size(-estWidth - 12, -20)
+      }
+    }
+  } catch {}
+
+  const label = new mapAPI.Label(text, { offset })
   const border = isTarget ? '2px solid #e56a4d' : '1px solid #6f797a'
   label.setStyle?.({
     color: '#172624',
