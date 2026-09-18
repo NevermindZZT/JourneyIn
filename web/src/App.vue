@@ -376,6 +376,7 @@ let mapAPI: any = null
 let mapScriptPromise: Promise<void> | null = null
 let amapScriptPromise: Promise<void> | null = null
 let mapOverlays: any[] = []
+let currentStopMarkers: any[] = []
 let amapSatelliteLayer: any = null
 let mediaQuery: MediaQueryList | null = null
 let mapReadyTimer: number | null = null
@@ -1069,6 +1070,7 @@ function handleViewportResize() {
     mapInstance?.resize?.()
     if (selectedTarget.value) focusSelectedMapTarget()
     else fitVisibleMapContent()
+    updateStopLabelsVisibility()
   })
 }
 
@@ -1836,7 +1838,7 @@ async function saveDescription() {
 }
 
 
-async function renderBaiduMap() {
+async function renderBaiduMap(preserveView = false) {
   if (!baiduKey.value || !mapContainer.value || !tripDocument.value) return
   const renderVersion = ++mapRenderVersion
   ++mapFocusVersion
@@ -1857,6 +1859,7 @@ async function renderBaiduMap() {
       }, 8000)
     }
     mapInstance.clearOverlays()
+    currentStopMarkers = []
     const points: any[] = []
     const visibleLabelIDs = computeVisibleLabelStopIDs(mapStops.value)
     for (const stop of mapStops.value) {
@@ -1869,6 +1872,11 @@ async function renderBaiduMap() {
       const isTarget = selectedTarget.value?.id === stop.id
       marker.__journeyinStopId = stop.id
       marker.__journeyinCarryOver = carryOver
+      marker.__journeyinStop = stop
+      marker.__journeyinTitle = carryOver ? '前日终点 · ' + stop.title : stop.title
+      marker.__journeyinBadge = carryOver ? '' : stopDayBadge(stop)
+      marker.__journeyinIsSubStop = false
+      currentStopMarkers.push(marker)
       marker.addEventListener?.('click', () => {
         if (mapPickMode.value) { handleMapClick({ point: mapPoint }); return }
         if (carryOver) {
@@ -1892,6 +1900,11 @@ async function renderBaiduMap() {
         const marker = new mapAPI.Marker(mapPoint)
         const isChildTarget = selectedTarget.value?.id === child.id
         marker.__journeyinSubStopId = child.id
+        marker.__journeyinStop = child
+        marker.__journeyinTitle = child.title
+        marker.__journeyinBadge = ''
+        marker.__journeyinIsSubStop = true
+        currentStopMarkers.push(marker)
         marker.addEventListener?.('click', () => { if (mapPickMode.value) { handleMapClick({ point: mapPoint }); return }; selectSubStop(child, selectedStop.value!) })
         const shouldShow = childVisibleIDs.has(child.id)
         attachMapLabel(marker, child.title, '', isChildTarget, shouldShow)
@@ -1910,13 +1923,15 @@ async function renderBaiduMap() {
         attachRouteLabel(snapshot, leg.id)
       }
     }
-    const focusTarget = selectedTarget.value
-    if (focusTarget) {
-      await nextTick()
-      if (renderVersion !== mapRenderVersion) return
-      focusMapOnPoint(focusTarget)
-    } else if (points.length) fitVisibleMapContent()
-    else mapInstance.centerAndZoom('中国', 5)
+    if (!preserveView) {
+      const focusTarget = selectedTarget.value
+      if (focusTarget) {
+        await nextTick()
+        if (renderVersion !== mapRenderVersion) return
+        focusMapOnPoint(focusTarget)
+      } else if (points.length) fitVisibleMapContent()
+      else mapInstance.centerAndZoom('中国', 5)
+    }
     applyMapType()
     mapError.value = ''
     renderSearchResultMarkers()
@@ -1927,6 +1942,8 @@ function resetMapSDK() {
   mapInstance = null
   mapAPI = null
   mapOverlays = []
+  currentStopMarkers = []
+  if (mapZoomDebounceTimer !== null) { window.clearTimeout(mapZoomDebounceTimer); mapZoomDebounceTimer = null }
   amapSatelliteLayer = null
   mapReady.value = false
   mapWarning.value = ''
@@ -1981,7 +1998,7 @@ async function loadAMap() {
 function safeMapError(cause: unknown, fallback: string) { const message = cause instanceof Error ? cause.message : String(cause || ''); return (message || fallback).replace(/([?&](?:ak|key|jscode)=)[^&\s'\"]+/gi, '$1<redacted>') }
 function amapPointToArray(point: Coord) { return [point.lng, point.lat] }
 function addAMapOverlay(overlay: any) { mapInstance?.add?.(overlay); mapOverlays.push(overlay); return overlay }
-function clearAMapOverlays() { mapInstance?.clearMap?.(); mapOverlays = [] }
+function clearAMapOverlays() { mapInstance?.clearMap?.(); mapOverlays = []; currentStopMarkers = [] }
 function attachAMapLabel(marker: any, title: string, dayBadge = '', isTarget = false, shouldShow = true) {
   if (typeof marker.setLabel !== 'function') return
   if (!shouldShow) {
@@ -2105,7 +2122,7 @@ function selectSearchResult(index: number) {
   renderSearchResultMarkers()
 }
 
-async function renderAMapMap() {
+async function renderAMapMap(preserveView = false) {
   if (!amapKey.value || !mapContainer.value || !tripDocument.value) return
   const renderVersion = ++mapRenderVersion
   ++mapFocusVersion
@@ -2136,6 +2153,7 @@ async function renderAMapMap() {
     }
     mapInstance.resize?.()
     clearAMapOverlays()
+    currentStopMarkers = []
     const points: any[] = []
     const visibleLabelIDs = computeVisibleLabelStopIDs(mapStops.value)
     for (const stop of mapStops.value) {
@@ -2148,6 +2166,11 @@ async function renderAMapMap() {
       const isTarget = selectedTarget.value?.id === stop.id
       marker.__journeyinStopId = stop.id
       marker.__journeyinCarryOver = carryOver
+      marker.__journeyinStop = stop
+      marker.__journeyinTitle = carryOver ? '前日终点 · ' + stop.title : stop.title
+      marker.__journeyinBadge = carryOver ? '' : stopDayBadge(stop)
+      marker.__journeyinIsSubStop = false
+      currentStopMarkers.push(marker)
       marker.on?.('click', () => {
         if (mapPickMode.value) { handleMapClick({ point: { lng: point.lng, lat: point.lat, crs: 'gcj02' } }); return }
         if (carryOver) {
@@ -2170,6 +2193,11 @@ async function renderAMapMap() {
         const marker = addAMapOverlay(new mapAPI.Marker({ position: mapPoint, title: child.title, anchor: 'bottom-center' }))
         const isChildTarget = selectedTarget.value?.id === child.id
         marker.__journeyinSubStopId = child.id
+        marker.__journeyinStop = child
+        marker.__journeyinTitle = child.title
+        marker.__journeyinBadge = ''
+        marker.__journeyinIsSubStop = true
+        currentStopMarkers.push(marker)
         marker.on?.('click', () => { if (mapPickMode.value) { handleMapClick({ point: { lng: point.lng, lat: point.lat, crs: 'gcj02' } }); return }; selectSubStop(child, selectedStop.value!) })
         const shouldShow = childVisibleIDs.has(child.id)
         attachAMapLabel(marker, child.title, '', isChildTarget, shouldShow)
@@ -2185,10 +2213,12 @@ async function renderAMapMap() {
       polyline.on?.('click', () => { selectedLegId.value = leg.id })
       attachAMapRouteLabel(snapshot, leg.id)
     }
-    const focusTarget = selectedTarget.value
-    if (focusTarget) { await nextTick(); if (renderVersion !== mapRenderVersion) return; focusAMapPoint(focusTarget) }
-    else if (points.length) fitVisibleMapContent()
-    else mapInstance.setCenter?.([116.397428, 39.90923])
+    if (!preserveView) {
+      const focusTarget = selectedTarget.value
+      if (focusTarget) { await nextTick(); if (renderVersion !== mapRenderVersion) return; focusAMapPoint(focusTarget) }
+      else if (points.length) fitVisibleMapContent()
+      else mapInstance.setCenter?.([116.397428, 39.90923])
+    }
     applyMapType()
     mapError.value = ''
     renderSearchResultMarkers()
@@ -2198,13 +2228,14 @@ async function renderAMapMap() {
     mapError.value = safeMapError(cause, '高德地图初始化失败')
   }
 }
-async function renderMap() {
+async function renderMap(options?: { preserveView?: boolean }) {
   if (!mapContainer.value) return
-  if (tripView.value === 'atlas') return renderAtlasMap()
+  const preserveView = options?.preserveView ?? false
+  if (tripView.value === 'atlas') return renderAtlasMap(preserveView)
   if (!tripDocument.value) return
   if (!key.value) { resetMapSDK(); return }
-  if (selectedMapProvider.value === 'amap') return renderAMapMap()
-  return renderBaiduMap()
+  if (selectedMapProvider.value === 'amap') return renderAMapMap(preserveView)
+  return renderBaiduMap(preserveView)
 }
 
 function toggleAtlasSheetBreakpoint() {
@@ -2283,7 +2314,7 @@ async function gotoTripFromAtlas(tripID: string) {
   }
 }
 
-async function renderAtlasMap() {
+async function renderAtlasMap(preserveView = false) {
   if (tripView.value !== 'atlas' || !mapContainer.value) return
   const currentKey = selectedMapProvider.value === 'amap' ? amapKey.value.trim() : baiduKey.value.trim()
   if (!currentKey) {
@@ -2291,13 +2322,13 @@ async function renderAtlasMap() {
     return
   }
   if (selectedMapProvider.value === 'amap') {
-    await renderAtlasAMap()
+    await renderAtlasAMap(preserveView)
   } else {
-    await renderAtlasBaidu()
+    await renderAtlasBaidu(preserveView)
   }
 }
 
-async function renderAtlasAMap() {
+async function renderAtlasAMap(preserveView = false) {
   if (!mapContainer.value) return
   await loadAMap()
   if (!mapAPI || typeof mapAPI.Map !== 'function') return
@@ -2379,20 +2410,22 @@ async function renderAtlasAMap() {
     }
   })
 
-  if (allPoints.length > 0) {
-    try {
-      mapInstance.setFitView?.(mapOverlays.filter(Boolean), false, [60, 60, 60, 60])
-    } catch {
-      mapInstance.setCenter?.(allPoints[0])
+  if (!preserveView) {
+    if (allPoints.length > 0) {
+      try {
+        mapInstance.setFitView?.(mapOverlays.filter(Boolean), false, [60, 60, 60, 60])
+      } catch {
+        mapInstance.setCenter?.(allPoints[0])
+      }
+    } else {
+      mapInstance.setCenter?.([105, 35])
+      mapInstance.setZoom?.(4)
     }
-  } else {
-    mapInstance.setCenter?.([105, 35])
-    mapInstance.setZoom?.(4)
   }
   applyMapType()
 }
 
-async function renderAtlasBaidu() {
+async function renderAtlasBaidu(preserveView = false) {
   if (!mapContainer.value) return
   await loadBaiduMap()
   if (!mapAPI || typeof mapAPI.Map !== 'function') return
@@ -2459,13 +2492,15 @@ async function renderAtlasBaidu() {
     }
   })
 
-  if (allPoints.length > 0) {
-    try {
-      const view = mapInstance.getViewport?.(allPoints)
-      if (view) mapInstance.centerAndZoom(view.center, view.zoom)
-    } catch {}
-  } else {
-    mapInstance.centerAndZoom('中国', 4)
+  if (!preserveView) {
+    if (allPoints.length > 0) {
+      try {
+        const view = mapInstance.getViewport?.(allPoints)
+        if (view) mapInstance.centerAndZoom(view.center, view.zoom)
+      } catch {}
+    } else {
+      mapInstance.centerAndZoom('中国', 4)
+    }
   }
   applyMapType()
 }
@@ -2626,12 +2661,36 @@ function shouldShowRouteLabel(distanceM: number | undefined, isLegSelected: bool
   return !isShortDistance
 }
 
+function updateStopLabelsVisibility() {
+  if (!mapInstance || !mapAPI || !currentStopMarkers.length) return
+  const visibleLabelIDs = computeVisibleLabelStopIDs(mapStops.value)
+  const childVisibleIDs = selectedStop.value?.children?.length
+    ? computeVisibleLabelStopIDs(selectedStop.value.children)
+    : new Set<string>()
+
+  const isAMap = selectedMapProvider.value === 'amap'
+  for (const marker of currentStopMarkers) {
+    const isSubStop = Boolean(marker.__journeyinIsSubStop)
+    const stopId = isSubStop ? marker.__journeyinSubStopId : marker.__journeyinStopId
+    if (!stopId) continue
+    const isTarget = selectedTarget.value?.id === stopId
+    const shouldShow = isSubStop ? childVisibleIDs.has(stopId) : visibleLabelIDs.has(stopId)
+    const title = marker.__journeyinTitle || ''
+    const badge = marker.__journeyinBadge || ''
+    if (isAMap) {
+      attachAMapLabel(marker, title, badge, isTarget, shouldShow)
+    } else {
+      attachMapLabel(marker, title, badge, isTarget, shouldShow)
+    }
+  }
+}
+
 let mapZoomDebounceTimer: number | null = null
 function handleMapZoomChange() {
   if (mapLabelMode.value !== 'auto' || !isMobileViewport()) return
   if (mapZoomDebounceTimer !== null) window.clearTimeout(mapZoomDebounceTimer)
   mapZoomDebounceTimer = window.setTimeout(() => {
-    void renderMap()
+    updateStopLabelsVisibility()
   }, 120)
 }
 
@@ -2639,7 +2698,7 @@ function setMapLabelMode(mode: MapLabelMode) {
   mapLabelMode.value = mode
   localStorage.setItem('journeyin.mapLabelMode', mode)
   localStorage.setItem('journeyin.mapLabels', mode === 'none' ? 'false' : 'true')
-  void renderMap()
+  void renderMap({ preserveView: true })
 }
 
 function toggleMapLabels() {
