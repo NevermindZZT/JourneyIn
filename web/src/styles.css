@@ -448,11 +448,25 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
     padding: 8px 16px 11px;
   }
 }
-.map-fallback ion-icon { font-size: 64px; }
-.map-fallback strong { max-width: min(880px, 90vw); color: var(--p); font-size: clamp(18px, 2vw, 28px); }
-.map-fallback span { max-width: 680px; color: var(--muted); line-height: 1.6; }
-.map-loading { position: absolute; inset: 0; z-index: 5; display: grid; place-items: center; align-content: center; gap: 8px; color: var(--p); background: color-mix(in srgb, var(--md-map) 82%, transparent); }
-.map-loading ion-icon { font-size: 48px; }
+.map-fallback {
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 14px;
+  padding: max(76px, env(safe-area-inset-top) + 64px) 24px 36px;
+  color: var(--ink);
+  background: radial-gradient(circle at 50% 46%, color-mix(in srgb, var(--p) 8%, transparent) 0%, transparent 60%),
+              radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--surface) 90%, var(--md-map)), color-mix(in srgb, var(--surface) 96%, var(--md-map)));
+}
+.map-fallback ion-icon { font-size: 52px; color: color-mix(in srgb, var(--p) 80%, var(--ink)); }
+.map-fallback strong { max-width: min(720px, 90vw); color: var(--p); font-size: clamp(16px, 2vw, 22px); line-height: 1.4; }
+.map-fallback span { max-width: 520px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.map-fallback button { margin-top: 4px; }
 .map-warning { position: absolute; z-index: 30; top: 70px; right: 16px; display: flex; max-width: min(460px, calc(100vw - 32px)); align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--line)); border-radius: 12px; color: var(--ink); background: color-mix(in srgb, var(--surface) 92%, transparent); box-shadow: 0 8px 24px color-mix(in srgb, var(--ink) 12%, transparent); backdrop-filter: blur(14px); font-size: 11px; }
 .map-warning span { min-width: 0; flex: 1; }
 .map-warning button { min-height: 30px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--p); background: var(--surface); font-size: 10px; font-weight: 800; }
@@ -653,10 +667,9 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .journey-workspace { position: relative; min-width: 0; min-height: 0; flex: 1 1 auto; overflow: hidden; }
 .redesign-map-canvas { position: absolute; z-index: 1; inset: 0; overflow: hidden; background: var(--md-map); }
 .redesign-map-canvas #map { position: absolute; inset: 0; width: 100%; height: 100%; }
-.redesign-map-canvas .map-fallback { background: radial-gradient(circle at 25% 22%, color-mix(in srgb, var(--p) 12%, transparent), transparent 28%), repeating-linear-gradient(30deg, color-mix(in srgb, var(--p) 8%, var(--md-map)) 0 2px, transparent 2px 40px), var(--md-map); }
+.redesign-map-canvas .map-fallback { background: radial-gradient(circle at 50% 46%, color-mix(in srgb, var(--p) 8%, transparent) 0%, transparent 60%), radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--surface) 90%, var(--md-map)), color-mix(in srgb, var(--surface) 96%, var(--md-map))); }
 .redesign-map-canvas .map-fallback strong { max-width: min(700px, 90vw); color: var(--p); }
-.redesign-map-canvas .map-fallback span { max-width: 600px; color: var(--muted); }
-.redesign-map-canvas .map-loading { background: color-mix(in srgb, var(--md-map) 80%, transparent); }
+.redesign-map-canvas .map-fallback span { max-width: 540px; color: var(--muted); }
 
 .workspace-topbar { position: absolute; z-index: 35; top: max(14px, env(safe-area-inset-top)); right: 18px; left: 18px; display: flex; align-items: center; gap: 9px; pointer-events: none; }
 .workspace-topbar > * { pointer-events: auto; }

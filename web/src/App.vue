@@ -13,6 +13,7 @@ import UiSelect from './UiSelect.vue'
 import MarkdownEditor from './MarkdownEditor.vue'
 import TripPosterModal from './TripPosterModal.vue'
 import BrandLogo from './BrandLogo.vue'
+import MapLoadingState from './MapLoadingState.vue'
 
 type Theme = 'system' | 'light' | 'dark'
 type Coord = { lat: number; lng: number }
@@ -3443,12 +3444,24 @@ onUnmounted(() => {
           <section v-else-if="tripView === 'atlas'" class="journey-workspace atlas-workspace" aria-label="足迹漫游工作区">
             <div class="map-canvas redesign-map-canvas">
               <div v-if="keyConfigured && !mapError" :key="selectedMapProvider + '_atlas'" ref="mapContainer" id="map"></div>
-              <div v-if="!keyConfigured || mapError" class="map-fallback">
+
+              <!-- 足迹漫游微动效加载层 -->
+              <MapLoadingState
+                v-if="atlasLoading || (keyConfigured && !mapError && !mapReady && !mapWarning)"
+                title="正在绘制足迹漫游…"
+                subtitle="正在汇总历史行程路线与地标网络"
+                :hint="atlasLoading ? '汇总行程数据中' : (mapProviderLabel + '底图连接中')"
+                mode="atlas"
+              />
+
+              <div v-else-if="!keyConfigured || mapError" class="map-fallback">
                 <IonIcon :icon="footstepsOutline" />
                 <strong>{{ mapError || (mapProviderLabel + '未配置') }}</strong>
                 <span>配置 {{ mapProviderLabel }} 浏览器端 Key 后即可呈现所有历史行程路线与足迹网络。</span>
+                <button v-if="mapError" type="button" class="secondary-action compact-action" @click="retryMap">重新尝试加载</button>
+                <button v-else-if="!readOnlyView" type="button" class="primary-action compact-action" @click="openSettings()">前往设置配置 Key</button>
               </div>
-              <div v-if="keyConfigured && !mapError && !mapReady && !mapWarning" class="map-loading"><IonIcon :icon="footstepsOutline" /><span>正在渲染足迹漫游地图…</span></div>
+
               <div v-if="mapWarning" class="map-warning"><span>{{ mapWarning }}</span><button type="button" @click="retryMap">重新加载</button></div>
             </div>
 
@@ -3586,13 +3599,24 @@ onUnmounted(() => {
           <section v-else class="journey-workspace" aria-label="地图工作区">
             <div class="map-canvas redesign-map-canvas" :class="{ 'map-pick-active': mapPickMode }">
               <div v-if="keyConfigured && tripDocument && !mapError" :key="selectedMapProvider" ref="mapContainer" id="map"></div>
-              <div v-if="!tripDocument || !keyConfigured || mapError" class="map-fallback">
+
+              <!-- 全新旅行微动效加载层 -->
+              <MapLoadingState
+                v-if="!tripDocument || (keyConfigured && !mapError && !mapReady && !mapWarning)"
+                :title="!tripDocument ? '正在绘制旅途地图…' : '正在连接' + mapProviderLabel + '…'"
+                :subtitle="!tripDocument ? '正在解析地点坐标与路线拓扑' : '正在绘制图钉与路线网络'"
+                :hint="!tripDocument ? '读取行程规划中' : (mapProviderLabel + '底图连接中')"
+              />
+
+              <!-- 真异常或未配置 Key 降级面板 -->
+              <div v-else-if="!keyConfigured || mapError" class="map-fallback">
                 <IonIcon :icon="mapOutline" />
-                <strong>{{ !tripDocument ? '正在读取行程地图' : mapError || (mapProviderLabel + '未配置') }}</strong>
-                <span>{{ !tripDocument ? '地图工作区即将准备完成。' : mapError ? '请确认浏览器端 Key、域名白名单和网络连接。当前页面：' + serverURL : '配置' + mapProviderLabel + '浏览器端 Key 后显示真实地图；已保存的行程数据仍然可查看。' }}</span>
-                <IonChip color="warning"><IonIcon :icon="cloudOfflineOutline" /> {{ !tripDocument ? '读取中' : '降级模式' }}</IonChip>
+                <strong>{{ mapError || (mapProviderLabel + '未配置') }}</strong>
+                <span>{{ mapError ? '请确认浏览器端 Key、域名白名单和网络连接。当前页面：' + serverURL : '配置' + mapProviderLabel + '浏览器端 Key 后显示真实地图；已保存的行程数据仍然可查看。' }}</span>
+                <button v-if="mapError" type="button" class="secondary-action compact-action" @click="retryMap">重新尝试加载</button>
+                <button v-else-if="!readOnlyView" type="button" class="primary-action compact-action" @click="openSettings()">前往设置配置 Key</button>
               </div>
-              <div v-if="keyConfigured && tripDocument && !mapError && !mapReady && !mapWarning" class="map-loading"><IonIcon :icon="mapOutline" /><span>正在加载{{ mapProviderLabel }}…</span></div>
+
               <div v-if="mapWarning" class="map-warning"><span>{{ mapWarning }}</span><button type="button" @click="retryMap">重新加载</button></div>
             </div>
 
@@ -3666,7 +3690,7 @@ onUnmounted(() => {
               </div>
             </header>
 
-            <div class="workspace-status"><span class="status-dot" :class="{ ready: keyConfigured && mapReady && !mapError }"></span><span>{{ !tripDocument ? '读取行程…' : !keyConfigured ? '离线数据可用' : mapError ? mapProviderLabel + '不可用' : mapReady ? mapProviderLabel + '已连接' : mapProviderLabel + '加载中' }} · {{ visibleStops.length }} 个规划点<span v-if="unlocatedMainStops.length"> · 待定位 {{ unlocatedMainStops.length }}</span></span></div>
+            <div v-if="tripDocument" class="workspace-status"><span class="status-dot" :class="{ ready: keyConfigured && mapReady && !mapError }"></span><span>{{ !keyConfigured ? '离线数据可用' : mapError ? mapProviderLabel + '不可用' : mapReady ? mapProviderLabel + '已连接' : mapProviderLabel + '加载中' }} · {{ visibleStops.length }} 个规划点<span v-if="unlocatedMainStops.length"> · 待定位 {{ unlocatedMainStops.length }}</span></span></div>
 
             <div v-if="mobileMapToolsOpen" class="map-tools-backdrop" @click="mobileMapToolsOpen = false"></div>
             <div v-if="mobileMapToolsOpen" class="map-tools-card" role="dialog" aria-label="地图选项">
