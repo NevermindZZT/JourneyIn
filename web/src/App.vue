@@ -660,15 +660,19 @@ function setSheetBreakpoint(next: SheetBreakpoint, mode: 'push' | 'replace' = 'r
   if (sync) syncNavigationURL(mode)
   void nextTick().then(() => {
     mapInstance?.resize?.()
-    if (selectedTarget.value) focusSelectedMapTarget()
-    else recenterMapToVisibleViewport()
+    if (tripView.value !== 'atlas' && selectedTarget.value) focusSelectedMapTarget()
   })
   if (sheetRecenterTimer !== null) { window.clearTimeout(sheetRecenterTimer); sheetRecenterTimer = null }
   sheetRecenterTimer = window.setTimeout(() => {
     sheetRecenterTimer = null
     mapInstance?.resize?.()
-    if (selectedTarget.value) focusSelectedMapTarget()
-    else fitVisibleMapContent()
+    if (tripView.value === 'atlas') {
+      void renderAtlasMap(false)
+    } else if (selectedTarget.value) {
+      focusSelectedMapTarget()
+    } else {
+      fitVisibleMapContent()
+    }
   }, 260)
 }
 
@@ -1045,6 +1049,10 @@ function visibleMapPoints(): any[] {
 
 function fitVisibleMapContent() {
   if (!mapInstance || !mapAPI) return
+  if (tripView.value === 'atlas') {
+    void renderAtlasMap(false)
+    return
+  }
   const rect = mapVisibleRect()
   if (!rect) return
   const container = mapContainer.value
@@ -1161,30 +1169,40 @@ function fitVisibleMapContent() {
 
 function recenterMapToVisibleViewport() {
   if (!mapInstance || !mapAPI) return
-  const viewport = mapFocusViewport()
-  if (!viewport) return
-  const offsetX = viewport.x - viewport.width / 2
-  const offsetY = viewport.y - viewport.height / 2
-  if (Math.abs(offsetX) < 1 && Math.abs(offsetY) < 1) return
+  const rect = mapVisibleRect()
+  if (!rect) return
+  const container = mapContainer.value
+  const fullW = container?.clientWidth || 0
+  const fullH = container?.clientHeight || 0
+  const visibleCenterX = (rect.left + rect.right) / 2
+  const visibleCenterY = (rect.top + rect.bottom) / 2
+  const offsetX = visibleCenterX - fullW / 2
+  const offsetY = visibleCenterY - fullH / 2
+  if (Math.abs(offsetX) < 2 && Math.abs(offsetY) < 2) return
   if (selectedMapProvider.value === 'amap') {
     if (typeof mapInstance.containerToLngLat !== 'function' || typeof mapInstance.setCenter !== 'function') return
-    const pixel = new mapAPI.Pixel(viewport.width / 2 - offsetX, viewport.height / 2 - offsetY)
-    const shifted = mapInstance.containerToLngLat(pixel)
+    const targetPixel = new mapAPI.Pixel(fullW / 2 - offsetX, fullH / 2 - offsetY)
+    const shifted = mapInstance.containerToLngLat(targetPixel)
     if (shifted) mapInstance.setCenter(shifted, true)
     return
   }
   if (typeof mapAPI.Pixel !== 'function' || typeof mapInstance.pixelToPoint !== 'function' || typeof mapInstance.setCenter !== 'function') return
-  const shiftedPixel = new mapAPI.Pixel(viewport.width / 2 - offsetX, viewport.height / 2 - offsetY)
-  const center = mapInstance.pixelToPoint(shiftedPixel)
+  const targetPixel = new mapAPI.Pixel(fullW / 2 - offsetX, fullH / 2 - offsetY)
+  const center = mapInstance.pixelToPoint(targetPixel)
   if (center) mapInstance.setCenter(center, { noAnimation: true })
 }
 
 function handleViewportResize() {
   window.requestAnimationFrame(() => {
     mapInstance?.resize?.()
-    if (selectedTarget.value) focusSelectedMapTarget()
-    else fitVisibleMapContent()
-    updateStopLabelsVisibility()
+    if (tripView.value === 'atlas') {
+      void renderAtlasMap(false)
+      updateAtlasLabelsVisibility()
+    } else {
+      if (selectedTarget.value) focusSelectedMapTarget()
+      else fitVisibleMapContent()
+      updateStopLabelsVisibility()
+    }
   })
 }
 
