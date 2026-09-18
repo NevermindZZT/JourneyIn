@@ -378,6 +378,8 @@ let mapScriptPromise: Promise<void> | null = null
 let amapScriptPromise: Promise<void> | null = null
 let mapOverlays: any[] = []
 let currentStopMarkers: any[] = []
+let atlasStopMarkers: any[] = []
+let atlasTripLabels: any[] = []
 let amapSatelliteLayer: any = null
 let mediaQuery: MediaQueryList | null = null
 let mapReadyTimer: number | null = null
@@ -2038,6 +2040,8 @@ function resetMapSDK() {
   mapAPI = null
   mapOverlays = []
   currentStopMarkers = []
+  atlasStopMarkers = []
+  atlasTripLabels = []
   if (mapZoomDebounceTimer !== null) { window.clearTimeout(mapZoomDebounceTimer); mapZoomDebounceTimer = null }
   amapSatelliteLayer = null
   mapReady.value = false
@@ -2093,7 +2097,7 @@ async function loadAMap() {
 function safeMapError(cause: unknown, fallback: string) { const message = cause instanceof Error ? cause.message : String(cause || ''); return (message || fallback).replace(/([?&](?:ak|key|jscode)=)[^&\s'\"]+/gi, '$1<redacted>') }
 function amapPointToArray(point: Coord) { return [point.lng, point.lat] }
 function addAMapOverlay(overlay: any) { mapInstance?.add?.(overlay); mapOverlays.push(overlay); return overlay }
-function clearAMapOverlays() { mapInstance?.clearMap?.(); mapOverlays = []; currentStopMarkers = [] }
+function clearAMapOverlays() { mapInstance?.clearMap?.(); mapOverlays = []; currentStopMarkers = []; atlasStopMarkers = []; atlasTripLabels = [] }
 function attachAMapLabel(marker: any, title: string, dayBadge = '', isTarget = false, shouldShow = true) {
   if (typeof marker.setLabel !== 'function') return
   if (!shouldShow) {
@@ -2445,6 +2449,223 @@ async function gotoTripFromAtlas(tripID: string) {
   }
 }
 
+function getTripRouteMidpoint(tripItem: AtlasTripItem, provider: 'baidu' | 'amap'): Coord | null {
+  let longestLeg: AtlasLegSummary | null = null
+  let maxLen = 0
+  for (const leg of tripItem.legs || []) {
+    if (leg.geometry && leg.geometry.length >= 2) {
+      const len = leg.distance_m || leg.geometry.length
+      if (len > maxLen) {
+        maxLen = len
+        longestLeg = leg
+      }
+    }
+  }
+  if (longestLeg && longestLeg.geometry?.length) {
+    const midIdx = Math.floor(longestLeg.geometry.length / 2)
+    const val = longestLeg.geometry[midIdx]
+    return mapRoutePointFor(val, longestLeg.crs || (provider === 'amap' ? 'gcj02' : 'bd09ll'), provider)
+  }
+  const firstStop = tripItem.key_stops?.[0]
+  if (firstStop?.point) {
+    const pt = pointForProvider({ location: { preferred: firstStop.point.crs || 'gcj02', coordinates: { [firstStop.point.crs || 'gcj02']: firstStop.point } } } as any, provider)
+    return pt || firstStop.point
+  }
+  return null
+}
+
+function updateAtlasLabelsVisibility() {
+  if (tripView.value !== 'atlas' || !mapInstance || !mapAPI) return
+  if (!atlasStopMarkers.length && !atlasTripLabels.length) return
+
+  const mode = mapLabelMode.value
+  const hasSelection = Boolean(selectedAtlasTripID.value)
+  const isAMap = selectedMapProvider.value === 'amap'
+  const containerW = mapContainer.value?.clientWidth || window.innerWidth
+  const rect = mapVisibleRect()
+  const rightLimit = rect ? rect.right : containerW
+
+  // 1. 轨迹路线名称标签显隐与高亮
+  for (const item of atlasTripLabels) {
+    const tripItem = item.__atlasTrip as AtlasTripItem
+    const isSelected = selectedAtlasTripID.value === tripItem?.id
+    const shouldShow = mode !== 'none' && (!hasSelection || isSelected)
+    const baseColor = item.__atlasColor || '#24695c'
+
+    if (isAMap) {
+      if (!shouldShow) {
+        item.hide?.()
+      } else {
+        item.show?.()
+        item.setZIndex?.(isSelected ? 100 : 40)
+        item.setStyle?.({
+          backgroundColor: baseColor,
+          color: '#ffffff',
+          border: isSelected ? '1.5px solid #ffffff' : '1px solid rgba(255,255,255,0.4)',
+          borderRadius: '999px',
+          padding: '4px 10px',
+          fontSize: '11px',
+          fontWeight: '700',
+          lineHeight: '15px',
+          maxWidth: '220px',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          boxShadow: isSelected ? '0 0 0 2px #ffffff, 0 4px 16px rgba(0,0,0,0.45)' : '0 3px 10px rgba(0,0,0,0.3)',
+          cursor: 'pointer',
+          opacity: hasSelection && !isSelected ? '0.35' : '0.95',
+        })
+      }
+    } else {
+      // Baidu
+      if (!shouldShow) {
+        item.hide?.()
+      } else {
+        item.show?.()
+        item.setStyle?.({
+          backgroundColor: baseColor,
+          color: '#ffffff',
+          border: isSelected ? '1.5px solid #ffffff' : '1px solid rgba(255,255,255,0.4)',
+          borderRadius: '999px',
+          padding: '4px 10px',
+          fontSize: '11px',
+          fontWeight: '700',
+          lineHeight: '15px',
+          maxWidth: '220px',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          boxShadow: isSelected ? '0 0 0 2px #ffffff, 0 4px 16px rgba(0,0,0,0.45)' : '0 3px 10px rgba(0,0,0,0.3)',
+          cursor: 'pointer',
+          opacity: hasSelection && !isSelected ? 0.35 : 0.95,
+          zIndex: isSelected ? 100 : 40,
+        })
+      }
+    }
+  }
+
+  // 2. 关键规划点标签显示计算 (避让冲突)
+  const visibleStopIDs = new Set<string>()
+  if (mode !== 'none') {
+    if (mode === 'always') {
+      for (const m of atlasStopMarkers) {
+        const stop = m.__atlasStop as AtlasStopSummary
+        const tripItem = m.__atlasTrip as AtlasTripItem
+        const isSelected = selectedAtlasTripID.value === tripItem?.id
+        if (!hasSelection || isSelected) {
+          visibleStopIDs.add(stop.id)
+        }
+      }
+    } else {
+      // auto 模式：根据屏幕像素距离避让
+      const displayedPixels: { x: number; y: number }[] = []
+
+      if (hasSelection) {
+        for (const m of atlasStopMarkers) {
+          const stop = m.__atlasStop as AtlasStopSummary
+          const tripItem = m.__atlasTrip as AtlasTripItem
+          if (tripItem?.id === selectedAtlasTripID.value) {
+            visibleStopIDs.add(stop.id)
+            if (stop.point) {
+              const pt = pointForProvider({ location: { preferred: stop.point.crs || 'gcj02', coordinates: { [stop.point.crs || 'gcj02']: stop.point } } } as any, selectedMapProvider.value) || stop.point
+              const pix = getMapPointScreenPixel(pt)
+              if (pix) displayedPixels.push(pix)
+            }
+          }
+        }
+      } else {
+        for (const m of atlasStopMarkers) {
+          const stop = m.__atlasStop as AtlasStopSummary
+          if (!stop.point) continue
+          const pt = pointForProvider({ location: { preferred: stop.point.crs || 'gcj02', coordinates: { [stop.point.crs || 'gcj02']: stop.point } } } as any, selectedMapProvider.value) || stop.point
+          if (!pt) continue
+          const pix = getMapPointScreenPixel(pt)
+          if (!pix) {
+            visibleStopIDs.add(stop.id)
+            continue
+          }
+
+          let conflict = false
+          for (const occupied of displayedPixels) {
+            const dist = Math.hypot(pix.x - occupied.x, pix.y - occupied.y)
+            if (dist < 55) {
+              conflict = true
+              break
+            }
+          }
+
+          if (!conflict) {
+            visibleStopIDs.add(stop.id)
+            displayedPixels.push(pix)
+          }
+        }
+      }
+    }
+  }
+
+  // 3. 应用关键规划点标签与边缘自适应
+  for (const m of atlasStopMarkers) {
+    const stop = m.__atlasStop as AtlasStopSummary
+    const tripItem = m.__atlasTrip as AtlasTripItem
+    const isSelected = selectedAtlasTripID.value === tripItem?.id
+    const baseColor = m.__atlasColor || '#24695c'
+    const shouldShow = visibleStopIDs.has(stop.id)
+
+    if (isAMap) {
+      if (!shouldShow) {
+        try { m.setLabel({ content: '' }) } catch {}
+      } else {
+        const highlightBorder = isSelected ? 'border: 1.5px solid #ffffff;' : 'border: 1px solid ' + baseColor + ';'
+        const labelContent = '<span style="display:inline-block;padding:3px 8px;border-radius:6px;background:#173f47ee;color:#fff;font-size:11px;font-weight:700;box-shadow:0 3px 10px rgba(0,0,0,0.3);' + highlightBorder + 'white-space:nowrap;cursor:pointer;">' + escapeHTML(stop.title) + '</span>'
+        let dir: 'right' | 'left' = 'right'
+        let off = new mapAPI.Pixel(10, -6)
+        try {
+          const pos = m.getPosition?.()
+          if (pos && mapInstance?.lngLatToContainer) {
+            const px = mapInstance.lngLatToContainer(pos)
+            const screenX = Array.isArray(px) ? px[0] : typeof px?.getX === 'function' ? px.getX() : px?.x
+            if (typeof screenX === 'number' && screenX > rightLimit - 170) {
+              dir = 'left'
+              off = new mapAPI.Pixel(-10, -6)
+            }
+          }
+        } catch {}
+        m.setLabel({ content: labelContent, direction: dir, offset: off })
+      }
+    } else {
+      // Baidu
+      if (!shouldShow) {
+        try { m.setLabel(null) } catch {}
+      } else {
+        let off = new mapAPI.Size(14, -18)
+        try {
+          const pos = m.getPosition?.()
+          if (pos && mapInstance?.pointToPixel) {
+            const px = mapInstance.pointToPixel(pos)
+            const screenX = typeof px?.x === 'number' ? px.x : null
+            if (typeof screenX === 'number' && screenX > rightLimit - 170) {
+              const estWidth = Math.max(60, stop.title.length * 12 + 20)
+              off = new mapAPI.Size(-estWidth - 10, -18)
+            }
+          }
+        } catch {}
+        const label = new mapAPI.Label(stop.title, { offset: off })
+        label.setStyle?.({
+          color: '#fff',
+          backgroundColor: '#173f47ee',
+          border: isSelected ? '1.5px solid #ffffff' : '1px solid ' + baseColor,
+          borderRadius: '6px',
+          padding: '3px 7px',
+          fontSize: '11px',
+          fontWeight: '700',
+          cursor: 'pointer'
+        })
+        m.setLabel(label)
+      }
+    }
+  }
+}
+
 async function renderAtlasMap(preserveView = false) {
   if (tripView.value !== 'atlas' || !mapContainer.value) return
   const currentKey = selectedMapProvider.value === 'amap' ? amapKey.value.trim() : baiduKey.value.trim()
@@ -2468,10 +2689,13 @@ async function renderAtlasAMap(preserveView = false) {
     mapReady.value = false
     mapInstance = new mapAPI.Map(mapContainer.value, { viewMode: '2D', zoom: 5, center: [105, 35], resizeEnable: true })
     mapInstance.on?.('complete', () => { mapReady.value = true; mapError.value = ''; mapWarning.value = '' })
+    mapInstance.on?.('zoomend', handleMapZoomChange)
     loadedMapKey = ''
   }
   mapInstance.resize?.()
   clearAMapOverlays()
+  atlasStopMarkers = []
+  atlasTripLabels = []
 
   const allPoints: any[] = []
   const tripsToRender = atlasData.value?.trips || []
@@ -2513,46 +2737,68 @@ async function renderAtlasAMap(preserveView = false) {
     })
 
     // 2. 绘制代表性地标节点
-    if (mapLabelMode.value !== 'none' && (!hasSelection || isSelected)) {
-      (tripItem.key_stops || []).forEach(stop => {
-        if (!stop.point) return
-        const pt = pointForProvider({ location: { coordinates: { [stop.point.crs || 'gcj02']: stop.point }, preferred: stop.point.crs || 'gcj02' } } as any, 'amap')
-        if (!pt) return
-        const mapPt = amapPointToArray(pt)
-        allPoints.push(mapPt)
-        
-        const markerContent = '<div style="display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:' + baseColor + ';color:#fff;font-size:11px;font-weight:800;border:2px solid #fff;box-shadow:0 3px 8px rgba(0,0,0,0.3);cursor:pointer;">' + stop.day_index + '</div>'
-        const marker = addAMapOverlay(new mapAPI.Marker({
-          position: mapPt,
-          title: tripItem.title + ' · ' + stop.title,
-          content: markerContent,
-          offset: new mapAPI.Pixel(-11, -11),
-          zIndex: zIndex + 5,
-        }))
-        marker.on?.('click', () => {
-          selectAtlasTrip(tripItem)
-        })
-
-        if (isSelected) {
-          const labelContent = '<span style="display:inline-block;padding:3px 8px;border-radius:6px;background:#173f47ee;color:#fff;font-size:11px;font-weight:700;box-shadow:0 3px 10px rgba(0,0,0,0.3);border:1px solid ' + baseColor + ';">' + escapeHTML(stop.title) + '</span>'
-          let dir: 'right' | 'left' = 'right'
-          let off = new mapAPI.Pixel(10, -6)
-          try {
-            const px = mapInstance.lngLatToContainer?.(new mapAPI.LngLat(mapPt[0], mapPt[1]))
-            const screenX = Array.isArray(px) ? px[0] : typeof px?.getX === 'function' ? px.getX() : px?.x
-            const containerW = mapContainer.value?.clientWidth || window.innerWidth
-            const rect = mapVisibleRect()
-            const rightLimit = rect ? rect.right : containerW
-            if (typeof screenX === 'number' && screenX > rightLimit - 180) {
-              dir = 'left'
-              off = new mapAPI.Pixel(-10, -6)
-            }
-          } catch {}
-          marker.setLabel({ content: labelContent, direction: dir, offset: off })
-        }
+    for (const stop of tripItem.key_stops || []) {
+      if (!stop.point) continue
+      const pt = pointForProvider({ location: { coordinates: { [stop.point.crs || 'gcj02']: stop.point }, preferred: stop.point.crs || 'gcj02' } } as any, 'amap')
+      if (!pt) continue
+      const mapPt = amapPointToArray(pt)
+      allPoints.push(mapPt)
+      
+      const markerContent = '<div style="display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:' + baseColor + ';color:#fff;font-size:11px;font-weight:800;border:2px solid #fff;box-shadow:0 3px 8px rgba(0,0,0,0.3);cursor:pointer;">' + stop.day_index + '</div>'
+      const marker = addAMapOverlay(new mapAPI.Marker({
+        position: mapPt,
+        title: tripItem.title + ' · ' + stop.title,
+        content: markerContent,
+        offset: new mapAPI.Pixel(-11, -11),
+        zIndex: zIndex + 5,
+      }))
+      marker.__atlasStop = stop
+      marker.__atlasTrip = tripItem
+      marker.__atlasColor = baseColor
+      marker.on?.('click', () => {
+        selectAtlasTrip(tripItem)
       })
+      atlasStopMarkers.push(marker)
+    }
+
+    // 3. 绘制旅程轨迹名称标签 (Trip Title Badge)
+    const midPoint = getTripRouteMidpoint(tripItem, 'amap')
+    if (midPoint) {
+      const mapMid = amapPointToArray(midPoint)
+      allPoints.push(mapMid)
+      const textOverlay = addAMapOverlay(new mapAPI.Text({
+        text: '✦ ' + tripItem.title,
+        position: mapMid,
+        anchor: 'center',
+        zIndex: zIndex + 10,
+        style: {
+          backgroundColor: baseColor,
+          color: '#ffffff',
+          border: isSelected ? '1.5px solid #ffffff' : '1px solid rgba(255,255,255,0.4)',
+          borderRadius: '999px',
+          padding: '4px 10px',
+          fontSize: '11px',
+          fontWeight: '700',
+          lineHeight: '15px',
+          maxWidth: '220px',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          boxShadow: isSelected ? '0 0 0 2px #ffffff, 0 4px 16px rgba(0,0,0,0.45)' : '0 3px 10px rgba(0,0,0,0.3)',
+          cursor: 'pointer',
+          opacity: hasSelection && !isSelected ? '0.35' : '0.95',
+        }
+      }))
+      textOverlay.__atlasTrip = tripItem
+      textOverlay.__atlasColor = baseColor
+      textOverlay.on?.('click', () => {
+        selectAtlasTrip(tripItem)
+      })
+      atlasTripLabels.push(textOverlay)
     }
   })
+
+  updateAtlasLabelsVisibility()
 
   if (!preserveView) {
     if (allPoints.length > 0) {
@@ -2595,9 +2841,12 @@ async function renderAtlasBaidu(preserveView = false) {
     mapReady.value = false
     mapInstance = new mapAPI.Map(mapContainer.value, { enableIconClick: false, fixCenterWhenResize: true })
     mapInstance.enableScrollWheelZoom()
+    mapInstance.addEventListener?.('zoomend', handleMapZoomChange)
     mapInstance.addEventListener?.('tilesloaded', () => { mapReady.value = true; mapError.value = ''; mapWarning.value = '' })
   }
   mapInstance.clearOverlays()
+  atlasStopMarkers = []
+  atlasTripLabels = []
 
   const allPoints: any[] = []
   const tripsToRender = atlasData.value?.trips || []
@@ -2609,6 +2858,7 @@ async function renderAtlasBaidu(preserveView = false) {
     const strokeColor = hasSelection ? (isSelected ? baseColor : '#94a3b8') : baseColor
     const strokeOpacity = hasSelection ? (isSelected ? 0.95 : 0.25) : 0.82
     const strokeWeight = hasSelection ? (isSelected ? 6 : 3) : 5
+    const zIndex = isSelected ? 80 : 30
 
     tripItem.legs.forEach(leg => {
       if (!leg.geometry || leg.geometry.length < 2) return
@@ -2633,38 +2883,63 @@ async function renderAtlasBaidu(preserveView = false) {
       }
     })
 
-    if (mapLabelMode.value !== 'none' && (!hasSelection || isSelected)) {
-      (tripItem.key_stops || []).forEach(stop => {
-        if (!stop.point) return
-        const pt = mapPointFor({ location: { coordinates: { [stop.point.crs || 'bd09ll']: stop.point }, preferred: stop.point.crs || 'bd09ll' } } as any)
-        if (!pt) return
-        const mapPt = new mapAPI.Point(pt.lng, pt.lat)
-        allPoints.push(mapPt)
-        const marker = new mapAPI.Marker(mapPt)
-        marker.addEventListener?.('click', () => {
-          selectAtlasTrip(tripItem)
-        })
-        mapInstance.addOverlay(marker)
-        if (isSelected) {
-          let off = new mapAPI.Size(14, -18)
-          try {
-            const px = mapInstance.pointToPixel?.(mapPt)
-            const screenX = typeof px?.x === 'number' ? px.x : null
-            const containerW = mapContainer.value?.clientWidth || window.innerWidth
-            const rect = mapVisibleRect()
-            const rightLimit = rect ? rect.right : containerW
-            if (typeof screenX === 'number' && screenX > rightLimit - 180) {
-              const estWidth = Math.max(60, stop.title.length * 12 + 20)
-              off = new mapAPI.Size(-estWidth - 10, -18)
-            }
-          } catch {}
-          const label = new mapAPI.Label(stop.title, { offset: off })
-          label.setStyle?.({ color: '#fff', backgroundColor: '#173f47ee', border: '1px solid ' + baseColor, borderRadius: '6px', padding: '3px 7px', fontSize: '11px', fontWeight: '700' })
-          marker.setLabel(label)
-        }
+    for (const stop of tripItem.key_stops || []) {
+      if (!stop.point) continue
+      const pt = mapPointFor({ location: { coordinates: { [stop.point.crs || 'bd09ll']: stop.point }, preferred: stop.point.crs || 'bd09ll' } } as any)
+      if (!pt) continue
+      const mapPt = new mapAPI.Point(pt.lng, pt.lat)
+      allPoints.push(mapPt)
+      const marker = new mapAPI.Marker(mapPt)
+      marker.__atlasStop = stop
+      marker.__atlasTrip = tripItem
+      marker.__atlasColor = baseColor
+      marker.addEventListener?.('click', () => {
+        selectAtlasTrip(tripItem)
       })
+      mapInstance.addOverlay(marker)
+      atlasStopMarkers.push(marker)
+    }
+
+    // 3. 绘制旅程轨迹名称标签 (Trip Title Badge)
+    const midPoint = getTripRouteMidpoint(tripItem, 'baidu')
+    if (midPoint) {
+      const mapMid = new mapAPI.Point(midPoint.lng, midPoint.lat)
+      allPoints.push(mapMid)
+      const labelText = '✦ ' + tripItem.title
+      const estW = Math.min(220, Math.max(80, labelText.length * 11 + 24))
+      const label = new mapAPI.Label(labelText, {
+        position: mapMid,
+        offset: new mapAPI.Size(-Math.round(estW / 2), -12)
+      })
+      label.setStyle?.({
+        color: '#ffffff',
+        backgroundColor: baseColor,
+        border: isSelected ? '1.5px solid #ffffff' : '1px solid rgba(255,255,255,0.4)',
+        borderRadius: '999px',
+        padding: '4px 10px',
+        fontSize: '11px',
+        fontWeight: '700',
+        lineHeight: '15px',
+        maxWidth: '220px',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+        boxShadow: isSelected ? '0 0 0 2px #ffffff, 0 4px 16px rgba(0,0,0,0.45)' : '0 3px 10px rgba(0,0,0,0.3)',
+        cursor: 'pointer',
+        opacity: hasSelection && !isSelected ? 0.35 : 0.95,
+        zIndex: zIndex + 10,
+      })
+      label.addEventListener?.('click', () => {
+        selectAtlasTrip(tripItem)
+      })
+      mapInstance.addOverlay(label)
+      label.__atlasTrip = tripItem
+      label.__atlasColor = baseColor
+      atlasTripLabels.push(label)
     }
   })
+
+  updateAtlasLabelsVisibility()
 
   if (!preserveView) {
     if (allPoints.length > 0) {
@@ -2879,10 +3154,14 @@ function updateStopLabelsVisibility() {
 
 let mapZoomDebounceTimer: number | null = null
 function handleMapZoomChange() {
-  if (mapLabelMode.value !== 'auto' || !isMobileViewport()) return
+  if (mapLabelMode.value !== 'auto') return
   if (mapZoomDebounceTimer !== null) window.clearTimeout(mapZoomDebounceTimer)
   mapZoomDebounceTimer = window.setTimeout(() => {
-    updateStopLabelsVisibility()
+    if (tripView.value === 'atlas') {
+      updateAtlasLabelsVisibility()
+    } else {
+      if (isMobileViewport()) updateStopLabelsVisibility()
+    }
   }, 120)
 }
 
@@ -2890,7 +3169,11 @@ function setMapLabelMode(mode: MapLabelMode) {
   mapLabelMode.value = mode
   localStorage.setItem('journeyin.mapLabelMode', mode)
   localStorage.setItem('journeyin.mapLabels', mode === 'none' ? 'false' : 'true')
-  void renderMap({ preserveView: true })
+  if (tripView.value === 'atlas') {
+    updateAtlasLabelsVisibility()
+  } else {
+    void renderMap({ preserveView: true })
+  }
 }
 
 function toggleMapLabels() {
