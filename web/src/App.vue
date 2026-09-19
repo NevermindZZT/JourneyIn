@@ -5,7 +5,7 @@ import {
 } from '@ionic/vue'
 import BMapLoader from '@baidumap/jsapi-loader'
 import AMapLoader from '@amap/amap-jsapi-loader'
-import { addOutline, chevronBackOutline, chevronDownOutline, chevronForwardOutline, chevronUpOutline, closeOutline, cloudOfflineOutline, createOutline, footstepsOutline, imageOutline, linkOutline, logInOutline, mapOutline, menuOutline, navigateOutline, refreshOutline, searchOutline, settingsOutline, sunnyOutline } from 'ionicons/icons'
+import { addOutline, chevronBackOutline, chevronDownOutline, chevronForwardOutline, chevronUpOutline, closeOutline, cloudOfflineOutline, createOutline, footstepsOutline, imageOutline, linkOutline, logInOutline, mapOutline, menuOutline, navigateOutline, partlySunnyOutline, refreshOutline, searchOutline, settingsOutline, sunnyOutline } from 'ionicons/icons'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 import PrototypePreview from './PrototypePreview.vue'
@@ -29,13 +29,21 @@ type TripSummary = { id: string; title: string; status: string; start_date: stri
 type TripHistoryEntry = { id: string; history_id?: string; trip_id: string; source_revision: number; title: string; start_date: string; end_date: string; label?: string; content_hash: string; created_at: string; read_only?: boolean }
 type TripSortMode = 'updated' | 'date'
 type Capabilities = { version?: string; default_map_provider?: 'baidu' | 'amap'; map_providers?: { baidu?: { browser_key_configured?: boolean; browser_key?: string }; amap?: { browser_key_configured?: boolean; browser_key?: string; security_proxy_path?: string; security_js_code_configured?: boolean } }; features?: { planning_point_edit?: boolean; coordinate_repair?: boolean }; mcp?: { http_endpoint?: string } }
-type KeySettings = { map?: { default_provider?: 'baidu' | 'amap'; baidu?: { browser_key_configured?: boolean; server_key_configured?: boolean }; amap?: { js_key_configured?: boolean; server_key_configured?: boolean; security_js_code_configured?: boolean } }; poi?: { provider_priority?: 'amap' | 'baidu'; local_directory_count?: number }; photos?: { root_dir?: string; configured?: boolean } }
+type KeySettings = { map?: { default_provider?: 'baidu' | 'amap'; baidu?: { browser_key_configured?: boolean; server_key_configured?: boolean }; amap?: { js_key_configured?: boolean; server_key_configured?: boolean; security_js_code_configured?: boolean } }; poi?: { provider_priority?: 'amap' | 'baidu'; local_directory_count?: number }; photos?: { root_dir?: string; configured?: boolean }; weather?: { default_provider?: 'auto' | 'openmeteo' | 'qweather' | 'caiyun' | 'amap' | 'baidu'; openmeteo?: { available?: boolean }; qweather?: { key_configured?: boolean; host?: string }; caiyun?: { token_configured?: boolean } } }
 type PlaceCandidate = { id?: string; name: string; address?: string; location: Coord & { crs?: string }; provider?: string; citycode?: string; adcode?: string; typecode?: string }
 type TravelMode = 'driving' | 'walking' | 'cycling' | 'transit'
 
 const mapProviderOptions = [
   { value: 'amap', label: '高德地图', description: 'AMap' },
   { value: 'baidu', label: '百度地图', description: 'Baidu Maps' },
+]
+const weatherProviderOptions = [
+  { value: 'auto', label: '智能自动 (推荐)', description: '有和风或彩云优先使用，无配置自动使用 Open-Meteo 16天全球预报' },
+  { value: 'openmeteo', label: 'Open-Meteo (16天免Key · 全球)', description: "零配置开箱即用，支持最高16天长预报与网格降水" },
+  { value: 'qweather', label: '和风天气 (10天预报 · QWeather)', description: "原生经纬度10天每日预报与分钟级天气状况" },
+  { value: 'caiyun', label: '彩云天气 (3~15天 · Caiyun)', description: "支持实时天气与短期预报" },
+  { value: 'baidu', label: '百度天气 (7天)', description: "支持当天及未来7天国内预报" },
+  { value: 'amap', label: '高德天气 (3天)', description: "支持当天及未来3天国内预报" },
 ]
 const travelModeOptions = [
   { value: 'walking', label: '步行' },
@@ -336,7 +344,7 @@ const shareNoticeVisible = ref(false)
 const posterModalOpen = ref(false)
 const actionLoading = ref(false)
 const settingsOpen = ref(false)
-type SettingsSection = 'appearance' | 'connection' | 'maps' | 'photos' | 'search' | 'sharing' | 'mcp' | 'about'
+type SettingsSection = 'appearance' | 'connection' | 'maps' | 'weather' | 'photos' | 'search' | 'sharing' | 'mcp' | 'about'
 type MarkdownEditorMode = 'edit' | 'preview'
 const settingsSection = ref<SettingsSection>('appearance')
 const newTripOpen = ref(false)
@@ -363,6 +371,10 @@ const amapServerKeyInput = ref('')
 const amapSecurityJSCodeInput = ref('')
 const poiProviderPriority = ref<'amap' | 'baidu'>('amap')
 const photosRootDirInput = ref('')
+const defaultWeatherProvider = ref<'auto' | 'openmeteo' | 'qweather' | 'caiyun' | 'amap' | 'baidu'>('auto')
+const qweatherKeyInput = ref('')
+const qweatherHostInput = ref('')
+const caiyunTokenInput = ref('')
 const localDirectoryCount = ref(0)
 const settingsSaving = ref(false)
 const panelOpen = ref(localStorage.getItem('journeyin.panelOpen') !== 'false')
@@ -4394,7 +4406,7 @@ function weatherDetails(stop: Stop | SubStop) {
     rangeText,
     liveText,
     metricsText: metrics.join(' · '),
-    provider: weather.provider === 'amap' ? '高德天气' : weather.provider === 'baidu' ? '百度天气' : '',
+    provider: weather.provider === 'openmeteo' ? 'Open-Meteo' : weather.provider === 'qweather' ? '和风天气' : weather.provider === 'caiyun' ? '彩云天气' : weather.provider === 'amap' ? '高德天气' : weather.provider === 'baidu' ? '百度天气' : '',
   }
 }
 function weatherText(stop: Stop | SubStop) {
@@ -4413,7 +4425,7 @@ async function refreshWeather() {
   weatherLoading.value = true; error.value = ''
   const childID = selectedSubStop.value?.id || ''
   try {
-    const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(day.id) + '/stops/' + encodeURIComponent(selectedTarget.value.id) + '/weather', { method: 'POST', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision }, body: JSON.stringify({ provider: selectedMapProvider.value, local_date: day.date }) })
+    const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(day.id) + '/stops/' + encodeURIComponent(selectedTarget.value.id) + '/weather', { method: 'POST', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision }, body: JSON.stringify({ provider: defaultWeatherProvider.value || 'auto', local_date: day.date }) })
     const payload = await response.json() as { document?: TripDocument; revision?: number; stops?: number; days?: number; error?: { message?: string } }
     if (!response.ok) throw new Error(payload.error?.message || '天气查询失败')
     applyTripPayload(payload); selectedStopId.value = parent.id; selectedSubStopId.value = childID
@@ -4603,7 +4615,116 @@ async function openSettings() {
     amapServerKeyInput.value = ''
     amapSecurityJSCodeInput.value = ''
     photosRootDirInput.value = settingsData.value.photos?.root_dir || photoStatus.value?.root_dir || ''
+    if (settingsData.value.weather?.default_provider) {
+      defaultWeatherProvider.value = settingsData.value.weather.default_provider
+    } else {
+      defaultWeatherProvider.value = 'auto'
+    }
+    qweatherKeyInput.value = ''
+    qweatherHostInput.value = settingsData.value.weather?.qweather?.host || ''
+    caiyunTokenInput.value = ''
   } catch (cause) { settingsMessage.value = cause instanceof Error ? cause.message : '无法读取设置' }
+}
+
+async function saveDefaultWeatherProvider() {
+  settingsSaving.value = true
+  try {
+    const response = await apiFetch('/api/v1/settings/weather', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ default_provider: defaultWeatherProvider.value })
+    })
+    const payload = await response.json() as { error?: { message?: string } }
+    if (!response.ok) throw new Error(payload.error?.message || '保存默认天气失败')
+    await openSettings()
+    settingsMessage.value = '默认天气服务商已保存'
+  } catch (cause) {
+    settingsMessage.value = cause instanceof Error ? cause.message : '保存默认天气失败'
+  } finally {
+    settingsSaving.value = false
+  }
+}
+
+async function saveQWeatherSettings() {
+  settingsSaving.value = true
+  try {
+    const body: Record<string, string> = {}
+    if (qweatherKeyInput.value.trim() !== '') {
+      body.qweather_key = qweatherKeyInput.value.trim()
+    }
+    if (qweatherHostInput.value.trim() !== '') {
+      body.qweather_host = qweatherHostInput.value.trim()
+    }
+    const response = await apiFetch('/api/v1/settings/weather', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+    const payload = await response.json() as { error?: { message?: string } }
+    if (!response.ok) throw new Error(payload.error?.message || '保存和风天气设置失败')
+    await openSettings()
+    settingsMessage.value = '和风天气设置已保存到数据库'
+  } catch (cause) {
+    settingsMessage.value = cause instanceof Error ? cause.message : '保存和风天气设置失败'
+  } finally {
+    settingsSaving.value = false
+  }
+}
+
+async function clearQWeatherKey() {
+  settingsSaving.value = true
+  try {
+    const response = await apiFetch('/api/v1/settings/weather', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ qweather_key: '' })
+    })
+    const payload = await response.json() as { error?: { message?: string } }
+    if (!response.ok) throw new Error(payload.error?.message || '清除和风天气 Key 失败')
+    await openSettings()
+    settingsMessage.value = '和风天气 Key 已清除'
+  } catch (cause) {
+    settingsMessage.value = cause instanceof Error ? cause.message : '清除和风天气 Key 失败'
+  } finally {
+    settingsSaving.value = false
+  }
+}
+async function saveCaiyunToken() {
+  settingsSaving.value = true
+  try {
+    const response = await apiFetch('/api/v1/settings/weather', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ caiyun_token: caiyunTokenInput.value.trim() })
+    })
+    const payload = await response.json() as { error?: { message?: string } }
+    if (!response.ok) throw new Error(payload.error?.message || '保存彩云 Token 失败')
+    await openSettings()
+    settingsMessage.value = '彩云 Token 已保存到数据库'
+  } catch (cause) {
+    settingsMessage.value = cause instanceof Error ? cause.message : '保存彩云 Token 失败'
+  } finally {
+    settingsSaving.value = false
+  }
+}
+
+async function clearCaiyunToken() {
+  settingsSaving.value = true
+  try {
+    const response = await apiFetch('/api/v1/settings/weather', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ caiyun_token: '' })
+    })
+    const payload = await response.json() as { error?: { message?: string } }
+    if (!response.ok) throw new Error(payload.error?.message || '清除彩云 Token 失败')
+    await openSettings()
+    settingsMessage.value = '彩云天气 Token 已清除'
+  } catch (cause) {
+    settingsMessage.value = cause instanceof Error ? cause.message : '清除彩云 Token 失败'
+  } finally {
+    settingsSaving.value = false
+  }
 }
 
 async function savePhotosRootDir() {
@@ -5273,6 +5394,7 @@ onUnmounted(() => {
               <button type="button" :class="{ active: settingsSection === 'appearance' }" @click="settingsSection = 'appearance'"><span class="settings-nav-icon">☼</span><span>外观</span><small>主题与阅读</small></button>
               <button type="button" :class="{ active: settingsSection === 'connection' }" @click="settingsSection = 'connection'"><span class="settings-nav-icon">↗</span><span>连接</span><small>服务与令牌</small></button>
               <button type="button" :class="{ active: settingsSection === 'maps' }" @click="settingsSection = 'maps'"><span class="settings-nav-icon">⌖</span><span>地图</span><small>Provider 与 Key</small></button>
+              <button type="button" :class="{ active: settingsSection === 'weather' }" @click="settingsSection = 'weather'"><span class="settings-nav-icon"><IonIcon :icon="partlySunnyOutline" /></span><span>天气服务</span><small>彩云与 15 天预报</small></button>
               <button type="button" :class="{ active: settingsSection === 'photos' }" @click="settingsSection = 'photos'"><span class="settings-nav-icon"><IonIcon :icon="imageOutline" /></span><span>足迹相册</span><small>相册扫描目录</small></button>
               <button type="button" :class="{ active: settingsSection === 'search' }" @click="settingsSection = 'search'"><span class="settings-nav-icon">⌕</span><span>地点检索</span><small>搜索优先级</small></button>
               <button type="button" :class="{ active: settingsSection === 'sharing' }" @click="settingsSection = 'sharing'"><span class="settings-nav-icon">↗</span><span>分享</span><small>链接与权限</small></button>
@@ -5348,6 +5470,117 @@ onUnmounted(() => {
                       {{ photoSyncing || photoStatus?.scanning ? '扫描中…' : '立即增量重新扫描' }}
                     </button>
                   </div>
+                </div>
+                <p v-if="settingsMessage" class="settings-feedback">{{ settingsMessage }}</p>
+              </section>
+
+              <section v-else-if="settingsSection === 'weather'" class="settings-page-section">
+                <div class="settings-section-heading">
+                  <span class="eyebrow">WEATHER SERVICE</span>
+                  <h3>天气服务与 16 天长预报</h3>
+                  <p>解耦地图与天气能力，支持免 Key 开箱即用的 Open-Meteo 16 天全球预报，以及和风天气、彩云天气商业服务。</p>
+                </div>
+                <div class="settings-card">
+                  <div class="settings-card-heading">
+                    <div>
+                      <strong>默认天气服务商</strong>
+                      <small>行程规划点刷新天气时默认使用的气象服务源</small>
+                    </div>
+                    <span class="settings-status-dot"></span>
+                  </div>
+                  <label class="select-field">
+                    默认天气服务商
+                    <UiSelect v-model="defaultWeatherProvider" aria-label="默认天气服务商" :options="weatherProviderOptions" />
+                  </label>
+                  <p class="settings-help">智能自动模式下，配置和风或彩云后优先调用；未配置任何 Key 时，系统将自动使用 Open-Meteo 提供最高 16 天的免费全球逐日预报与降水数据。</p>
+                  <button class="primary-action" type="button" :disabled="settingsSaving" @click="saveDefaultWeatherProvider">{{ settingsSaving ? '保存中…' : '保存默认天气' }}</button>
+                </div>
+
+                <div class="settings-provider-grid">
+                  <article class="settings-card provider-card">
+                    <div class="settings-card-heading">
+                      <div>
+                        <strong>Open-Meteo</strong>
+                        <small>全球气象开放数据网格 · 16 天逐日预报</small>
+                      </div>
+                      <span class="provider-status">免 Key 开箱即用</span>
+                    </div>
+                    <p class="settings-status-line">
+                      服务状态：<strong>可用 (全球覆盖)</strong><br />
+                      预报跨度：<strong>最高 16 天逐日天气与降水</strong><br />
+                      配置要求：<strong>零配置，无需申请 API Key</strong>
+                    </p>
+                    <p class="settings-help" style="margin-top: 0; min-height: 48px;">
+                      基于各国家气象机构数值模式聚合，开箱即用，特别适合多天长途旅行的超长程逐日气象与降水预测。
+                    </p>
+                    <a href="https://open-meteo.com" target="_blank" rel="noopener noreferrer">访问 Open-Meteo 官网 ↗</a>
+                  </article>
+
+                  <article class="settings-card provider-card">
+                    <div class="settings-card-heading">
+                      <div>
+                        <strong>和风天气 (QWeather)</strong>
+                        <small>v7 / v1 API · 10~30 天每日预报</small>
+                      </div>
+                      <span class="provider-status">{{ settingsData?.weather?.qweather?.key_configured ? 'Key 已配置' : '待配置' }}</span>
+                    </div>
+                    <p class="settings-status-line">
+                      API Key：<strong>{{ settingsData?.weather?.qweather?.key_configured ? '已配置' : '未配置' }}</strong><br />
+                      专属 Host：<strong>{{ settingsData?.weather?.qweather?.host || 'api.qweather.com' }}</strong>
+                    </p>
+                    <label>
+                      API Key
+                      <input
+                        v-model="qweatherKeyInput"
+                        type="password"
+                        :placeholder="settingsData?.weather?.qweather?.key_configured ? '已配置，输入新 Key 可替换' : '输入和风天气 API Key'"
+                        autocomplete="off"
+                      />
+                    </label>
+                    <label>
+                      专属 API Host
+                      <input
+                        v-model="qweatherHostInput"
+                        type="text"
+                        placeholder="例如：xxxx.xy.qweatherapi.com (默认 api.qweather.com)"
+                        autocomplete="off"
+                      />
+                    </label>
+                    <a href="https://console.qweather.com" target="_blank" rel="noopener noreferrer">申请/管理和风天气 Key ↗</a>
+                  </article>
+                </div>
+                <p class="settings-help">保存和风天气 Key 到数据库后，服务端会立即生效；Key 只返回配置状态，不会回显原文。注册和风天气控制台即可免费获得每月 50,000 次调用额度。</p>
+                <div class="settings-actions">
+                  <button class="primary-action" type="button" :disabled="settingsSaving" @click="saveQWeatherSettings">{{ settingsSaving ? '保存中…' : '保存和风天气设置' }}</button>
+                  <button v-if="settingsData?.weather?.qweather?.key_configured" class="secondary-action" type="button" :disabled="settingsSaving" @click="clearQWeatherKey">清除 Key</button>
+                </div>
+
+                <article class="settings-card provider-card" style="margin-top: 14px;">
+                  <div class="settings-card-heading">
+                    <div>
+                      <strong>彩云天气 (ColorfulClouds)</strong>
+                      <small>v2.6 开放平台 API · 个人免费版 3 天 / 付费套餐最高 15 天</small>
+                    </div>
+                    <span class="provider-status">{{ settingsData?.weather?.caiyun?.token_configured ? 'Token 已配置' : '待配置' }}</span>
+                  </div>
+                  <p class="settings-status-line">
+                    彩云 API 令牌：<strong>{{ settingsData?.weather?.caiyun?.token_configured ? '已配置 (受保护存储)' : '未配置' }}</strong>
+                  </p>
+                  <label>
+                    彩云开放平台 Token
+                    <input
+                      v-model="caiyunTokenInput"
+                      type="password"
+                      :placeholder="settingsData?.weather?.caiyun?.token_configured ? '已配置，输入新 Token 可替换' : '输入彩云天气开放平台 Token'"
+                      autocomplete="off"
+                    />
+                  </label>
+                  <a href="https://platform.caiyunapp.com" target="_blank" rel="noopener noreferrer">申请彩云开放平台 Token ↗</a>
+                </article>
+                <p class="settings-help">保存彩云 Token 到数据库后，服务端会立即生效；Token 只返回配置状态，不会回显原文。注：彩云个人免费版额度限制最多返回 3 天预报。</p>
+                <div class="settings-actions">
+                  <button class="primary-action" type="button" :disabled="settingsSaving" @click="saveCaiyunToken">{{ settingsSaving ? '保存中…' : '保存彩云 Token 到数据库' }}</button>
+                  <button v-if="settingsData?.weather?.caiyun?.token_configured" class="secondary-action" type="button" :disabled="settingsSaving" @click="clearCaiyunToken">清除 Token</button>
                 </div>
                 <p v-if="settingsMessage" class="settings-feedback">{{ settingsMessage }}</p>
               </section>

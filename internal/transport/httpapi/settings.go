@@ -8,6 +8,7 @@ import (
 
 	journeymaps "journeyin/internal/maps"
 	"journeyin/internal/photos"
+	"journeyin/internal/weather"
 )
 
 const defaultMapProviderSettingKey = "map.default_provider"
@@ -130,6 +131,33 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	if photosRootDir == "" && s.photosService != nil {
 		photosRootDir = s.photosService.RootDir()
 	}
+	defaultWeatherProvider := string(weather.ProviderAuto)
+	caiyunTokenConfigured := false
+	qweatherKeyConfigured := false
+	qweatherHost := "api.qweather.com"
+	if s.weatherService != nil {
+		defaultWeatherProvider = string(s.weatherService.DefaultProvider())
+		if p := s.weatherService.CaiyunProvider(); p != nil {
+			caiyunTokenConfigured = p.TokenConfigured()
+		}
+		if p := s.weatherService.QWeatherProvider(); p != nil {
+			qweatherKeyConfigured = p.KeyConfigured()
+			qweatherHost = p.Host()
+		}
+	} else if s.settingsStore != nil {
+		if val, ok, err := s.settingsStore.GetSetting(r.Context(), "weather.default_provider"); err == nil && ok && strings.TrimSpace(val) != "" {
+			defaultWeatherProvider = strings.TrimSpace(val)
+		}
+		if _, ok, err := s.settingsStore.GetSetting(r.Context(), "weather.caiyun.token"); err == nil && ok {
+			caiyunTokenConfigured = true
+		}
+		if _, ok, err := s.settingsStore.GetSetting(r.Context(), "weather.qweather.key"); err == nil && ok {
+			qweatherKeyConfigured = true
+		}
+		if val, ok, err := s.settingsStore.GetSetting(r.Context(), "weather.qweather.host"); err == nil && ok && strings.TrimSpace(val) != "" {
+			qweatherHost = strings.TrimSpace(val)
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"map": map[string]any{
 			"default_provider": defaultProvider,
@@ -143,6 +171,19 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		"photos": map[string]any{
 			"root_dir":   photosRootDir,
 			"configured": photosRootDir != "",
+		},
+		"weather": map[string]any{
+			"default_provider": defaultWeatherProvider,
+			"openmeteo": map[string]any{
+				"available": true,
+			},
+			"qweather": map[string]any{
+				"key_configured": qweatherKeyConfigured,
+				"host":           qweatherHost,
+			},
+			"caiyun": map[string]any{
+				"token_configured": caiyunTokenConfigured,
+			},
 		},
 	})
 }
@@ -331,5 +372,84 @@ func (s *Server) updatePhotosSettings(w http.ResponseWriter, r *http.Request) {
 		"root_dir": newDir,
 		"enabled":  s.photosService != nil && s.photosService.IsEnabled(),
 	})
+}
+
+type weatherSettingsBody struct {
+	DefaultProvider *string `json:"default_provider"`
+	CaiyunToken     *string `json:"caiyun_token"`
+	QWeatherKey     *string `json:"qweather_key"`
+	QWeatherHost    *string `json:"qweather_host"`
+}
+
+func (s *Server) updateWeatherSettings(w http.ResponseWriter, r *http.Request) {
+	if s.settingsStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "settings_unavailable", "settings store is not configured", nil)
+		return
+	}
+	var body weatherSettingsBody
+	if err := decodeBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
+		return
+	}
+	if body.DefaultProvider != nil {
+		val := strings.TrimSpace(*body.DefaultProvider)
+		providerID := weather.ParseProviderID(val)
+		if err := s.settingsStore.SetSetting(r.Context(), "weather.default_provider", string(providerID), false); err != nil {
+			writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
+			return
+		}
+		if s.weatherService != nil {
+			s.weatherService.SetDefaultProvider(providerID)
+		}
+	}
+	if body.CaiyunToken != nil {
+		token := strings.TrimSpace(*body.CaiyunToken)
+		var err error
+		if token == "" {
+			err = s.settingsStore.DeleteSetting(r.Context(), "weather.caiyun.token")
+		} else {
+			err = s.settingsStore.SetSetting(r.Context(), "weather.caiyun.token", token, true)
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
+			return
+		}
+		if s.weatherService != nil && s.weatherService.CaiyunProvider() != nil {
+			s.weatherService.CaiyunProvider().SetToken(token)
+		}
+	}
+	if body.QWeatherKey != nil {
+		key := strings.TrimSpace(*body.QWeatherKey)
+		var err error
+		if key == "" {
+			err = s.settingsStore.DeleteSetting(r.Context(), "weather.qweather.key")
+		} else {
+			err = s.settingsStore.SetSetting(r.Context(), "weather.qweather.key", key, true)
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
+			return
+		}
+		if s.weatherService != nil && s.weatherService.QWeatherProvider() != nil {
+			s.weatherService.QWeatherProvider().SetKey(key)
+		}
+	}
+	if body.QWeatherHost != nil {
+		host := strings.TrimSpace(*body.QWeatherHost)
+		var err error
+		if host == "" {
+			err = s.settingsStore.DeleteSetting(r.Context(), "weather.qweather.host")
+		} else {
+			err = s.settingsStore.SetSetting(r.Context(), "weather.qweather.host", host, false)
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
+			return
+		}
+		if s.weatherService != nil && s.weatherService.QWeatherProvider() != nil {
+			s.weatherService.QWeatherProvider().SetHost(host)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"saved": true})
 }
 

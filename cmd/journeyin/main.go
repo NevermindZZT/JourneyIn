@@ -21,6 +21,7 @@ import (
 	"journeyin/internal/photos"
 	"journeyin/internal/store"
 	"journeyin/internal/transport/httpapi"
+	"journeyin/internal/weather"
 	mcptransport "journeyin/internal/transport/mcp"
 )
 
@@ -109,6 +110,58 @@ func main() {
 		photosSvc.TriggerScan()
 	}
 	api.SetPhotoService(photosSvc)
+
+	// 初始化天气服务 (解耦后的统一 weather.Service，支持 Open-Meteo、和风天气、彩云、高德、百度适配)
+	openmeteoProvider := weather.NewOpenMeteoProvider()
+	qweatherKey := settingValue(ctx, database, "weather.qweather.key", os.Getenv("JOURNEYIN_QWEATHER_KEY"))
+	qweatherHost := settingValue(ctx, database, "weather.qweather.host", os.Getenv("JOURNEYIN_QWEATHER_HOST"))
+	qweatherProvider := weather.NewQWeatherProvider(qweatherKey, qweatherHost)
+	caiyunToken := settingValue(ctx, database, "weather.caiyun.token", os.Getenv("JOURNEYIN_CAIYUN_TOKEN"))
+	caiyunProvider := weather.NewCaiyunProvider(caiyunToken)
+
+	weatherRegistry := weather.NewRegistry()
+	weatherRegistry.Register(openmeteoProvider)
+	weatherRegistry.Register(qweatherProvider)
+	weatherRegistry.Register(caiyunProvider)
+
+	if baidu, ok := mapRegistry.Get(journeymaps.ProviderBaidu); ok {
+		weatherRegistry.Register(weather.NewMapWeatherAdapter(weather.ProviderBaidu, func(ctx context.Context, req weather.WeatherRequest) (weather.WeatherSnapshot, error) {
+			mReq := journeymaps.WeatherRequest{
+				Location:  journeymaps.GeoPoint{Lat: req.Location.Lat, Lng: req.Location.Lng, CRS: journeymaps.CoordinateSystem(req.Location.CRS)},
+				LocalDate: req.LocalDate,
+				Timezone:  req.Timezone,
+				CityCode:  req.CityCode,
+				AdCode:    req.AdCode,
+			}
+			snap, err := baidu.Weather(ctx, mReq)
+			if err != nil {
+				return weather.WeatherSnapshot{Provider: weather.ProviderBaidu, LocalDate: req.LocalDate, Available: false}, err
+			}
+			return convertMapWeatherToWeather(snap), nil
+		}))
+	}
+	if amap, ok := mapRegistry.Get(journeymaps.ProviderAMap); ok {
+		weatherRegistry.Register(weather.NewMapWeatherAdapter(weather.ProviderAMap, func(ctx context.Context, req weather.WeatherRequest) (weather.WeatherSnapshot, error) {
+			mReq := journeymaps.WeatherRequest{
+				Location:  journeymaps.GeoPoint{Lat: req.Location.Lat, Lng: req.Location.Lng, CRS: journeymaps.CoordinateSystem(req.Location.CRS)},
+				LocalDate: req.LocalDate,
+				Timezone:  req.Timezone,
+				CityCode:  req.CityCode,
+				AdCode:    req.AdCode,
+			}
+			snap, err := amap.Weather(ctx, mReq)
+			if err != nil {
+				return weather.WeatherSnapshot{Provider: weather.ProviderAMap, LocalDate: req.LocalDate, Available: false}, err
+			}
+			return convertMapWeatherToWeather(snap), nil
+		}))
+	}
+
+	defaultWeatherProvider := weather.ParseProviderID(settingValue(ctx, database, "weather.default_provider", os.Getenv("JOURNEYIN_DEFAULT_WEATHER_PROVIDER")))
+	weatherCache := weatherCacheStoreAdapter{store: database}
+	weatherService := weather.NewService(weatherRegistry, qweatherProvider, caiyunProvider, openmeteoProvider, weatherCache, defaultWeatherProvider)
+	app.SetWeatherService(weatherService)
+	api.SetWeatherService(weatherService)
 
 	mcpToken := strings.TrimSpace(os.Getenv("JOURNEYIN_MCP_TOKEN"))
 	if !isLoopback(listen) && mcpToken == "" {
@@ -224,4 +277,46 @@ func isLoopback(addr string) bool {
 		return false
 	}
 	return host == "127.0.0.1" || host == "localhost" || host == "::1"
+}
+
+func convertMapWeatherToWeather(snap journeymaps.WeatherSnapshot) weather.WeatherSnapshot {
+	return weather.WeatherSnapshot{
+		Provider:         weather.ProviderID(snap.Provider),
+		LocalDate:        snap.LocalDate,
+		Condition:        snap.Condition,
+		TemperatureC:     snap.TemperatureC,
+		TempMinC:         snap.TempMinC,
+		TempMaxC:         snap.TempMaxC,
+		CurrentCondition: snap.CurrentCondition,
+		CurrentTempC:     snap.CurrentTempC,
+		HumidityPercent:  snap.HumidityPercent,
+		WindDirection:    snap.WindDirection,
+		WindPower:        snap.WindPower,
+		PressureHPa:      snap.PressureHPa,
+		FetchedAt:        snap.FetchedAt,
+		ExpiresAt:        snap.ExpiresAt,
+		Available:        snap.Available,
+	}
+}
+
+type weatherCacheStoreAdapter struct {
+	store *store.Store
+}
+
+func (a weatherCacheStoreAdapter) GetMapCache(ctx context.Context, provider, category, key string) ([]byte, bool, error) {
+	if a.store == nil {
+		return nil, false, nil
+	}
+	entry, ok, err := a.store.GetMapCache(ctx, provider, category, key)
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	return entry.ResponseJSON, true, nil
+}
+
+func (a weatherCacheStoreAdapter) PutMapCache(ctx context.Context, provider, category, key string, data []byte, expiresAt, now time.Time) error {
+	if a.store == nil {
+		return nil
+	}
+	return a.store.PutMapCache(ctx, provider, category, key, data, expiresAt, now)
 }

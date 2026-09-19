@@ -13,6 +13,7 @@ import (
 	"journeyin/internal/domain"
 	journeymaps "journeyin/internal/maps"
 	"journeyin/internal/store"
+	"journeyin/internal/weather"
 )
 
 type AddStopInput struct {
@@ -797,8 +798,8 @@ func (s *TripService) MoveStopToDay(ctx context.Context, tripID string, expected
 	return s.Replace(ctx, tripID, expectedRevision, normalized, source)
 }
 func (s *TripService) RefreshWeather(ctx context.Context, tripID string, expectedRevision int, dayID, stopID string, input WeatherInput, source string) (store.TripRecord, error) {
-	if s.mapService == nil {
-		return store.TripRecord{}, errors.New("map service is not configured")
+	if s.weatherService == nil && s.mapService == nil {
+		return store.TripRecord{}, errors.New("weather service is not configured")
 	}
 	record, err := s.store.GetTrip(ctx, tripID)
 	if err != nil {
@@ -852,13 +853,37 @@ func (s *TripService) RefreshWeather(ctx context.Context, tripID string, expecte
 	if localDate == "" {
 		localDate = dayDate
 	}
-	snapshot, err := s.mapService.WeatherWithCache(ctx, provider, journeymaps.WeatherRequest{Location: locationData.Point, LocalDate: localDate, Timezone: trip.Timezone, CityCode: locationData.CityCode, AdCode: locationData.AdCode}, false)
-	if err != nil {
-		return store.TripRecord{}, err
-	}
-	weather, err := json.Marshal(snapshot)
-	if err != nil {
-		return store.TripRecord{}, err
+	var weatherRaw []byte
+	if s.weatherService != nil {
+		wProvider := weather.ParseProviderID(string(input.Provider))
+		wReq := weather.WeatherRequest{
+			Location: weather.GeoPoint{
+				Lat: locationData.Point.Lat,
+				Lng: locationData.Point.Lng,
+				CRS: weather.CRS(locationData.Point.CRS),
+			},
+			LocalDate: localDate,
+			Timezone:  trip.Timezone,
+			CityCode:  locationData.CityCode,
+			AdCode:    locationData.AdCode,
+		}
+		snapshot, err := s.weatherService.WeatherWithCache(ctx, wProvider, wReq, false)
+		if err != nil {
+			return store.TripRecord{}, err
+		}
+		weatherRaw, err = json.Marshal(snapshot)
+		if err != nil {
+			return store.TripRecord{}, err
+		}
+	} else {
+		snapshot, err := s.mapService.WeatherWithCache(ctx, provider, journeymaps.WeatherRequest{Location: locationData.Point, LocalDate: localDate, Timezone: trip.Timezone, CityCode: locationData.CityCode, AdCode: locationData.AdCode}, false)
+		if err != nil {
+			return store.TripRecord{}, err
+		}
+		weatherRaw, err = json.Marshal(snapshot)
+		if err != nil {
+			return store.TripRecord{}, err
+		}
 	}
 	for dayIndex := range trip.Days {
 		if trip.Days[dayIndex].ID != dayID {
@@ -867,13 +892,13 @@ func (s *TripService) RefreshWeather(ctx context.Context, tripID string, expecte
 		for stopIndex := range trip.Days[dayIndex].Stops {
 			stop := &trip.Days[dayIndex].Stops[stopIndex]
 			if stop.ID == stopID {
-				stop.Weather = weather
+				stop.Weather = weatherRaw
 				found = true
 				break
 			}
 			for childIndex := range stop.Children {
 				if stop.Children[childIndex].ID == stopID {
-					stop.Children[childIndex].Weather = weather
+					stop.Children[childIndex].Weather = weatherRaw
 					found = true
 					break
 				}

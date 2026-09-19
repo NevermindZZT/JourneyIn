@@ -161,6 +161,7 @@ POST /api/v1/trips/{trip_id}/plan
 POST /api/v1/trips/{trip_id}/routes/refresh
 PUT  /api/v1/settings/map
 PUT  /api/v1/settings/poi
+PUT  /api/v1/settings/weather
 DELETE /api/v1/settings/place-directory
 ~~~
 
@@ -175,6 +176,10 @@ $env:JOURNEYIN_MAP_DAILY_LIMIT = '0' # 0 表示不在 JourneyIn 内设置上限
 $env:JOURNEYIN_AMAP_SERVER_KEY = '<amap-webservice-key>'
 $env:JOURNEYIN_AMAP_JS_KEY = '<amap-web-js-key>'
 $env:JOURNEYIN_AMAP_SECURITY_JS_CODE = '<amap-js-security-code>'
+# 天气服务环境变量（可选）：默认开箱使用 Open-Meteo 全球 16 天免 Key 预报，也可配置商业服务
+$env:JOURNEYIN_QWEATHER_KEY = '<qweather-api-key>' # 和风天气 Key (每月 50,000 次免费)
+$env:JOURNEYIN_QWEATHER_HOST = '<qweather-api-host>' # 默认 api.qweather.com 或控制台专属 host
+$env:JOURNEYIN_CAIYUN_TOKEN = '<caiyun-weather-token>' # 彩云天气 Token
 ~~~
 
 高德服务端 Key 优先从设置页保存的 SQLite app_settings 读取；只有设置项为空时才使用环境变量 fallback。高德 POI 结果使用 GCJ-02，保存地点时会同时保留原始 CRS 和用于百度 BMap 显示的 BD-09LL 转换坐标。地点搜索结果进入本地目录后保留 7 天，设置页可以手动清除。
@@ -288,9 +293,12 @@ GET  /api/v1/sync/pull
 POST /api/v1/sync/push
 GET  /api/v1/settings
 PUT  /api/v1/settings/map-keys
+PUT  /api/v1/settings/weather
 ~~~
 
-百度服务端 Key 使用 JOURNEYIN_BAIDU_SERVER_AK；浏览器端 JSAPI 4.0/BMap（兼容 legacy BMapGL）Key 使用 JOURNEYIN_BAIDU_BROWSER_AK。高德 Web Service Key 使用 JOURNEYIN_AMAP_SERVER_KEY，JS API 2.0 浏览器 Key 使用 JOURNEYIN_AMAP_JS_KEY，JS 安全密钥使用 JOURNEYIN_AMAP_SECURITY_JS_CODE；高德安全密钥只在服务端代理中使用。百度和高德 Key 都可以在设置页填写并保存到 SQLite 的 app_settings 表；已保存的设置优先于环境变量，服务端 Key 和 JS 安全密钥只返回已配置状态，不回显原文。没有 Key 时服务返回明确的 provider_unavailable，不伪造路线。设置接口为 GET /api/v1/settings 和 PUT /api/v1/settings/map-keys。
+百度服务端 Key 使用 JOURNEYIN_BAIDU_SERVER_AK；浏览器端 JSAPI 4.0/BMap（兼容 legacy BMapGL）Key 使用 JOURNEYIN_BAIDU_BROWSER_AK。高德 Web Service Key 使用 JOURNEYIN_AMAP_SERVER_KEY，JS API 2.0 浏览器 Key 使用 JOURNEYIN_AMAP_JS_KEY，JS 安全密钥使用 JOURNEYIN_AMAP_SECURITY_JS_CODE；高德安全密钥只在服务端代理中使用。百度和高德 Key 都可以在设置页填写并保存到 SQLite 的 app_settings 表；已保存的设置优先于环境变量，服务端 Key 和 JS 安全密钥只返回已配置状态，不回显原文。没有 Key 时服务返回明确的 provider_unavailable，不伪造路线。设置接口为 GET /api/v1/settings、PUT /api/v1/settings/map-keys 和 PUT /api/v1/settings/weather。
+
+天气服务已与地图底图彻底解耦，抽象为独立的 Weather Provider 体系。系统默认采用智能自动模式（auto）：未配置任何 Key 时，系统默认自动调用 **Open-Meteo**，免 Key 开箱即用享受未来 **16 天全球每日气象与降水预报**；在设置页配置 **和风天气（QWeather）** 后，优先使用和风天气商业级本土化 10~30 天每日预报；同时兼容彩云天气、高德天气（3天内）与百度天气（7天内）的自动平滑降级。
 
 使用官方最小 JSAPI 初始化验证：构建 Web 资源和 Go 二进制后打开 /bmap-smoke.html 或 /amap-smoke.html；主应用通过官方 @amap/amap-jsapi-loader 加载高德 JS API 2.0。高德路线由服务端 Web API 路径规划 2.0 生成，地图 Provider 切换不会复用另一家的路线 geometry；当前显示 Provider 没有对应路线时必须显式生成。
 

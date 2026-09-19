@@ -13,11 +13,13 @@ import (
 	"journeyin/internal/domain"
 	journeymaps "journeyin/internal/maps"
 	"journeyin/internal/store"
+	"journeyin/internal/weather"
 )
 
 type TripService struct {
 	store              *store.Store
 	mapService         *MapService
+	weatherService     *weather.Service
 	mu                 sync.Mutex
 	defaultProviderMu  sync.RWMutex
 	defaultMapProvider journeymaps.ProviderID
@@ -64,6 +66,12 @@ func NewTripService(s *store.Store) *TripService {
 	return &TripService{store: s, previews: make(map[string]preview), planLocks: make(map[string]chan struct{}), defaultMapProvider: journeymaps.ProviderAMap}
 }
 func (s *TripService) SetMapService(service *MapService) { s.mapService = service }
+
+func (s *TripService) SetWeatherService(service *weather.Service) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.weatherService = service
+}
 
 func (s *TripService) SetDefaultMapProvider(provider journeymaps.ProviderID) {
 	if provider != journeymaps.ProviderAMap && provider != journeymaps.ProviderBaidu {

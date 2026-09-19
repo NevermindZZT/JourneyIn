@@ -190,3 +190,96 @@ func TestUpdatePhotosSettings(t *testing.T) {
 	}
 	clearResp.Body.Close()
 }
+
+func TestWeatherSettingsUpdateAndRead(t *testing.T) {
+	server := testPlanningServer(t)
+	defer server.Close()
+
+	// 初始读取 weather 设置
+	resp, err := http.Get(server.URL + "/api/v1/settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var s struct {
+		Weather struct {
+			DefaultProvider string `json:"default_provider"`
+			Caiyun          struct {
+				TokenConfigured bool `json:"token_configured"`
+			} `json:"caiyun"`
+		} `json:"weather"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
+		t.Fatal(err)
+	}
+	if s.Weather.DefaultProvider != "auto" {
+		t.Fatalf("expected initial default weather provider auto, got %s", s.Weather.DefaultProvider)
+	}
+	if s.Weather.Caiyun.TokenConfigured {
+		t.Fatalf("expected initial caiyun token not configured")
+	}
+
+	// 更新 weather 设置 (设置 default_provider 为 qweather，并填入 token/key/host)
+	putReq, _ := http.NewRequest(http.MethodPut, server.URL+"/api/v1/settings/weather", strings.NewReader(`{"default_provider":"qweather","caiyun_token":"my_secret_token","qweather_key":"my_qw_key","qweather_host":"custom.xy.qweatherapi.com"}`))
+	putReq.Header.Set("Content-Type", "application/json")
+	putResp, err := http.DefaultClient.Do(putReq)
+	if err != nil || putResp.StatusCode != http.StatusOK {
+		t.Fatalf("put weather setting failed: %v", err)
+	}
+	putResp.Body.Close()
+
+	// 再次读取检验状态
+	resp2, _ := http.Get(server.URL + "/api/v1/settings")
+	var s2 struct {
+		Weather struct {
+			DefaultProvider string `json:"default_provider"`
+			OpenMeteo       struct {
+				Available bool `json:"available"`
+			} `json:"openmeteo"`
+			QWeather struct {
+				KeyConfigured bool   `json:"key_configured"`
+				Host          string `json:"host"`
+			} `json:"qweather"`
+			Caiyun struct {
+				TokenConfigured bool `json:"token_configured"`
+			} `json:"caiyun"`
+		} `json:"weather"`
+	}
+	_ = json.NewDecoder(resp2.Body).Decode(&s2)
+	resp2.Body.Close()
+	if s2.Weather.DefaultProvider != "qweather" {
+		t.Fatalf("expected updated default weather provider qweather, got %s", s2.Weather.DefaultProvider)
+	}
+	if !s2.Weather.OpenMeteo.Available {
+		t.Fatalf("expected openmeteo available to be true")
+	}
+	if !s2.Weather.QWeather.KeyConfigured || s2.Weather.QWeather.Host != "custom.xy.qweatherapi.com" {
+		t.Fatalf("expected qweather key configured and custom host, got key=%v, host=%s", s2.Weather.QWeather.KeyConfigured, s2.Weather.QWeather.Host)
+	}
+	if !s2.Weather.Caiyun.TokenConfigured {
+		t.Fatalf("expected caiyun token configured to be true")
+	}
+
+	// 清空彩云 Token
+	clearReq, _ := http.NewRequest(http.MethodPut, server.URL+"/api/v1/settings/weather", strings.NewReader(`{"caiyun_token":""}`))
+	clearReq.Header.Set("Content-Type", "application/json")
+	clearResp, err := http.DefaultClient.Do(clearReq)
+	if err != nil || clearResp.StatusCode != http.StatusOK {
+		t.Fatalf("clear weather token failed: %v", err)
+	}
+	clearResp.Body.Close()
+
+	resp3, _ := http.Get(server.URL + "/api/v1/settings")
+	var s3 struct {
+		Weather struct {
+			Caiyun struct {
+				TokenConfigured bool `json:"token_configured"`
+			} `json:"caiyun"`
+		} `json:"weather"`
+	}
+	_ = json.NewDecoder(resp3.Body).Decode(&s3)
+	resp3.Body.Close()
+	if s3.Weather.Caiyun.TokenConfigured {
+		t.Fatalf("expected caiyun token to be cleared")
+	}
+}

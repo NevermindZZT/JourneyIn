@@ -18,6 +18,7 @@ import (
 	journeyshare "journeyin/internal/share"
 	"journeyin/internal/photos"
 	"journeyin/internal/store"
+	"journeyin/internal/weather"
 )
 
 type Server struct {
@@ -39,6 +40,7 @@ type Server struct {
 	settingsStore      *store.Store
 	auth               *Authenticator
 	photosService      *photos.Service
+	weatherService     *weather.Service
 }
 
 func NewServer(trips *application.TripService, web, schema fs.FS, version string, logger *slog.Logger) *Server {
@@ -78,6 +80,7 @@ func (s *Server) SetSyncStore(syncStore *store.Store)         { s.syncStore = sy
 func (s *Server) SetSettingsStore(settingsStore *store.Store) { s.settingsStore = settingsStore }
 func (s *Server) SetAuthenticator(auth *Authenticator)        { s.auth = auth }
 func (s *Server) SetPhotoService(service *photos.Service)     { s.photosService = service }
+func (s *Server) SetWeatherService(service *weather.Service) { s.weatherService = service }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -130,6 +133,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/v1/settings/poi", s.updatePOIPreferences)
 	mux.HandleFunc("DELETE /api/v1/settings/place-directory", s.clearPlaceDirectory)
 	mux.HandleFunc("PUT /api/v1/settings/photos", s.updatePhotosSettings)
+	mux.HandleFunc("PUT /api/v1/settings/weather", s.updateWeatherSettings)
 	mux.HandleFunc("/_AMapService/", s.amapServiceProxy)
 	mux.Handle("/", s.staticHandler())
 	return requestLogger(mux, s.logger)
