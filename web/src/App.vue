@@ -660,7 +660,13 @@ function setSheetBreakpoint(next: SheetBreakpoint, mode: 'push' | 'replace' = 'r
   if (sync) syncNavigationURL(mode)
   void nextTick().then(() => {
     mapInstance?.resize?.()
-    if (tripView.value !== 'atlas' && selectedTarget.value) focusSelectedMapTarget()
+    if (tripView.value !== 'atlas') {
+      if (panelMode.value === 'search' && selectedSearchResultIndex.value >= 0 && searchResults.value[selectedSearchResultIndex.value]) {
+        focusMapOnSearchResult(searchResults.value[selectedSearchResultIndex.value])
+      } else if (selectedTarget.value) {
+        focusSelectedMapTarget()
+      }
+    }
   })
   if (sheetRecenterTimer !== null) { window.clearTimeout(sheetRecenterTimer); sheetRecenterTimer = null }
   sheetRecenterTimer = window.setTimeout(() => {
@@ -668,6 +674,8 @@ function setSheetBreakpoint(next: SheetBreakpoint, mode: 'push' | 'replace' = 'r
     mapInstance?.resize?.()
     if (tripView.value === 'atlas') {
       void renderAtlasMap(false)
+    } else if (panelMode.value === 'search' && selectedSearchResultIndex.value >= 0 && searchResults.value[selectedSearchResultIndex.value]) {
+      focusMapOnSearchResult(searchResults.value[selectedSearchResultIndex.value])
     } else if (selectedTarget.value) {
       focusSelectedMapTarget()
     } else {
@@ -1198,6 +1206,8 @@ function handleViewportResize() {
     if (tripView.value === 'atlas') {
       void renderAtlasMap(false)
       updateAtlasLabelsVisibility()
+    } else if (panelMode.value === 'search' && selectedSearchResultIndex.value >= 0 && searchResults.value[selectedSearchResultIndex.value]) {
+      focusMapOnSearchResult(searchResults.value[selectedSearchResultIndex.value])
     } else {
       if (selectedTarget.value) focusSelectedMapTarget()
       else fitVisibleMapContent()
@@ -1259,6 +1269,11 @@ function openJourneySearch(parentID = '') {
   locationSearchTargetDayID.value = ''
   locationSearchTitleDraft.value = ''
   searchParentStopId.value = parentID
+  searchQuery.value = ''
+  searchRegion.value = ''
+  searchResults.value = []
+  selectedSearchResultIndex.value = -1
+  clearSearchResultMarkers()
   panelMode.value = 'search'
   panelOpen.value = true
   setSheetBreakpoint('expanded', 'replace')
@@ -1277,6 +1292,9 @@ function openPointSearch(target: Stop | SubStop) {
   searchParentStopId.value = ''
   searchQuery.value = target.title
   if (!searchRegion.value && target.address) searchRegion.value = target.address
+  searchResults.value = []
+  selectedSearchResultIndex.value = -1
+  clearSearchResultMarkers()
   panelMode.value = 'search'
   panelOpen.value = true
   setSheetBreakpoint('expanded', 'replace')
@@ -2231,21 +2249,51 @@ function focusMapOnSearchResult(result: PlaceCandidate) {
   if (!mapInstance || !mapAPI) return
   const point = searchResultMapPoint(result, selectedMapProvider.value)
   if (!point) return
+  const focusVersion = ++mapFocusVersion
   mapInstance.resize?.()
   if (selectedMapProvider.value === 'amap') {
-    mapInstance.setCenter?.(amapPointToArray(point), true)
+    const pt = amapPointToArray(point)
+    mapInstance.setCenter?.(pt, true)
     mapInstance.setZoom?.(SELECTED_STOP_ZOOM, true)
   } else {
     const mapPoint = new mapAPI.Point(point.lng, point.lat)
     if (typeof mapInstance.centerAndZoom === 'function') mapInstance.centerAndZoom(mapPoint, SELECTED_STOP_ZOOM, { noAnimation: true })
     else { mapInstance.setCenter?.(mapPoint); mapInstance.setZoom?.(SELECTED_STOP_ZOOM, { zoomCenter: mapPoint }) }
   }
-  window.requestAnimationFrame(() => recenterMapToVisibleViewport())
+  const alignVisibleCenter = () => {
+    if (focusVersion !== mapFocusVersion) return
+    const rect = mapVisibleRect()
+    if (!rect) return
+    const container = mapContainer.value
+    const fullW = container?.clientWidth || 0
+    const fullH = container?.clientHeight || 0
+    const visibleCenterX = (rect.left + rect.right) / 2
+    const visibleCenterY = (rect.top + rect.bottom) / 2
+    const offsetX = visibleCenterX - fullW / 2
+    const offsetY = visibleCenterY - fullH / 2
+    if (Math.abs(offsetX) < 2 && Math.abs(offsetY) < 2) return
+    if (selectedMapProvider.value === 'amap') {
+      if (!mapAPI?.Pixel || !mapInstance?.containerToLngLat) return
+      const targetPixel = new mapAPI.Pixel(fullW / 2 - offsetX, fullH / 2 - offsetY)
+      const adjustedCenter = mapInstance.containerToLngLat(targetPixel)
+      if (adjustedCenter) mapInstance.setCenter(adjustedCenter, true)
+    } else {
+      if (!mapAPI?.Pixel || !mapInstance?.pixelToPoint) return
+      const targetPixel = new mapAPI.Pixel(fullW / 2 - offsetX, fullH / 2 - offsetY)
+      const adjustedCenter = mapInstance.pixelToPoint(targetPixel)
+      if (adjustedCenter) mapInstance.setCenter(adjustedCenter, { noAnimation: true })
+    }
+  }
+  window.requestAnimationFrame(alignVisibleCenter)
 }
 
 function renderSearchResultMarkers() {
   if (!mapInstance || !mapAPI || panelMode.value !== 'search' || !searchResults.value.length) { clearSearchResultMarkers(); return }
   clearSearchResultMarkers()
+  const containerW = mapContainer.value?.clientWidth || window.innerWidth
+  const rect = mapVisibleRect()
+  const rightLimit = rect ? rect.right : containerW
+
   searchResults.value.forEach((result, index) => {
     const point = searchResultMapPoint(result, selectedMapProvider.value)
     if (!point) return
@@ -2253,14 +2301,60 @@ function renderSearchResultMarkers() {
     const label = String(index + 1)
     let marker: any = null
     if (selectedMapProvider.value === 'amap') {
-      marker = new mapAPI.Marker({ position: amapPointToArray(point), content: '<div class="search-result-pin' + (selected ? ' selected' : '') + '"><span>' + label + '</span></div>', offset: new mapAPI.Pixel(-13, -13), zIndex: 120 })
+      marker = new mapAPI.Marker({
+        position: amapPointToArray(point),
+        title: result.name,
+        content: '<div class="search-result-pin' + (selected ? ' selected' : '') + '"><span>' + label + '</span></div>',
+        offset: new mapAPI.Pixel(-13, -13),
+        zIndex: selected ? 150 : 120
+      })
       marker.on?.('click', () => selectSearchResult(index))
+      if (selected && typeof marker.setLabel === 'function') {
+        let dir: 'right' | 'left' = 'right'
+        let off = new mapAPI.Pixel(14, -6)
+        try {
+          const px = mapInstance.lngLatToContainer?.(new mapAPI.LngLat(point.lng, point.lat))
+          const screenX = Array.isArray(px) ? px[0] : typeof px?.getX === 'function' ? px.getX() : px?.x
+          if (typeof screenX === 'number' && screenX > rightLimit - 180) {
+            dir = 'left'
+            off = new mapAPI.Pixel(-14, -6)
+          }
+        } catch {}
+        marker.setLabel({
+          content: '<span style="display:inline-block;padding:3px 8px;border-radius:6px;background:#173f47ee;color:#fff;font-size:11px;font-weight:700;box-shadow:0 3px 10px rgba(0,0,0,0.3);border:1.5px solid #e56a4d;white-space:nowrap;cursor:pointer;">' + escapeHTML(result.name) + '</span>',
+          direction: dir,
+          offset: off
+        })
+      }
       mapInstance.add?.(marker)
     } else {
       const mapPoint = new mapAPI.Point(point.lng, point.lat)
       const icon = searchResultBaiduIcon(selected, label)
       marker = new mapAPI.Marker(mapPoint, icon ? { icon } : undefined)
       marker.addEventListener?.('click', () => selectSearchResult(index))
+      if (selected && mapAPI?.Label) {
+        let off = new mapAPI.Size(16, -18)
+        try {
+          const px = mapInstance.pointToPixel?.(mapPoint)
+          const screenX = typeof px?.x === 'number' ? px.x : null
+          if (typeof screenX === 'number' && screenX > rightLimit - 180) {
+            const estWidth = Math.max(60, result.name.length * 12 + 20)
+            off = new mapAPI.Size(-estWidth - 10, -18)
+          }
+        } catch {}
+        const labelObj = new mapAPI.Label(result.name, { offset: off })
+        labelObj.setStyle?.({
+          color: '#fff',
+          backgroundColor: '#173f47ee',
+          border: '1.5px solid #e56a4d',
+          borderRadius: '6px',
+          padding: '3px 7px',
+          fontSize: '11px',
+          fontWeight: '700',
+          cursor: 'pointer'
+        })
+        marker.setLabel(labelObj)
+      }
       mapInstance.addOverlay(marker)
     }
     searchResultMarkers.push(marker)
@@ -3370,8 +3464,18 @@ async function searchPlaces() {
     const payload = await response.json() as { items?: PlaceCandidate[]; error?: { message?: string } }
     if (!response.ok) throw new Error(payload.error?.message || '地点搜索失败')
     searchResults.value = payload.items || []
-    if (!searchResults.value.length) searchMessage.value = '没有找到结果，请补充城市或更换关键词'
-    renderSearchResultMarkers()
+    if (!searchResults.value.length) {
+      searchMessage.value = '没有找到结果，请补充城市或更换关键词'
+      renderSearchResultMarkers()
+    } else {
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur()
+      }
+      if (isMobileViewport() && sheetBreakpoint.value === 'expanded') {
+        setSheetBreakpoint('half', 'replace')
+      }
+      selectSearchResult(0)
+    }
   } catch (cause) { searchMessage.value = cause instanceof Error ? cause.message : '地点搜索失败' } finally { searchLoading.value = false }
 }
 async function addPlaceToTrip(candidate: PlaceCandidate) {
