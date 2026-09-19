@@ -150,39 +150,66 @@ func (p *BaiduProvider) SearchPOIWithTag(ctx context.Context, query, region, tag
 	return POISearchResult{Items: items, Total: response.Total, Page: page, PageSize: pageSize}, nil
 }
 
-func (p *BaiduProvider) ReverseGeocode(ctx context.Context, point GeoPoint) (string, error) {
+func (p *BaiduProvider) ReverseGeocodeDetails(ctx context.Context, point GeoPoint) (string, string, error) {
 	if p.serverAK() == "" {
-		return "", unavailable(p.ID())
+		return "", "", unavailable(p.ID())
 	}
 	if err := validatePoint(point); err != nil {
-		return "", err
+		return "", "", err
 	}
-	params := url.Values{"location": {fmt.Sprintf("%.8f,%.8f", point.Lat, point.Lng)}, "coordtype": {string(reverseCoordType(point.CRS))}, "ret_coordtype": {"bd09ll"}, "output": {"json"}, "ak": {p.serverAK()}}
+	params := url.Values{
+		"location":       {fmt.Sprintf("%.8f,%.8f", point.Lat, point.Lng)},
+		"coordtype":      {string(reverseCoordType(point.CRS))},
+		"ret_coordtype":  {"bd09ll"},
+		"extensions_poi": {"1"},
+		"output":         {"json"},
+		"ak":             {p.serverAK()},
+	}
 	var response struct {
 		Status  int    `json:"status"`
 		Message string `json:"message"`
 		Result  struct {
-			FormattedAddress string `json:"formatted_address"`
-			AddressComponent struct {
+			FormattedAddress   string `json:"formatted_address"`
+			SematicDescription string `json:"sematic_description"`
+			AddressComponent   struct {
 				Province     string `json:"province"`
 				City         string `json:"city"`
 				District     string `json:"district"`
 				Street       string `json:"street"`
 				StreetNumber string `json:"street_number"`
 			} `json:"addressComponent"`
+			Pois []struct {
+				Name     string `json:"name"`
+				Tag      string `json:"tag"`
+				Addr     string `json:"addr"`
+				Distance any    `json:"distance"`
+			} `json:"pois"`
 		} `json:"result"`
 	}
 	if err := p.get(ctx, "/reverse_geocoding/v3/", params, &response); err != nil {
-		return "", err
+		return "", "", err
 	}
 	if response.Status != 0 {
-		return "", baiduStatusError(response.Status, response.Message)
+		return "", "", baiduStatusError(response.Status, response.Message)
 	}
-	if response.Result.FormattedAddress != "" {
-		return response.Result.FormattedAddress, nil
+	address := response.Result.FormattedAddress
+	if address == "" {
+		c := response.Result.AddressComponent
+		address = strings.TrimSpace(strings.Join([]string{c.Province, c.City, c.District, c.Street, c.StreetNumber}, ""))
 	}
-	c := response.Result.AddressComponent
-	return strings.TrimSpace(strings.Join([]string{c.Province, c.City, c.District, c.Street, c.StreetNumber}, "")), nil
+	name := ""
+	if len(response.Result.Pois) > 0 {
+		name = strings.TrimSpace(response.Result.Pois[0].Name)
+	}
+	if name == "" && response.Result.SematicDescription != "" {
+		name = strings.TrimSpace(response.Result.SematicDescription)
+	}
+	return address, name, nil
+}
+
+func (p *BaiduProvider) ReverseGeocode(ctx context.Context, point GeoPoint) (string, error) {
+	address, _, err := p.ReverseGeocodeDetails(ctx, point)
+	return address, err
 }
 
 func (p *BaiduProvider) Route(ctx context.Context, request RouteRequest) (RouteSnapshot, error) {

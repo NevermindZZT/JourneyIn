@@ -2015,9 +2015,10 @@ async function renderBaiduMap(preserveView = false) {
     if (!mapAPI || typeof mapAPI.Map !== 'function' || !mapContainer.value) throw new Error('百度 JSAPI 未提供可用的 Map 构造器；请检查浏览器端 AK、服务权限、域名白名单和当前浏览器环境')
     if (!mapInstance) {
       mapReady.value = false
-      mapInstance = new mapAPI.Map(mapContainer.value, { enableIconClick: false, fixCenterWhenResize: true })
+      mapInstance = new mapAPI.Map(mapContainer.value, { enableIconClick: true, enableMapClick: true, fixCenterWhenResize: true })
       mapInstance.enableScrollWheelZoom()
       mapInstance.addEventListener?.('click', handleMapClick)
+      mapInstance.addEventListener?.('spotclick', handleBaiduSpotClick)
       mapInstance.addEventListener?.('zoomend', handleMapZoomChange)
       mapInstance.addEventListener?.('tilesloaded', () => { mapReady.value = true; mapError.value = ''; mapWarning.value = '' })
       if (mapReadyTimer !== null) window.clearTimeout(mapReadyTimer)
@@ -2415,13 +2416,20 @@ async function renderAMapMap(preserveView = false) {
       if (mapInstance) { try { mapInstance.destroy?.() } catch { /* best effort */ } }
       mapReady.value = false
       const first = mapStops.value.map(stop => pointForProvider(stop, 'amap')).find(Boolean)
-      mapInstance = new mapAPI.Map(mapContainer.value, { viewMode: '2D', zoom: first ? 12 : 5, center: first ? amapPointToArray(first) : [116.397428, 39.90923], resizeEnable: true })
+      mapInstance = new mapAPI.Map(mapContainer.value, {
+        viewMode: '2D',
+        zoom: first ? 12 : 5,
+        center: first ? amapPointToArray(first) : [116.397428, 39.90923],
+        resizeEnable: true,
+        isHotspot: true,
+      })
       mapInstance.on?.('click', (event: any) => {
         const lnglat = event?.lnglat
         const lng = Number(lnglat?.lng ?? lnglat?.getLng?.())
         const lat = Number(lnglat?.lat ?? lnglat?.getLat?.())
         if (Number.isFinite(lng) && Number.isFinite(lat)) handleMapClick({ point: { lng, lat, crs: 'gcj02' } })
       })
+      mapInstance.on?.('hotspotclick', handleAMapHotspotClick)
       mapInstance.on?.('zoomend', handleMapZoomChange)
       mapInstance.on?.('complete', () => { mapReady.value = true; mapError.value = ''; mapWarning.value = '' })
       mapInstance.on?.('error', (err: any) => {
@@ -3352,9 +3360,166 @@ function startMapPickForPoint(target: Stop | SubStop) {
   if (window.matchMedia('(max-width: 900px)').matches) setSheetBreakpoint('peek', 'replace')
 }
 
+async function fetchAddressForPoint(point: Coord & { crs: string }, provider: 'baidu' | 'amap'): Promise<{ address: string; name: string }> {
+  try {
+    const resp = await apiFetch('/api/v1/maps/reverse-geocode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider,
+        location: { lat: point.lat, lng: point.lng, crs: point.crs }
+      })
+    })
+    if (!resp.ok) return { address: '', name: '' }
+    const payload = await resp.json() as { address?: string; name?: string }
+    return { address: payload.address || '', name: payload.name || '' }
+  } catch {
+    return { address: '', name: '' }
+  }
+}
+
+function promptAddMapPoint(info: { point: Coord & { crs: string }; title: string; address?: string; provider: 'baidu' | 'amap' }) {
+  if (tripView.value !== 'detail' || readOnlyView.value || !selected.value || !tripDocument.value) return
+  const target = mapPickTargetID.value ? findPlanningPoint(mapPickTargetID.value) : null
+  mapPickLocation.value = info.point
+  const initialTitle = target?.title || (info.title && info.title !== '地图地点' ? info.title : '')
+  mapPickTitle.value = initialTitle
+  mapPickAddress.value = target?.address || info.address || ''
+  const day = target ? dayForStop(target) : selectedDay.value === 'all' ? tripDocument.value.days[0] : tripDocument.value.days[selectedDay.value - 1]
+  mapPickDayID.value = day?.id || tripDocument.value.days[0]?.id || ''
+  mapPickMode.value = false
+  mapPickOpen.value = true
+  error.value = ''
+
+  void fetchAddressForPoint(info.point, info.provider).then(res => {
+    if (mapPickOpen.value) {
+      if (!mapPickAddress.value && res.address) mapPickAddress.value = res.address
+      if ((!mapPickTitle.value.trim() || mapPickTitle.value === '地图地点') && res.name) {
+        mapPickTitle.value = res.name
+      }
+    }
+  })
+}
+
+function handleAMapHotspotClick(event: any) {
+  if (tripView.value !== 'detail' || readOnlyView.value || !selected.value || !tripDocument.value) return
+  const lnglat = event?.lnglat
+  const lng = Number(lnglat?.lng ?? lnglat?.getLng?.())
+  const lat = Number(lnglat?.lat ?? lnglat?.getLat?.())
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return
+
+  const point = { lat, lng, crs: 'gcj02' }
+  const name = String(event?.name || '').trim() || '地图地点'
+
+  promptAddMapPoint({
+    point,
+    title: name,
+    provider: 'amap'
+  })
+}
+
+const BAIDU_MCBAND = [12890594.86, 8362377.87, 5591021, 3481989.83, 1678043.12, 0]
+const BAIDU_MC2LL = [
+  [1.410526172116255e-8, 0.00000898305509648872, -1.9939833816331, 200.9824383106796, -187.2403703815547, 91.6087516669843, -23.38765649603339, 2.57121317296198, -0.03801003308653, 17337981.2],
+  [-7.435856389565537e-9, 0.000008983055097726239, -0.78625201886289, 96.32687599759846, -1.85204757529826, -59.36935905485877, 47.40033549296737, -16.50741931063887, 2.28786674699375, 10260144.86],
+  [-3.030883460898826e-8, 0.00000898305509983578, 0.30071316287616, 59.74293618442277, 7.357984074871, -25.38371002664745, 13.45380521110908, -3.29883767235584, 0.32710905363475, 6856817.37],
+  [-1.981981304930552e-8, 0.000008983055099779535, 0.03278182852591, 40.31678527705744, 0.65659298677277, -4.44255534477492, 0.85341911805263, 0.12923347998204, -0.04625736007561, 4482777.06],
+  [3.09191371068437e-9, 0.000008983055096812155, 0.00006995724062, 23.10934304144901, -0.00023663490511, -0.6321817810242, -0.00663494467273, 0.03430082397953, -0.00466043876332, 2555164.4],
+  [2.890871144776878e-9, 0.000008983055095805407, -3.068298e-8, 7.47137025468032, -0.00000353937994, -0.02145144861037, -0.00001234426596, 0.00010322952773, -0.00000323890364, 826088.5]
+]
+
+function baiduConvertMC2LL(mcLng: number, mcLat: number): { lng: number; lat: number } {
+  if (mapInstance && typeof mapInstance.mercatorToLnglat === 'function') {
+    try {
+      const res = mapInstance.mercatorToLnglat(mcLng, mcLat)
+      if (Array.isArray(res) && res.length >= 2 && Number.isFinite(res[0]) && Number.isFinite(res[1])) {
+        return { lng: Number(res[0]), lat: Number(res[1]) }
+      }
+    } catch {}
+  }
+  if (mapInstance && typeof mapInstance.mercatorToLngLat === 'function') {
+    try {
+      const res = mapInstance.mercatorToLngLat(mcLng, mcLat)
+      if (Array.isArray(res) && res.length >= 2 && Number.isFinite(res[0]) && Number.isFinite(res[1])) {
+        return { lng: Number(res[0]), lat: Number(res[1]) }
+      }
+    } catch {}
+  }
+  const absLng = Math.abs(mcLng)
+  const absLat = Math.abs(mcLat)
+  let nl: number[] | null = null
+  for (let t = 0; t < BAIDU_MCBAND.length; t++) {
+    if (absLat >= BAIDU_MCBAND[t]) {
+      nl = BAIDU_MC2LL[t]
+      break
+    }
+  }
+  if (!nl) return { lng: 0, lat: 0 }
+  const e = nl[0] + nl[1] * absLng
+  const i = absLat / nl[9]
+  const l = nl[2] + nl[3] * i + nl[4] * i * i + nl[5] * i * i * i + nl[6] * i * i * i * i + nl[7] * i * i * i * i * i + nl[8] * i * i * i * i * i * i
+  return {
+    lng: e * (mcLng < 0 ? -1 : 1),
+    lat: l * (mcLat < 0 ? -1 : 1)
+  }
+}
+
+function handleBaiduSpotClick(event: any) {
+  if (tripView.value !== 'detail' || readOnlyView.value || !selected.value || !tripDocument.value) return
+  const spot = event?.spots?.[0]
+  if (!spot) return
+  const pt = spot.point || spot.pt
+  if (!pt) return
+  let lng = Number(pt.lng)
+  let lat = Number(pt.lat)
+  if (Math.abs(lng) > 180 || Math.abs(lat) > 90) {
+    const converted = baiduConvertMC2LL(lng, lat)
+    lng = converted.lng
+    lat = converted.lat
+  }
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return
+
+  let name = ''
+  if (typeof mapInstance?.getIconByClickPosition === 'function' && event.pixel) {
+    try {
+      const icon = mapInstance.getIconByClickPosition(event.pixel)
+      if (icon?.name) name = String(icon.name).trim()
+    } catch {}
+  }
+  if (!name) {
+    const raw = String(spot.n || spot.userdata?.name || spot.name || spot.title || event?.name || event?.title || '').replace(/<[^>]+>/g, '').trim()
+    if (raw && raw !== '地图地点') name = raw
+  }
+
+  promptAddMapPoint({
+    point: { lat, lng, crs: 'bd09ll' },
+    title: name,
+    provider: 'baidu'
+  })
+
+  const uid = spot.userdata?.uid || spot.uid
+  if (uid && typeof mapInstance?.getPoiByUid === 'function') {
+    try {
+      mapInstance.getPoiByUid(uid, (poi: any) => {
+        if (mapPickOpen.value && (!mapPickTitle.value.trim() || mapPickTitle.value === '地图地点')) {
+          const poiName = String(poi?.name || poi?.title || '').trim()
+          if (poiName) mapPickTitle.value = poiName
+        }
+      })
+    } catch {}
+  }
+}
+
 function handleMapClick(event: any) {
   if (readOnlyView.value || !mapPickMode.value || !event?.point || !tripDocument.value) return
-  const point = { lat: Number(event.point.lat), lng: Number(event.point.lng), crs: selectedMapProvider.value === 'amap' ? 'gcj02' : 'bd09ll' }
+  let lat = Number(event.point.lat)
+  let lng = Number(event.point.lng)
+  if (selectedMapProvider.value === 'baidu' && (Math.abs(lng) > 180 || Math.abs(lat) > 90)) {
+    const converted = baiduConvertMC2LL(lng, lat)
+    lng = converted.lng
+    lat = converted.lat
+  }
+  const point = { lat, lng, crs: selectedMapProvider.value === 'amap' ? 'gcj02' : 'bd09ll' }
   if (!Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return
   const target = mapPickTargetID.value ? findPlanningPoint(mapPickTargetID.value) : null
   mapPickLocation.value = point
@@ -3364,6 +3529,14 @@ function handleMapClick(event: any) {
   mapPickDayID.value = day?.id || tripDocument.value.days[0]?.id || ''
   mapPickMode.value = false
   mapPickOpen.value = true
+  if (!mapPickAddress.value) {
+    void fetchAddressForPoint(point, selectedMapProvider.value).then(res => {
+      if (mapPickOpen.value) {
+        if (!mapPickAddress.value && res.address) mapPickAddress.value = res.address
+        if (!mapPickTitle.value.trim() && res.name) mapPickTitle.value = res.name
+      }
+    })
+  }
 }
 
 function cancelMapPick() {
@@ -3393,12 +3566,14 @@ async function saveMapPick() {
     if (!mapPickDayID.value) { error.value = '请选择行程日期'; return }
     const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(mapPickDayID.value) + '/stops', { method: 'POST', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision }, body: JSON.stringify({ stop: { title: mapPickTitle.value.trim(), address: mapPickAddress.value.trim(), location: locationForMapPoint(point, provider) } }) })
     const payload = await response.json() as { document?: TripDocument; revision?: number; stops?: number; days?: number; error?: { message?: string } }
-    if (!response.ok) throw new Error(payload.error?.message || '保存地图选点失败')
+    if (!response.ok) throw new Error(payload.error?.message || '保存规划点失败')
     applyTripPayload(payload)
     selectedDay.value = tripDocument.value.days.findIndex(day => day.id === mapPickDayID.value) + 1
+    const addedTitle = mapPickTitle.value.trim()
     cancelMapPick()
+    tripDetailsNotice.value = '已将“' + addedTitle + '”添加至行程规划'
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : '保存地图选点失败'
+    error.value = cause instanceof Error ? cause.message : '保存规划点失败'
   } finally {
     actionLoading.value = false
   }
@@ -4429,7 +4604,7 @@ onUnmounted(() => {
       <div v-if="pointEditorOpen && !readOnlyView" class="modal-backdrop point-editor-backdrop" @click.self="cancelEditPoint"><section class="modal-panel point-editor-panel" role="dialog" aria-modal="true" aria-labelledby="point-editor-title" aria-describedby="point-editor-description"><header class="point-editor-header"><div><p class="eyebrow">POINT EDITOR</p><h2 id="point-editor-title">编辑规划点</h2><p id="point-editor-description">名称、地址和坐标分开处理；不会因为改名而替换位置。</p></div><button class="modal-close" type="button" :disabled="pointEditorSaving" aria-label="关闭规划点编辑" @click="cancelEditPoint">×</button></header><form id="point-editor-form" class="point-editor-form" @submit.prevent="savePointDetails"><label>规划点名称<input ref="pointEditorTitleInput" v-model="pointEditorTitleDraft" maxlength="200" required placeholder="例如：西湖断桥" /></label><label>地址或补充定位线索<input v-model="pointEditorAddressDraft" maxlength="500" placeholder="用于确认候选，不会自动猜坐标" /></label><section class="point-editor-location" :class="{ missing: !pointEditorPoint() }"><div class="point-editor-location-head"><div><strong>{{ pointEditorLocationStatus() }}</strong><small v-if="pointEditorPoint()">{{ pointEditorPoint()?.crs }} · {{ pointEditorPoint()?.lat.toFixed(6) }}, {{ pointEditorPoint()?.lng.toFixed(6) }}</small><small v-else>没有可靠坐标，路线与导航暂不可用。</small></div><span class="location-state-label">{{ pointEditorPoint() ? '已保存' : '待处理' }}</span></div><small v-if="pointEditorPoint()">来源：{{ pointEditorLocationSource() }}</small><p v-else>请从候选中选择一个明确地点，或在地图上点击准确位置。不会根据数字外观补造 CRS。</p><div class="point-editor-location-actions"><button class="secondary-action compact-action" type="button" @click="openPointSearchFromEditor">重新搜索候选</button><button class="secondary-action compact-action" type="button" :disabled="!mapReady" @click="startMapPickFromEditor">地图选点更新</button></div></section><p class="point-editor-note">重新搜索或地图选点会清除受影响的路线和该点天气；保存名称和地址本身不会改变路线。</p><p v-if="error" class="point-editor-error" role="alert">{{ error }}</p><div class="point-editor-related"><span><strong>更多编辑</strong><small>说明、时间窗口、日期、顺序和删除仍在详情页中管理。</small></span><button class="text-action" type="button" @click="beginEditDescriptionFromPointEditor">编辑说明与时间</button></div></form><div class="modal-actions point-editor-actions"><button type="button" :disabled="pointEditorSaving" @click="cancelEditPoint">取消</button><button class="primary" type="submit" form="point-editor-form" :disabled="pointEditorSaving || !pointEditorTitleDraft.trim()">{{ pointEditorSaving ? '保存中…' : '保存名称和地址' }}</button></div></section></div>
       <div v-if="descriptionFullscreen && descriptionEditing && !readOnlyView" class="fullscreen-editor-backdrop"><section class="fullscreen-editor" role="dialog" aria-modal="true" aria-labelledby="fullscreen-description-title"><header><h2 id="fullscreen-description-title">编辑规划点信息</h2><button class="modal-close" type="button" aria-label="退出全屏编辑" @click="closeDescriptionFullscreen">×</button></header><MarkdownEditor class="fullscreen-markdown-editor" v-model="descriptionDraft" v-model:mode="descriptionEditorMode" :preview-html="renderMarkdown(descriptionDraft)" :rows="12" editor-label="MARKDOWN" preview-label="地点说明预览" editor-aria-label="地点说明 Markdown 原始文本" placeholder="补充门票、开放时间、行程备注等信息" /><div class="description-actions"><button class="text-button" type="button" @click="cancelEditDescription">取消</button><button class="primary-text-button" type="button" :disabled="descriptionSaving" @click="saveDescription">{{ descriptionSaving ? '保存中…' : '保存规划点' }}</button></div></section></div>
       <div v-if="tripDescriptionFullscreen && tripDescriptionEditing && !readOnlyView" class="fullscreen-editor-backdrop"><section class="fullscreen-editor" role="dialog" aria-modal="true" aria-labelledby="fullscreen-trip-description-title"><header><h2 id="fullscreen-trip-description-title">编辑行程总体说明</h2><button class="modal-close" type="button" aria-label="退出全屏编辑" @click="closeTripDescriptionFullscreen">×</button></header><MarkdownEditor class="fullscreen-markdown-editor" v-model="tripDescriptionDraft" v-model:mode="tripDescriptionEditorMode" :preview-html="renderMarkdown(tripDescriptionDraft)" :rows="12" editor-label="MARKDOWN" preview-label="行程说明预览" editor-aria-label="行程说明 Markdown 原始文本" placeholder="补充整个行程的背景、节奏和注意事项" /><div class="description-actions"><button class="text-button" type="button" @click="cancelEditTripDescription">取消</button><button class="primary-text-button" type="button" :disabled="tripDescriptionSaving" @click="saveTripDescription">{{ tripDescriptionSaving ? '保存中…' : '保存说明' }}</button></div></section></div>
-      <div v-if="mapPickOpen" class="modal-backdrop" @click.self="cancelMapPick"><section class="modal-panel map-pick-panel" role="dialog" aria-modal="true" aria-labelledby="map-pick-title"><button class="modal-close" aria-label="取消地图选点" @click="cancelMapPick">×</button><p class="eyebrow">MAP PICK</p><h2 id="map-pick-title">{{ mapPickTargetID ? '更新规划点位置' : '保存地图选点' }}</h2><p class="map-pick-coordinate">{{ mapPickLocation?.crs }} · {{ mapPickLocation?.lat.toFixed(6) }}, {{ mapPickLocation?.lng.toFixed(6) }}</p><p class="map-pick-context">{{ mapPickTargetID ? '点击保存后会替换当前坐标，并清除受影响的路线和天气。' : '点击地图得到坐标后，再确认名称和日期。' }}</p><label>地点名称<input v-model="mapPickTitle" required autofocus placeholder="例如：临时观景点" /></label><label>地址或备注（可选）<input v-model="mapPickAddress" placeholder="补充位置说明" /></label><label v-if="!mapPickTargetID" class="select-field">加入日期<UiSelect v-model="mapPickDayID" aria-label="加入日期" :options="tripDayOptions" /></label><p v-if="error" class="modal-form-error" role="alert">{{ error }}</p><div class="modal-actions"><button type="button" @click="cancelMapPick">取消</button><button type="button" class="primary" :disabled="actionLoading || !mapPickTitle.trim()" @click="saveMapPick">{{ actionLoading ? '保存中…' : mapPickTargetID ? '更新规划点' : '保存规划点' }}</button></div></section></div>
+      <div v-if="mapPickOpen" class="modal-backdrop" @click.self="cancelMapPick"><section class="modal-panel map-pick-panel" role="dialog" aria-modal="true" aria-labelledby="map-pick-title"><button class="modal-close" aria-label="取消添加" @click="cancelMapPick">×</button><p class="eyebrow">MAP POINT</p><h2 id="map-pick-title">{{ mapPickTargetID ? '更新规划点位置' : mapPickTitle ? '添加地点到行程' : '保存地图选点' }}</h2><p class="map-pick-coordinate">{{ mapPickLocation?.crs }} · {{ mapPickLocation?.lat.toFixed(6) }}, {{ mapPickLocation?.lng.toFixed(6) }}</p><p class="map-pick-context">{{ mapPickTargetID ? '点击保存后会替换当前坐标，并清除受影响的路线和天气。' : (mapPickTitle && mapPickTitle !== '地图地点') ? '确认将地图上的「' + mapPickTitle + '」添加至当前规划吗？' : '确认将该地图地点添加至当前规划吗？' }}</p><label>地点名称<input v-model="mapPickTitle" required autofocus placeholder="请输入地点名称" /></label><label>地址或备注（可选）<input v-model="mapPickAddress" placeholder="补充位置说明" /></label><label v-if="!mapPickTargetID" class="select-field">加入日期<UiSelect v-model="mapPickDayID" aria-label="加入日期" :options="tripDayOptions" /></label><p v-if="error" class="modal-form-error" role="alert">{{ error }}</p><div class="modal-actions"><button type="button" @click="cancelMapPick">取消</button><button type="button" class="primary" :disabled="actionLoading || !mapPickTitle.trim()" @click="saveMapPick">{{ actionLoading ? '保存中…' : mapPickTargetID ? '更新规划点' : '确认添加' }}</button></div></section></div>
       <div v-if="tripDetailsEditing && !readOnlyView" class="modal-backdrop trip-details-backdrop" @click.self="cancelEditTripDetails">
         <section class="modal-panel trip-details-panel" role="dialog" aria-modal="true" aria-labelledby="trip-details-title">
           <header class="trip-details-header"><div><p class="eyebrow">TRIP DETAILS</p><h2 id="trip-details-title">编辑行程信息</h2><p>名称和日期会作为一次更改保存。</p></div><button class="modal-close" type="button" :disabled="tripDetailsSaving" aria-label="关闭编辑行程信息" @click="cancelEditTripDetails">×</button></header>

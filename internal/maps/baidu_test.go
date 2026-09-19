@@ -23,6 +23,8 @@ func TestBaiduProviderUsesStandardEndpointsAndNormalizesSnapshots(t *testing.T) 
 			response = map[string]any{"status": 0, "result": map[string]any{"routes": []any{map[string]any{"distance": 100, "duration": 200, "steps": []any{map[string]any{"path": "120.150000,30.250000;120.151000,30.251000"}}}}}}
 		case "/weather/v1/":
 			response = map[string]any{"status": 0, "result": map[string]any{"forecasts": []any{map[string]any{"date": "2026-04-18", "high": 25, "low": 15, "text_day": "晴"}}}}
+		case "/reverse_geocoding/v3/":
+			response = map[string]any{"status": 0, "result": map[string]any{"formatted_address": "山西省阳泉市平定县岔口乡G5", "sematic_description": "红岩岭自然风景区内", "pois": []any{map[string]any{"name": "红岩岭自然风景区", "tag": "旅游景点"}}}}
 		default:
 			http.NotFound(w, r)
 			return
@@ -52,6 +54,13 @@ func TestBaiduProviderUsesStandardEndpointsAndNormalizesSnapshots(t *testing.T) 
 	}
 	if !weather.Available || weather.Condition != "晴" || weather.TemperatureC == nil || *weather.TemperatureC != 20 {
 		t.Fatalf("unexpected weather: %+v", weather)
+	}
+	addr, poiName, err := provider.ReverseGeocodeDetails(t.Context(), GeoPoint{Lat: 38.067, Lng: 113.818, CRS: CRSBD09LL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if addr != "山西省阳泉市平定县岔口乡G5" || poiName != "红岩岭自然风景区" {
+		t.Fatalf("unexpected reverse geocode details: %s, %s", addr, poiName)
 	}
 }
 

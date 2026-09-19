@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -131,7 +132,13 @@ func (s *Server) reverseGeocode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var address string
-	if s.mapService != nil {
+	var name string
+	type detailedReverseGeocoder interface {
+		ReverseGeocodeDetails(context.Context, journeymaps.GeoPoint) (string, string, error)
+	}
+	if detailed, ok := provider.(detailedReverseGeocoder); ok {
+		address, name, err = detailed.ReverseGeocodeDetails(r.Context(), body.Location)
+	} else if s.mapService != nil {
 		address, err = s.mapService.ReverseGeocode(r.Context(), body.Provider, body.Location)
 	} else {
 		address, err = provider.ReverseGeocode(r.Context(), body.Location)
@@ -140,7 +147,7 @@ func (s *Server) reverseGeocode(w http.ResponseWriter, r *http.Request) {
 		writeMapError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"provider": body.Provider, "address": address})
+	writeJSON(w, http.StatusOK, map[string]any{"provider": body.Provider, "address": address, "name": name})
 }
 
 func (s *Server) route(w http.ResponseWriter, r *http.Request) {
