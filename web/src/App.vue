@@ -4678,25 +4678,6 @@ onUnmounted(() => {
               </div>
 
               <div v-if="mapWarning" class="map-warning"><span>{{ mapWarning }}</span><button type="button" @click="retryMap">重新加载</button></div>
-
-              <!-- 照片聚类详情抽屉 (点击聚簇 Marker 呼出) -->
-              <div v-if="selectedPhotoCluster" class="atlas-photo-drawer">
-                <div class="atlas-photo-drawer-head">
-                  <strong>该区域照片 ({{ selectedPhotoCluster.photos.length }} 张)</strong>
-                  <button type="button" @click="selectedPhotoCluster = null">×</button>
-                </div>
-                <div class="atlas-photo-grid">
-                  <div
-                    v-for="p in selectedPhotoCluster.photos"
-                    :key="p.id"
-                    class="atlas-photo-item-card"
-                    @click="openPhotoPreview(p, selectedPhotoCluster.photos)"
-                  >
-                    <img :src="p.thumb_url + '?size=120'" class="atlas-photo-item-img" loading="lazy" />
-                    <span class="atlas-photo-item-date">{{ formatPhotoTime(p.taken_at) }}</span>
-                  </div>
-                </div>
-              </div>
             </div>
 
             <!-- 足迹漫游顶栏：左侧返回按钮与右侧地图选项/设置操作 -->
@@ -4705,19 +4686,6 @@ onUnmounted(() => {
                 <span>‹</span><small>行程</small>
               </button>
               <div class="workspace-top-actions">
-                <button
-                  v-if="photoStatus?.enabled"
-                  class="workspace-tool-trigger atlas-photo-toggle-btn"
-                  :class="{ active: atlasShowPhotos }"
-                  type="button"
-                  :aria-pressed="atlasShowPhotos"
-                  :title="atlasShowPhotos ? '点击隐藏足迹照片' : '点击显示足迹照片'"
-                  @click="toggleAtlasPhotos()"
-                >
-                  <IonIcon :icon="imageOutline" />
-                  <span>{{ atlasShowPhotos ? '照片' : '隐藏' }}</span>
-                  <span v-if="atlasPhotos.length" class="atlas-photo-btn-badge">{{ atlasPhotos.length }}</span>
-                </button>
                 <button class="workspace-tool-trigger" type="button" :aria-expanded="mobileMapToolsOpen" aria-label="打开地图选项" @click="toggleMobileMapTools">
                   <IonIcon :icon="mapOutline" /><span>地图选项</span>
                 </button>
@@ -4746,7 +4714,7 @@ onUnmounted(() => {
             <!-- 足迹漫游浮层：成就看板与行程高亮列表 (完全复用 workspace-panel / stop-detail-panel 的设计与结构) -->
             <aside
               class="floating-panel workspace-panel atlas-floating-panel"
-              :class="['sheet-' + sheetBreakpoint, { 'is-sheet-dragging': sheetDragActive }]"
+              :class="['sheet-' + sheetBreakpoint, { 'is-sheet-dragging': sheetDragActive, 'has-photo-drawer-open': Boolean(selectedPhotoCluster) }]"
               :style="sheetDragStyle"
               aria-label="足迹漫游看板"
             >
@@ -4892,6 +4860,25 @@ onUnmounted(() => {
                 </div>
               </div>
             </aside>
+
+            <!-- 照片聚类详情抽屉 (点击聚簇 Marker 呼出，小屏幕作为高层级底部半屏抽屉滑出，桌面端作为居中悬浮卡片) -->
+            <div v-if="selectedPhotoCluster" class="atlas-photo-drawer">
+              <div class="atlas-photo-drawer-head">
+                <strong>该区域照片 ({{ selectedPhotoCluster.photos.length }} 张)</strong>
+                <button type="button" aria-label="关闭照片列表" @click="selectedPhotoCluster = null">×</button>
+              </div>
+              <div class="atlas-photo-grid">
+                <div
+                  v-for="p in selectedPhotoCluster.photos"
+                  :key="p.id"
+                  class="atlas-photo-item-card"
+                  @click="openPhotoPreview(p, selectedPhotoCluster.photos)"
+                >
+                  <img :src="p.thumb_url + '?size=120'" class="atlas-photo-item-img" loading="lazy" />
+                  <span class="atlas-photo-item-date">{{ formatPhotoTime(p.taken_at) }}</span>
+                </div>
+              </div>
+            </div>
           </section>
 
           <section v-else class="journey-workspace" aria-label="地图工作区">
