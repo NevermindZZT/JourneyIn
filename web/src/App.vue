@@ -5,7 +5,7 @@ import {
 } from '@ionic/vue'
 import BMapLoader from '@baidumap/jsapi-loader'
 import AMapLoader from '@amap/amap-jsapi-loader'
-import { addOutline, chevronDownOutline, chevronUpOutline, closeOutline, cloudOfflineOutline, createOutline, footstepsOutline, imageOutline, linkOutline, logInOutline, mapOutline, menuOutline, navigateOutline, refreshOutline, searchOutline, settingsOutline, sunnyOutline } from 'ionicons/icons'
+import { addOutline, chevronBackOutline, chevronDownOutline, chevronForwardOutline, chevronUpOutline, closeOutline, cloudOfflineOutline, createOutline, footstepsOutline, imageOutline, linkOutline, logInOutline, mapOutline, menuOutline, navigateOutline, refreshOutline, searchOutline, settingsOutline, sunnyOutline } from 'ionicons/icons'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 import PrototypePreview from './PrototypePreview.vue'
@@ -242,7 +242,20 @@ const atlasShowTrips = ref(true)
 const atlasShowPhotos = ref<boolean>(localStorage.getItem('journeyin.atlasShowPhotos') !== 'false')
 let atlasPhotoMarkers: any[] = []
 const selectedPhotoCluster = ref<PhotoCluster | null>(null)
-const previewPhoto = ref<{ id: string; file_name: string; taken_at: string; url: string } | null>(null)
+const previewPhotoList = ref<PhotoAtlasItem[]>([])
+const previewPhotoIndex = ref<number>(-1)
+const previewPhoto = computed(() => {
+  if (previewPhotoIndex.value >= 0 && previewPhotoIndex.value < previewPhotoList.value.length) {
+    const p = previewPhotoList.value[previewPhotoIndex.value]
+    return {
+      id: p.id,
+      file_name: p.file_name,
+      taken_at: p.taken_at,
+      url: '/api/v1/photos/' + p.id + '/file'
+    }
+  }
+  return null
+})
 const photoSyncing = ref(false)
 const ATLAS_PALETTE = [
   '#24695c',
@@ -952,6 +965,23 @@ async function handleNavigationPopState() {
 }
 
 function handleGlobalKeyDown(event: KeyboardEvent) {
+  if (previewPhoto.value) {
+    if (event.key === 'Escape') {
+      closePhotoPreview()
+      event.preventDefault()
+      return
+    }
+    if (event.key === 'ArrowLeft') {
+      prevPreviewPhoto()
+      event.preventDefault()
+      return
+    }
+    if (event.key === 'ArrowRight') {
+      nextPreviewPhoto()
+      event.preventDefault()
+      return
+    }
+  }
   if (event.key !== 'Escape') return
   if (descriptionFullscreen.value && descriptionEditing.value) { closeDescriptionFullscreen(); event.preventDefault(); return }
   if (tripDescriptionFullscreen.value && tripDescriptionEditing.value) { closeTripDescriptionFullscreen(); event.preventDefault(); return }
@@ -2741,13 +2771,72 @@ function handlePhotoClusterClick(cluster: PhotoCluster) {
   }
 }
 
-function openPhotoPreview(photo: PhotoAtlasItem) {
-  previewPhoto.value = {
-    id: photo.id,
-    file_name: photo.file_name,
-    taken_at: photo.taken_at,
-    url: '/api/v1/photos/' + photo.id + '/file'
+function openPhotoPreview(photo: PhotoAtlasItem, list?: PhotoAtlasItem[]) {
+  let activeList = list
+  if (!activeList || !activeList.length) {
+    if (selectedPhotoCluster.value && selectedPhotoCluster.value.photos.some(p => p.id === photo.id)) {
+      activeList = selectedPhotoCluster.value.photos
+    } else {
+      activeList = atlasPhotos.value
+    }
   }
+  previewPhotoList.value = activeList && activeList.length ? activeList : [photo]
+  const idx = previewPhotoList.value.findIndex(p => p.id === photo.id)
+  previewPhotoIndex.value = idx >= 0 ? idx : 0
+}
+
+function closePhotoPreview() {
+  previewPhotoIndex.value = -1
+  previewPhotoList.value = []
+}
+
+function prevPreviewPhoto() {
+  if (!previewPhotoList.value.length) return
+  if (previewPhotoIndex.value > 0) {
+    previewPhotoIndex.value--
+  } else {
+    previewPhotoIndex.value = previewPhotoList.value.length - 1
+  }
+}
+
+function nextPreviewPhoto() {
+  if (!previewPhotoList.value.length) return
+  if (previewPhotoIndex.value < previewPhotoList.value.length - 1) {
+    previewPhotoIndex.value++
+  } else {
+    previewPhotoIndex.value = 0
+  }
+}
+
+let lightboxTouchStartX = 0
+let lightboxTouchStartY = 0
+let lightboxTouchDeltaX = 0
+let lightboxTouchDeltaY = 0
+
+function handleLightboxTouchStart(e: TouchEvent) {
+  if (!e.touches || e.touches.length !== 1) return
+  lightboxTouchStartX = e.touches[0].clientX
+  lightboxTouchStartY = e.touches[0].clientY
+  lightboxTouchDeltaX = 0
+  lightboxTouchDeltaY = 0
+}
+
+function handleLightboxTouchMove(e: TouchEvent) {
+  if (!e.touches || e.touches.length !== 1) return
+  lightboxTouchDeltaX = e.touches[0].clientX - lightboxTouchStartX
+  lightboxTouchDeltaY = e.touches[0].clientY - lightboxTouchStartY
+}
+
+function handleLightboxTouchEnd() {
+  if (Math.abs(lightboxTouchDeltaX) > 40 && Math.abs(lightboxTouchDeltaX) > Math.abs(lightboxTouchDeltaY) * 1.1) {
+    if (lightboxTouchDeltaX < 0) {
+      nextPreviewPhoto()
+    } else {
+      prevPreviewPhoto()
+    }
+  }
+  lightboxTouchDeltaX = 0
+  lightboxTouchDeltaY = 0
 }
 
 function toggleAtlasPhotos(val?: boolean) {
@@ -4601,7 +4690,7 @@ onUnmounted(() => {
                     v-for="p in selectedPhotoCluster.photos"
                     :key="p.id"
                     class="atlas-photo-item-card"
-                    @click="openPhotoPreview(p)"
+                    @click="openPhotoPreview(p, selectedPhotoCluster.photos)"
                   >
                     <img :src="p.thumb_url + '?size=120'" class="atlas-photo-item-img" loading="lazy" />
                     <span class="atlas-photo-item-date">{{ formatPhotoTime(p.taken_at) }}</span>
@@ -5034,13 +5123,49 @@ onUnmounted(() => {
       </div>
       <div v-if="false && settingsOpen" class="modal-backdrop" @click.self="settingsOpen = false"><section class="modal-panel settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title"><button class="modal-close" aria-label="关闭" @click="settingsOpen = false">×</button><p class="eyebrow">JOURNEYIN SETTINGS</p><h2 id="settings-title">设置</h2><p class="settings-intro">当前主题：{{ themeLabel }}。Key 配置保存到 SQLite，服务端 Key 不会回显。</p><section class="settings-section"><h3>外观</h3><p class="settings-label">主题：{{ themeLabel }}</p><div class="theme-options"><button type="button" :class="{ selected: theme === 'system' }" @click="setTheme('system')">跟随系统</button><button type="button" :class="{ selected: theme === 'light' }" @click="setTheme('light')">浅色</button><button type="button" :class="{ selected: theme === 'dark' }" @click="setTheme('dark')">深色</button></div></section><section class="settings-section"><h3>服务端连接</h3><label>当前服务地址<input v-model="serverURL" readonly /></label><label>兼容 REST API Token<input v-model="authTokenInput" type="password" placeholder="仅用于兼容旧客户端，可留空" autocomplete="off" /></label><div class="modal-actions"><button type="button" @click="logout">清除令牌</button><button type="button" class="primary" @click="saveAuth">保存令牌</button></div><p v-if="settingsMessage" class="settings-message">{{ settingsMessage }}</p></section><section class="settings-section"><h3>默认地图</h3><label>默认地图 Provider<select v-model="defaultMapProvider"><option value="baidu">百度地图</option><option value="amap">高德地图</option></select></label><p class="key-help">用于没有单独地图偏好的新行程和查看页面；单个行程已保存的地图 Provider 不会被覆盖。地图工具仍可临时切换 Provider。</p><div class="modal-actions"><button type="button" class="primary" :disabled="settingsSaving" @click="saveDefaultMapProvider">{{ settingsSaving ? '保存中…' : '保存默认地图' }}</button></div></section><section class="settings-section"><h3>百度地图</h3><p class="key-status">浏览器端 Key：<strong>{{ baiduKey ? '已配置' : '未配置' }}</strong> · 服务端 Key：<strong>{{ settingsData?.map?.baidu?.server_key_configured ? '已配置' : '未配置' }}</strong></p><label>百度浏览器端 Key<input v-model="baiduBrowserKeyInput" type="password" :placeholder="settingsData?.map?.baidu?.browser_key_configured ? '已配置，输入新 Key 可替换' : '用于 JSAPI 4.0/BMap 网页地图'" autocomplete="off" /></label><label>百度服务端 Key<input v-model="baiduServerKeyInput" type="password" placeholder="已配置时输入新 Key 可替换；留空保持当前值" autocomplete="off" /></label><p class="key-help">浏览器端 Key 用于地图底图；服务端 Key 用于 POI 搜索、地理编码、路线和天气。请确认当前访问 host 在百度控制台白名单内。</p><a href="https://lbsyun.baidu.com/apiconsole/key" target="_blank" rel="noopener noreferrer">申请/管理百度地图 Key ↗</a></section><section class="settings-section"><h3>高德地图</h3><p class="key-status">JS Key：<strong>{{ settingsData?.map?.amap?.js_key_configured ? '已配置' : '未配置' }}</strong> · 服务端 Key：<strong>{{ settingsData?.map?.amap?.server_key_configured ? '已配置' : '未配置' }}</strong> · 安全密钥：<strong>{{ settingsData?.map?.amap?.security_js_code_configured ? '已配置' : '未配置' }}</strong></p><label>高德 JS Key<input v-model="amapJSKeyInput" type="password" placeholder="用于高德 Web 地图" autocomplete="off" /></label><label>高德服务端 Key<input v-model="amapServerKeyInput" type="password" placeholder="已配置时输入新 Key 可替换；留空保持当前值" autocomplete="off" /></label><label>高德 JS 安全密钥<input v-model="amapSecurityJSCodeInput" type="password" placeholder="用于 JSAPI 安全代理；已配置时输入新密钥可替换" autocomplete="off" /></label><a href="https://console.amap.com/dev/key/app" target="_blank" rel="noopener noreferrer">申请/管理高德 Key ↗</a><p class="key-help">保存后，规划点会优先使用已经保存的坐标，不会因为重新绘制地图重复查询。</p><div class="modal-actions"><button type="button" class="primary" :disabled="settingsSaving" @click="saveMapKeys">{{ settingsSaving ? '保存中…' : '保存地图 Key 到数据库' }}</button></div></section><section class="settings-section"><h3>地点检索</h3><label>优先 Provider<select v-model="poiProviderPriority"><option value="amap">高德优先</option><option value="baidu">百度优先</option></select></label><p class="key-help">当前策略会先查询本地地点目录；未命中后使用所选 Provider，Provider 不可用时自动尝试另一家。新搜索结果只保留 7 天。</p><p class="key-status">本地地点记录：<strong>{{ localDirectoryCount }}</strong> 条</p><div class="modal-actions"><button type="button" @click="savePOIPreferences">保存检索优先级</button><button type="button" @click="clearLocalDirectory">清除本地记录</button></div></section><section class="settings-section"><h3>MCP</h3><p>MCP 地址：{{ capabilities?.mcp?.http_endpoint || '/mcp' }}</p><p class="key-help">Docker 远程部署时设置 JOURNEYIN_MCP_TOKEN；本地 localhost 调试可不设置。</p></section></section></div>
       <div v-if="authOpen" class="modal-backdrop" @click.self="authOpen = false"><section class="modal-panel auth-panel" role="dialog" aria-modal="true" aria-labelledby="auth-title"><IonIcon class="auth-icon" :icon="logInOutline" /><h2 id="auth-title">登录 JourneyIn</h2><p>请输入 Docker 服务配置的账号和密码。登录成功后会在当前浏览器保存一个 HttpOnly 会话。</p><form class="auth-form" @submit.prevent="login"><label>账号<input v-model="loginUsername" type="text" autofocus autocomplete="username" /></label><label>密码<input v-model="loginPassword" type="password" autocomplete="current-password" /></label><p v-if="loginMessage" class="auth-error">{{ loginMessage }}</p><div class="modal-actions"><button type="button" @click="authOpen = false">稍后</button><button type="submit" class="primary" :disabled="loginLoading">{{ loginLoading ? '登录中…' : '登录' }}</button></div></form></section></div>
-      <!-- 全屏照片大图预览 Lightbox -->
-      <div v-if="previewPhoto" class="photo-lightbox-modal" @click.self="previewPhoto = null">
-        <div class="photo-lightbox-card">
-          <button type="button" class="photo-lightbox-close" @click="previewPhoto = null">×</button>
-          <img :src="previewPhoto.url" class="photo-lightbox-img" />
+      <!-- 全屏照片大图预览 Lightbox (支持左右半透明切换按钮、手势滑动、键盘快捷键) -->
+      <div
+        v-if="previewPhoto"
+        class="photo-lightbox-modal"
+        @click.self="closePhotoPreview()"
+      >
+        <div
+          class="photo-lightbox-card"
+          @touchstart.passive="handleLightboxTouchStart"
+          @touchmove.passive="handleLightboxTouchMove"
+          @touchend="handleLightboxTouchEnd"
+        >
+          <button type="button" class="photo-lightbox-close" aria-label="关闭预览" @click="closePhotoPreview()">×</button>
+          
+          <!-- 左侧上一张切换按钮 -->
+          <button
+            v-if="previewPhotoList.length > 1"
+            type="button"
+            class="photo-lightbox-nav prev"
+            aria-label="上一张照片"
+            @click.stop="prevPreviewPhoto"
+          >
+            <IonIcon :icon="chevronBackOutline" />
+          </button>
+
+          <img :src="previewPhoto.url" class="photo-lightbox-img" alt="大图预览" />
+
+          <!-- 右侧下一张切换按钮 -->
+          <button
+            v-if="previewPhotoList.length > 1"
+            type="button"
+            class="photo-lightbox-nav next"
+            aria-label="下一张照片"
+            @click.stop="nextPreviewPhoto"
+          >
+            <IonIcon :icon="chevronForwardOutline" />
+          </button>
+
           <div class="photo-lightbox-footer">
-            <strong>{{ previewPhoto.file_name }}</strong>
+            <div class="photo-lightbox-title-wrap">
+              <strong>{{ previewPhoto.file_name }}</strong>
+              <small v-if="previewPhotoList.length > 1" class="photo-lightbox-counter">{{ previewPhotoIndex + 1 }} / {{ previewPhotoList.length }}</small>
+            </div>
             <span>拍摄于 {{ formatPhotoTime(previewPhoto.taken_at) }}</span>
           </div>
         </div>
