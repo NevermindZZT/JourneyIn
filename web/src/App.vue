@@ -244,6 +244,9 @@ let atlasPhotoMarkers: any[] = []
 const selectedPhotoCluster = ref<PhotoCluster | null>(null)
 const previewPhotoList = ref<PhotoAtlasItem[]>([])
 const previewPhotoIndex = ref<number>(-1)
+const previewPhotoLoading = ref<boolean>(false)
+const previewPhotoError = ref<boolean>(false)
+const loadedPhotoMap = ref<Record<string, boolean>>({})
 const previewPhoto = computed(() => {
   if (previewPhotoIndex.value >= 0 && previewPhotoIndex.value < previewPhotoList.value.length) {
     const p = previewPhotoList.value[previewPhotoIndex.value]
@@ -251,7 +254,8 @@ const previewPhoto = computed(() => {
       id: p.id,
       file_name: p.file_name,
       taken_at: p.taken_at,
-      url: '/api/v1/photos/' + p.id + '/file'
+      url: '/api/v1/photos/' + p.id + '/file',
+      thumb_url: p.thumb_url
     }
   }
   return null
@@ -2783,30 +2787,72 @@ function openPhotoPreview(photo: PhotoAtlasItem, list?: PhotoAtlasItem[]) {
   }
   previewPhotoList.value = activeList && activeList.length ? activeList : [photo]
   const idx = previewPhotoList.value.findIndex(p => p.id === photo.id)
-  previewPhotoIndex.value = idx >= 0 ? idx : 0
+  setPreviewIndex(idx >= 0 ? idx : 0)
+}
+
+function setPreviewIndex(idx: number) {
+  if (idx < 0 || idx >= previewPhotoList.value.length) return
+  previewPhotoIndex.value = idx
+  const current = previewPhotoList.value[idx]
+  if (!current) return
+
+  if (loadedPhotoMap.value[current.id]) {
+    previewPhotoLoading.value = false
+    previewPhotoError.value = false
+  } else {
+    previewPhotoLoading.value = true
+    previewPhotoError.value = false
+  }
+  preloadNeighborPhotos(idx)
+}
+
+function onPreviewPhotoLoaded(id: string) {
+  if (previewPhoto.value?.id === id) {
+    previewPhotoLoading.value = false
+    previewPhotoError.value = false
+  }
+  loadedPhotoMap.value[id] = true
+}
+
+function onPreviewPhotoError(id: string) {
+  if (previewPhoto.value?.id === id) {
+    previewPhotoLoading.value = false
+    previewPhotoError.value = true
+  }
+}
+
+function preloadNeighborPhotos(idx: number) {
+  const list = previewPhotoList.value
+  if (!list.length) return
+  const nextIdx = (idx + 1) % list.length
+  const prevIdx = (idx - 1 + list.length) % list.length
+  const idsToPreload = [list[nextIdx]?.id, list[prevIdx]?.id].filter(Boolean)
+  idsToPreload.forEach(id => {
+    if (id && !loadedPhotoMap.value[id]) {
+      const img = new Image()
+      img.onload = () => { loadedPhotoMap.value[id] = true }
+      img.src = '/api/v1/photos/' + id + '/file'
+    }
+  })
 }
 
 function closePhotoPreview() {
   previewPhotoIndex.value = -1
   previewPhotoList.value = []
+  previewPhotoLoading.value = false
+  previewPhotoError.value = false
 }
 
 function prevPreviewPhoto() {
   if (!previewPhotoList.value.length) return
-  if (previewPhotoIndex.value > 0) {
-    previewPhotoIndex.value--
-  } else {
-    previewPhotoIndex.value = previewPhotoList.value.length - 1
-  }
+  const nextIdx = previewPhotoIndex.value > 0 ? previewPhotoIndex.value - 1 : previewPhotoList.value.length - 1
+  setPreviewIndex(nextIdx)
 }
 
 function nextPreviewPhoto() {
   if (!previewPhotoList.value.length) return
-  if (previewPhotoIndex.value < previewPhotoList.value.length - 1) {
-    previewPhotoIndex.value++
-  } else {
-    previewPhotoIndex.value = 0
-  }
+  const nextIdx = previewPhotoIndex.value < previewPhotoList.value.length - 1 ? previewPhotoIndex.value + 1 : 0
+  setPreviewIndex(nextIdx)
 }
 
 let lightboxTouchStartX = 0
@@ -5189,7 +5235,7 @@ onUnmounted(() => {
       </div>
       <div v-if="false && settingsOpen" class="modal-backdrop" @click.self="settingsOpen = false"><section class="modal-panel settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title"><button class="modal-close" aria-label="关闭" @click="settingsOpen = false">×</button><p class="eyebrow">JOURNEYIN SETTINGS</p><h2 id="settings-title">设置</h2><p class="settings-intro">当前主题：{{ themeLabel }}。Key 配置保存到 SQLite，服务端 Key 不会回显。</p><section class="settings-section"><h3>外观</h3><p class="settings-label">主题：{{ themeLabel }}</p><div class="theme-options"><button type="button" :class="{ selected: theme === 'system' }" @click="setTheme('system')">跟随系统</button><button type="button" :class="{ selected: theme === 'light' }" @click="setTheme('light')">浅色</button><button type="button" :class="{ selected: theme === 'dark' }" @click="setTheme('dark')">深色</button></div></section><section class="settings-section"><h3>服务端连接</h3><label>当前服务地址<input v-model="serverURL" readonly /></label><label>兼容 REST API Token<input v-model="authTokenInput" type="password" placeholder="仅用于兼容旧客户端，可留空" autocomplete="off" /></label><div class="modal-actions"><button type="button" @click="logout">清除令牌</button><button type="button" class="primary" @click="saveAuth">保存令牌</button></div><p v-if="settingsMessage" class="settings-message">{{ settingsMessage }}</p></section><section class="settings-section"><h3>默认地图</h3><label>默认地图 Provider<select v-model="defaultMapProvider"><option value="baidu">百度地图</option><option value="amap">高德地图</option></select></label><p class="key-help">用于没有单独地图偏好的新行程和查看页面；单个行程已保存的地图 Provider 不会被覆盖。地图工具仍可临时切换 Provider。</p><div class="modal-actions"><button type="button" class="primary" :disabled="settingsSaving" @click="saveDefaultMapProvider">{{ settingsSaving ? '保存中…' : '保存默认地图' }}</button></div></section><section class="settings-section"><h3>百度地图</h3><p class="key-status">浏览器端 Key：<strong>{{ baiduKey ? '已配置' : '未配置' }}</strong> · 服务端 Key：<strong>{{ settingsData?.map?.baidu?.server_key_configured ? '已配置' : '未配置' }}</strong></p><label>百度浏览器端 Key<input v-model="baiduBrowserKeyInput" type="password" :placeholder="settingsData?.map?.baidu?.browser_key_configured ? '已配置，输入新 Key 可替换' : '用于 JSAPI 4.0/BMap 网页地图'" autocomplete="off" /></label><label>百度服务端 Key<input v-model="baiduServerKeyInput" type="password" placeholder="已配置时输入新 Key 可替换；留空保持当前值" autocomplete="off" /></label><p class="key-help">浏览器端 Key 用于地图底图；服务端 Key 用于 POI 搜索、地理编码、路线和天气。请确认当前访问 host 在百度控制台白名单内。</p><a href="https://lbsyun.baidu.com/apiconsole/key" target="_blank" rel="noopener noreferrer">申请/管理百度地图 Key ↗</a></section><section class="settings-section"><h3>高德地图</h3><p class="key-status">JS Key：<strong>{{ settingsData?.map?.amap?.js_key_configured ? '已配置' : '未配置' }}</strong> · 服务端 Key：<strong>{{ settingsData?.map?.amap?.server_key_configured ? '已配置' : '未配置' }}</strong> · 安全密钥：<strong>{{ settingsData?.map?.amap?.security_js_code_configured ? '已配置' : '未配置' }}</strong></p><label>高德 JS Key<input v-model="amapJSKeyInput" type="password" placeholder="用于高德 Web 地图" autocomplete="off" /></label><label>高德服务端 Key<input v-model="amapServerKeyInput" type="password" placeholder="已配置时输入新 Key 可替换；留空保持当前值" autocomplete="off" /></label><label>高德 JS 安全密钥<input v-model="amapSecurityJSCodeInput" type="password" placeholder="用于 JSAPI 安全代理；已配置时输入新密钥可替换" autocomplete="off" /></label><a href="https://console.amap.com/dev/key/app" target="_blank" rel="noopener noreferrer">申请/管理高德 Key ↗</a><p class="key-help">保存后，规划点会优先使用已经保存的坐标，不会因为重新绘制地图重复查询。</p><div class="modal-actions"><button type="button" class="primary" :disabled="settingsSaving" @click="saveMapKeys">{{ settingsSaving ? '保存中…' : '保存地图 Key 到数据库' }}</button></div></section><section class="settings-section"><h3>地点检索</h3><label>优先 Provider<select v-model="poiProviderPriority"><option value="amap">高德优先</option><option value="baidu">百度优先</option></select></label><p class="key-help">当前策略会先查询本地地点目录；未命中后使用所选 Provider，Provider 不可用时自动尝试另一家。新搜索结果只保留 7 天。</p><p class="key-status">本地地点记录：<strong>{{ localDirectoryCount }}</strong> 条</p><div class="modal-actions"><button type="button" @click="savePOIPreferences">保存检索优先级</button><button type="button" @click="clearLocalDirectory">清除本地记录</button></div></section><section class="settings-section"><h3>MCP</h3><p>MCP 地址：{{ capabilities?.mcp?.http_endpoint || '/mcp' }}</p><p class="key-help">Docker 远程部署时设置 JOURNEYIN_MCP_TOKEN；本地 localhost 调试可不设置。</p></section></section></div>
       <div v-if="authOpen" class="modal-backdrop" @click.self="authOpen = false"><section class="modal-panel auth-panel" role="dialog" aria-modal="true" aria-labelledby="auth-title"><IonIcon class="auth-icon" :icon="logInOutline" /><h2 id="auth-title">登录 JourneyIn</h2><p>请输入 Docker 服务配置的账号和密码。登录成功后会在当前浏览器保存一个 HttpOnly 会话。</p><form class="auth-form" @submit.prevent="login"><label>账号<input v-model="loginUsername" type="text" autofocus autocomplete="username" /></label><label>密码<input v-model="loginPassword" type="password" autocomplete="current-password" /></label><p v-if="loginMessage" class="auth-error">{{ loginMessage }}</p><div class="modal-actions"><button type="button" @click="authOpen = false">稍后</button><button type="submit" class="primary" :disabled="loginLoading">{{ loginLoading ? '登录中…' : '登录' }}</button></div></form></section></div>
-      <!-- 全屏照片大图预览 Lightbox (支持左右半透明切换按钮、手势滑动、键盘快捷键) -->
+      <!-- 全屏照片大图预览 Lightbox (防坍塌视口 + 渐进式模糊占位 + Loading动效 + 左右切换) -->
       <div
         v-if="previewPhoto"
         class="photo-lightbox-modal"
@@ -5214,7 +5260,38 @@ onUnmounted(() => {
             <IonIcon :icon="chevronBackOutline" />
           </button>
 
-          <img :src="previewPhoto.url" class="photo-lightbox-img" alt="大图预览" />
+          <!-- 稳定的固定比例图片视口：彻底解决弱网大图未加载时的布局坍塌 -->
+          <div class="photo-lightbox-viewport">
+            <!-- 1. 底层即时模糊缩略图占位 (几 KB，几乎 0 延迟，避免白屏或黑屏) -->
+            <img
+              :src="previewPhoto.thumb_url + '?size=120'"
+              class="photo-lightbox-blur-bg"
+              aria-hidden="true"
+            />
+
+            <!-- 2. 高清大图 (异步加载，加载完成后平滑淡入覆盖) -->
+            <img
+              :key="previewPhoto.id"
+              :src="previewPhoto.url"
+              class="photo-lightbox-img"
+              :class="{ 'photo-loaded': !previewPhotoLoading && !previewPhotoError }"
+              alt="大图预览"
+              @load="onPreviewPhotoLoaded(previewPhoto.id)"
+              @error="onPreviewPhotoError(previewPhoto.id)"
+            />
+
+            <!-- 3. 加载中微动效覆盖层 (明确展示加载反馈，防止操作迟滞感) -->
+            <div v-if="previewPhotoLoading" class="photo-lightbox-loading">
+              <div class="photo-loading-spinner"></div>
+              <span>正在加载大图…</span>
+            </div>
+
+            <!-- 4. 加载异常提示与重试 -->
+            <div v-if="previewPhotoError" class="photo-lightbox-error">
+              <span>大图加载超时或网络异常</span>
+              <button type="button" @click="setPreviewIndex(previewPhotoIndex)">重新加载</button>
+            </div>
+          </div>
 
           <!-- 右侧下一张切换按钮 -->
           <button
