@@ -3752,9 +3752,18 @@ async function refreshWeather() {
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '天气查询失败' } finally { weatherLoading.value = false }
 }
 function closeDetail() {
-  if (selectedSubStopId.value) navigateBackFromSubStop()
-  else if (selectedStopId.value) navigateBackFromStop()
-  else navigateBackToList()
+  if (selectedSubStopId.value) {
+    navigateBackFromSubStop()
+  } else if (selectedStopId.value) {
+    navigateBackFromStop()
+  } else if (selected.value) {
+    selectedStopId.value = ''
+    selectedSubStopId.value = ''
+    syncNavigationURL('replace')
+    void renderMap()
+  } else {
+    navigateBackToList()
+  }
 }
 function findPlanningPoint(id: string): Stop | SubStop | null {
   if (!tripDocument.value) return null
@@ -3866,10 +3875,50 @@ async function reorderPlanningPointTo(stop: Stop | SubStop, targetSequence: numb
 }
 async function deletePlanningPoint(stop: Stop | SubStop) {
   if (readOnlyView.value || !selected.value) return
-  const day = dayForStop(stop); if (!day) { error.value = '无法确定规划点所属日期'; return }
-  const isChild = isChildStop(stop); const label = isChild ? '子规划点' : '规划点'; if (!window.confirm('确认删除“' + stop.title + '”这个' + label + '吗？')) return
-  actionLoading.value = true; error.value = ''
-  try { const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(day.id) + '/stops/' + encodeURIComponent(stop.id), { method: 'DELETE', headers: { 'If-Match': 'revision-' + selected.value.revision } }); const payload = await response.json() as { document?: TripDocument; revision?: number; stops?: number; days?: number; error?: { message?: string } }; if (!response.ok) throw new Error(payload.error?.message || '删除规划点失败'); applyTripPayload(payload); closeDetail() } catch (cause) { error.value = cause instanceof Error ? cause.message : '删除规划点失败' } finally { actionLoading.value = false }
+  const day = dayForStop(stop)
+  if (!day) { error.value = '无法确定规划点所属日期'; return }
+  const isChild = isChildStop(stop)
+  const label = isChild ? '子规划点' : '规划点'
+  if (!window.confirm('确认删除“' + stop.title + '”这个' + label + '吗？')) return
+  const parent = isChild ? parentForStop(stop) : null
+  const wasSelectedStop = selectedStopId.value === stop.id
+  const wasSelectedSubStop = selectedSubStopId.value === stop.id
+  actionLoading.value = true
+  error.value = ''
+  try {
+    const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(day.id) + '/stops/' + encodeURIComponent(stop.id), {
+      method: 'DELETE',
+      headers: { 'If-Match': 'revision-' + selected.value.revision }
+    })
+    const payload = await response.json() as { document?: TripDocument; revision?: number; stops?: number; days?: number; error?: { message?: string } }
+    if (!response.ok) throw new Error(payload.error?.message || '删除规划点失败')
+    applyTripPayload(payload)
+    if (isChild) {
+      if (wasSelectedSubStop && parent) {
+        selectedStopId.value = parent.id
+        selectedSubStopId.value = ''
+        syncNavigationURL('replace')
+      }
+    } else {
+      if (wasSelectedStop) {
+        selectedStopId.value = ''
+        selectedSubStopId.value = ''
+        detailMoreOpen.value = false
+        descriptionEditing.value = false
+        descriptionFullscreen.value = false
+        descriptionDraft.value = ''
+        syncNavigationURL('replace')
+      }
+    }
+    if (isMobileViewport() && (wasSelectedStop || wasSelectedSubStop)) {
+      setSheetBreakpoint('half', 'replace')
+    }
+    void renderMap()
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '删除规划点失败'
+  } finally {
+    actionLoading.value = false
+  }
 }
 async function openSettings() {
   settingsOpen.value = true
