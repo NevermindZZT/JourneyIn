@@ -29,7 +29,7 @@ type TripSummary = { id: string; title: string; status: string; start_date: stri
 type TripHistoryEntry = { id: string; history_id?: string; trip_id: string; source_revision: number; title: string; start_date: string; end_date: string; label?: string; content_hash: string; created_at: string; read_only?: boolean }
 type TripSortMode = 'updated' | 'date'
 type Capabilities = { version?: string; default_map_provider?: 'baidu' | 'amap'; map_providers?: { baidu?: { browser_key_configured?: boolean; browser_key?: string }; amap?: { browser_key_configured?: boolean; browser_key?: string; security_proxy_path?: string; security_js_code_configured?: boolean } }; features?: { planning_point_edit?: boolean; coordinate_repair?: boolean }; mcp?: { http_endpoint?: string } }
-type KeySettings = { map?: { default_provider?: 'baidu' | 'amap'; baidu?: { browser_key_configured?: boolean; server_key_configured?: boolean }; amap?: { js_key_configured?: boolean; server_key_configured?: boolean; security_js_code_configured?: boolean } }; poi?: { provider_priority?: 'amap' | 'baidu'; local_directory_count?: number } }
+type KeySettings = { map?: { default_provider?: 'baidu' | 'amap'; baidu?: { browser_key_configured?: boolean; server_key_configured?: boolean }; amap?: { js_key_configured?: boolean; server_key_configured?: boolean; security_js_code_configured?: boolean } }; poi?: { provider_priority?: 'amap' | 'baidu'; local_directory_count?: number }; photos?: { root_dir?: string; configured?: boolean } }
 type PlaceCandidate = { id?: string; name: string; address?: string; location: Coord & { crs?: string }; provider?: string; citycode?: string; adcode?: string; typecode?: string }
 type TravelMode = 'driving' | 'walking' | 'cycling' | 'transit'
 
@@ -332,7 +332,7 @@ const shareNoticeVisible = ref(false)
 const posterModalOpen = ref(false)
 const actionLoading = ref(false)
 const settingsOpen = ref(false)
-type SettingsSection = 'appearance' | 'connection' | 'maps' | 'search' | 'sharing' | 'mcp' | 'about'
+type SettingsSection = 'appearance' | 'connection' | 'maps' | 'photos' | 'search' | 'sharing' | 'mcp' | 'about'
 type MarkdownEditorMode = 'edit' | 'preview'
 const settingsSection = ref<SettingsSection>('appearance')
 const newTripOpen = ref(false)
@@ -358,6 +358,7 @@ const amapJSKeyInput = ref('')
 const amapServerKeyInput = ref('')
 const amapSecurityJSCodeInput = ref('')
 const poiProviderPriority = ref<'amap' | 'baidu'>('amap')
+const photosRootDirInput = ref('')
 const localDirectoryCount = ref(0)
 const settingsSaving = ref(false)
 const panelOpen = ref(localStorage.getItem('journeyin.panelOpen') !== 'false')
@@ -4486,7 +4487,31 @@ async function openSettings() {
     amapJSKeyInput.value = ''
     amapServerKeyInput.value = ''
     amapSecurityJSCodeInput.value = ''
+    photosRootDirInput.value = settingsData.value.photos?.root_dir || photoStatus.value?.root_dir || ''
   } catch (cause) { settingsMessage.value = cause instanceof Error ? cause.message : '无法读取设置' }
+}
+
+async function savePhotosRootDir() {
+  settingsSaving.value = true
+  try {
+    const resp = await apiFetch('/api/v1/settings/photos', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ root_dir: photosRootDirInput.value.trim() })
+    })
+    const payload = await resp.json() as { error?: { message?: string } }
+    if (!resp.ok) throw new Error(payload.error?.message || '保存相册目录失败')
+    await loadPhotoStatus()
+    if (photoStatus.value?.enabled) {
+      await loadAtlasPhotos()
+      if (tripView.value === 'atlas') void renderAtlasMap(true)
+    }
+    settingsMessage.value = '相册扫描目录已保存，后台正在同步照片数据'
+  } catch (cause) {
+    settingsMessage.value = cause instanceof Error ? cause.message : '保存相册目录失败'
+  } finally {
+    settingsSaving.value = false
+  }
 }
 
 async function saveDefaultMapProvider() {
@@ -5057,6 +5082,7 @@ onUnmounted(() => {
               <button type="button" :class="{ active: settingsSection === 'appearance' }" @click="settingsSection = 'appearance'"><span class="settings-nav-icon">☼</span><span>外观</span><small>主题与阅读</small></button>
               <button type="button" :class="{ active: settingsSection === 'connection' }" @click="settingsSection = 'connection'"><span class="settings-nav-icon">↗</span><span>连接</span><small>服务与令牌</small></button>
               <button type="button" :class="{ active: settingsSection === 'maps' }" @click="settingsSection = 'maps'"><span class="settings-nav-icon">⌖</span><span>地图</span><small>Provider 与 Key</small></button>
+              <button type="button" :class="{ active: settingsSection === 'photos' }" @click="settingsSection = 'photos'"><span class="settings-nav-icon"><IonIcon :icon="imageOutline" /></span><span>足迹相册</span><small>相册扫描目录</small></button>
               <button type="button" :class="{ active: settingsSection === 'search' }" @click="settingsSection = 'search'"><span class="settings-nav-icon">⌕</span><span>地点检索</span><small>搜索优先级</small></button>
               <button type="button" :class="{ active: settingsSection === 'sharing' }" @click="settingsSection = 'sharing'"><span class="settings-nav-icon">↗</span><span>分享</span><small>链接与权限</small></button>
               <button type="button" :class="{ active: settingsSection === 'mcp' }" @click="settingsSection = 'mcp'"><span class="settings-nav-icon">◇</span><span>MCP</span><small>Agent 连接</small></button>
@@ -5080,6 +5106,59 @@ onUnmounted(() => {
                 <div class="settings-section-heading"><span class="eyebrow">MAP PROVIDERS</span><h3>地图与路线</h3><p>选择默认 Provider，并分别管理浏览器端和服务端能力。</p></div>
                 <div class="settings-card"><div class="settings-card-heading"><div><strong>默认地图 Provider</strong><small>用于没有单独地图偏好的新行程</small></div><span class="settings-status-dot"></span></div><label class="select-field">默认地图 Provider<UiSelect v-model="defaultMapProvider" aria-label="默认地图 Provider" :options="mapProviderOptions" /></label><p class="settings-help">单个行程已保存的地图偏好不会被覆盖；地图工作区仍可临时切换底图。</p><button class="primary-action" type="button" :disabled="settingsSaving" @click="saveDefaultMapProvider">{{ settingsSaving ? '保存中…' : '保存默认地图' }}</button></div>
                 <div class="settings-provider-grid"><article class="settings-card provider-card"><div class="settings-card-heading"><div><strong>高德地图</strong><small>JS API 2.0 / Web Service</small></div><span class="provider-status">{{ settingsData?.map?.amap?.js_key_configured ? 'JS 已配置' : '待配置' }}</span></div><p class="settings-status-line">JS Key：<strong>{{ settingsData?.map?.amap?.js_key_configured ? '已配置' : '未配置' }}</strong><br />服务端 Key：<strong>{{ settingsData?.map?.amap?.server_key_configured ? '已配置' : '未配置' }}</strong><br />安全密钥：<strong>{{ settingsData?.map?.amap?.security_js_code_configured ? '已配置' : '未配置' }}</strong></p><label>JS Key<input v-model="amapJSKeyInput" type="password" placeholder="用于浏览器端地图" autocomplete="off" /></label><label>服务端 Key<input v-model="amapServerKeyInput" type="password" placeholder="留空保持当前值" autocomplete="off" /></label><label>JS 安全密钥<input v-model="amapSecurityJSCodeInput" type="password" placeholder="用于安全代理" autocomplete="off" /></label><a href="https://console.amap.com/dev/key/app" target="_blank" rel="noopener noreferrer">申请/管理高德 Key ↗</a></article><article class="settings-card provider-card"><div class="settings-card-heading"><div><strong>百度地图</strong><small>JSAPI 4.0 / Web Service</small></div><span class="provider-status">{{ baiduKey ? '浏览器已配置' : '待配置' }}</span></div><p class="settings-status-line">浏览器端 Key：<strong>{{ baiduKey ? '已配置' : '未配置' }}</strong><br />服务端 Key：<strong>{{ settingsData?.map?.baidu?.server_key_configured ? '已配置' : '未配置' }}</strong></p><label>浏览器端 Key<input v-model="baiduBrowserKeyInput" type="password" :placeholder="settingsData?.map?.baidu?.browser_key_configured ? '已配置，输入新 Key 可替换' : '用于浏览器端地图'" autocomplete="off" /></label><label>服务端 Key<input v-model="baiduServerKeyInput" type="password" placeholder="留空保持当前值" autocomplete="off" /></label><a href="https://lbsyun.baidu.com/apiconsole/key" target="_blank" rel="noopener noreferrer">申请/管理百度 Key ↗</a></article></div><p class="settings-help">保存地图 Key 到数据库后，浏览器端 Key 会立即生效；服务端 Key 和安全密钥只返回配置状态，不会回显原文。</p><div class="settings-actions"><button class="primary-action" type="button" :disabled="settingsSaving" @click="saveMapKeys">{{ settingsSaving ? '保存中…' : '保存地图 Key 到数据库' }}</button></div><p v-if="settingsMessage" class="settings-feedback">{{ settingsMessage }}</p>
+              </section>
+
+
+              <section v-else-if="settingsSection === 'photos'" class="settings-page-section">
+                <div class="settings-section-heading">
+                  <span class="eyebrow">ATLAS PHOTOS</span>
+                  <h3>足迹相册扫描目录</h3>
+                  <p>配置本地或容器内的照片目录，自动提取拍摄时间与 GPS 地理信息并在足迹漫游中打点呈现。</p>
+                </div>
+                <div class="settings-card">
+                  <div class="settings-card-heading">
+                    <div>
+                      <strong>相册扫描根目录 (Photos Directory)</strong>
+                      <small>递归扫描所有子文件夹，支持 JPG、PNG、HEIC、WEBP、TIFF 等格式</small>
+                    </div>
+                    <span class="provider-status">{{ photoStatus?.enabled ? '已启用 (' + (photoStatus?.gps_photos || 0) + ' 处)' : '未启用' }}</span>
+                  </div>
+                  <label>
+                    照片目录路径
+                    <input
+                      v-model="photosRootDirInput"
+                      type="text"
+                      placeholder="例如：D:/Photos 或 /photos (留空保存可清除)"
+                      autocomplete="off"
+                    />
+                  </label>
+                  <p class="settings-help">
+                    若留空保存将清除配置；若宿主机配置了环境变量 <code>JOURNEYIN_PHOTOS_DIR</code>，将在未保存设置时自动生效。保存新目录后，系统将自动开始增量扫描并清理已失效点位。
+                  </p>
+                  <div v-if="photoStatus?.enabled" class="settings-cache-row">
+                    <span>已索引照片</span>
+                    <strong>{{ photoStatus?.total_photos || 0 }} 张 (含 GPS：{{ photoStatus?.gps_photos || 0 }} 处)</strong>
+                  </div>
+                  <div v-if="photoStatus?.last_scan_at" class="settings-cache-row">
+                    <span>最近扫描时间</span>
+                    <small>{{ formatPhotoTime(photoStatus.last_scan_at) }}</small>
+                  </div>
+                  <div class="settings-actions">
+                    <button class="primary-action" type="button" :disabled="settingsSaving" @click="savePhotosRootDir">
+                      {{ settingsSaving ? '保存中…' : '保存相册目录' }}
+                    </button>
+                    <button
+                      v-if="photoStatus?.enabled"
+                      class="secondary-action"
+                      type="button"
+                      :disabled="photoSyncing || photoStatus?.scanning"
+                      @click="triggerPhotoSync"
+                    >
+                      {{ photoSyncing || photoStatus?.scanning ? '扫描中…' : '立即增量重新扫描' }}
+                    </button>
+                  </div>
+                </div>
+                <p v-if="settingsMessage" class="settings-feedback">{{ settingsMessage }}</p>
               </section>
 
               <section v-else-if="settingsSection === 'search'" class="settings-page-section">

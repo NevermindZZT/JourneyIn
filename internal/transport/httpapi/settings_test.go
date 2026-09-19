@@ -140,3 +140,53 @@ func TestDefaultMapProviderSettingControlsCapabilitiesAndPlanning(t *testing.T) 
 		t.Fatalf("reloaded document lost AMap selection: %+v", planned.Document)
 	}
 }
+func TestUpdatePhotosSettings(t *testing.T) {
+	server := testPlanningServer(t)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/v1/settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var s struct {
+		Photos struct {
+			RootDir    string `json:"root_dir"`
+			Configured bool   `json:"configured"`
+		} `json:"photos"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
+		t.Fatal(err)
+	}
+
+	newDir := t.TempDir()
+	bodyJSON, _ := json.Marshal(map[string]string{"root_dir": newDir})
+	putReq, _ := http.NewRequest(http.MethodPut, server.URL+"/api/v1/settings/photos", strings.NewReader(string(bodyJSON)))
+	putReq.Header.Set("Content-Type", "application/json")
+	putResp, err := http.DefaultClient.Do(putReq)
+	if err != nil || putResp.StatusCode != http.StatusOK {
+		t.Fatalf("put photos setting failed: %v", err)
+	}
+	putResp.Body.Close()
+
+	resp2, _ := http.Get(server.URL + "/api/v1/settings")
+	var s2 struct {
+		Photos struct {
+			RootDir    string `json:"root_dir"`
+			Configured bool   `json:"configured"`
+		} `json:"photos"`
+	}
+	_ = json.NewDecoder(resp2.Body).Decode(&s2)
+	resp2.Body.Close()
+	if s2.Photos.RootDir != newDir || !s2.Photos.Configured {
+		t.Fatalf("expected root_dir=%s, got %s", newDir, s2.Photos.RootDir)
+	}
+
+	clearReq, _ := http.NewRequest(http.MethodPut, server.URL+"/api/v1/settings/photos", strings.NewReader(`{"root_dir":""}`))
+	clearReq.Header.Set("Content-Type", "application/json")
+	clearResp, err := http.DefaultClient.Do(clearReq)
+	if err != nil || clearResp.StatusCode != http.StatusOK {
+		t.Fatalf("clear photos setting failed: %v", err)
+	}
+	clearResp.Body.Close()
+}

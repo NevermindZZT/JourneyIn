@@ -91,7 +91,29 @@ func NewService(db *sql.DB, rootDir, cacheDir string, logger *slog.Logger) *Serv
 }
 
 func (s *Service) IsEnabled() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.rootDir != ""
+}
+
+func (s *Service) RootDir() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.rootDir
+}
+
+func (s *Service) SetRootDir(newRoot string) {
+	cleanRoot := ""
+	if strings.TrimSpace(newRoot) != "" {
+		if abs, err := filepath.Abs(newRoot); err == nil {
+			cleanRoot = abs
+		} else {
+			cleanRoot = filepath.Clean(newRoot)
+		}
+	}
+	s.mu.Lock()
+	s.rootDir = cleanRoot
+	s.mu.Unlock()
 }
 
 func (s *Service) Status(ctx context.Context) (PhotoStatus, error) {

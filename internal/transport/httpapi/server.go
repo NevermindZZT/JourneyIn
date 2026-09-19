@@ -129,6 +129,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/v1/settings/map", s.updateMapPreferences)
 	mux.HandleFunc("PUT /api/v1/settings/poi", s.updatePOIPreferences)
 	mux.HandleFunc("DELETE /api/v1/settings/place-directory", s.clearPlaceDirectory)
+	mux.HandleFunc("PUT /api/v1/settings/photos", s.updatePhotosSettings)
 	mux.HandleFunc("/_AMapService/", s.amapServiceProxy)
 	mux.Handle("/", s.staticHandler())
 	return requestLogger(mux, s.logger)

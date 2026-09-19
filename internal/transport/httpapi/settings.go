@@ -3,9 +3,11 @@ package httpapi
 import (
 	"context"
 	"net/http"
+	"os"
 	"strings"
 
 	journeymaps "journeyin/internal/maps"
+	"journeyin/internal/photos"
 )
 
 const defaultMapProviderSettingKey = "map.default_provider"
@@ -119,11 +121,30 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"map": map[string]any{
-		"default_provider": defaultProvider,
-		"baidu":            map[string]any{"browser_key_configured": browserOK, "server_key_configured": serverOK},
-		"amap":             map[string]any{"js_key_configured": amapJSOK, "server_key_configured": amapServerOK, "security_js_code_configured": amapSecurityOK},
-	}, "poi": map[string]any{"provider_priority": priority, "local_directory_count": directoryCount}})
+	photosRootDir := ""
+	if s.settingsStore != nil {
+		if val, ok, err := s.settingsStore.GetSetting(r.Context(), "photos.root_dir"); err == nil && ok && strings.TrimSpace(val) != "" {
+			photosRootDir = strings.TrimSpace(val)
+		}
+	}
+	if photosRootDir == "" && s.photosService != nil {
+		photosRootDir = s.photosService.RootDir()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"map": map[string]any{
+			"default_provider": defaultProvider,
+			"baidu":            map[string]any{"browser_key_configured": browserOK, "server_key_configured": serverOK},
+			"amap":             map[string]any{"js_key_configured": amapJSOK, "server_key_configured": amapServerOK, "security_js_code_configured": amapSecurityOK},
+		},
+		"poi": map[string]any{
+			"provider_priority":     priority,
+			"local_directory_count": directoryCount,
+		},
+		"photos": map[string]any{
+			"root_dir":   photosRootDir,
+			"configured": photosRootDir != "",
+		},
+	})
 }
 
 func (s *Server) updateMapKeys(w http.ResponseWriter, r *http.Request) {
@@ -263,3 +284,52 @@ func (s *Server) clearPlaceDirectory(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"cleared": true})
 }
+type photosSettingsBody struct {
+	RootDir *string `json:"root_dir"`
+}
+
+func (s *Server) updatePhotosSettings(w http.ResponseWriter, r *http.Request) {
+	if s.settingsStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "settings_unavailable", "settings store is not configured", nil)
+		return
+	}
+	var body photosSettingsBody
+	if err := decodeBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
+		return
+	}
+	var newDir string
+	if body.RootDir != nil {
+		newDir = strings.TrimSpace(*body.RootDir)
+	}
+	var err error
+	if newDir == "" {
+		err = s.settingsStore.DeleteSetting(r.Context(), "photos.root_dir")
+		fallbackDir := os.Getenv("JOURNEYIN_PHOTOS_DIR")
+		if s.photosService != nil {
+			s.photosService.SetRootDir(fallbackDir)
+			if fallbackDir != "" {
+				s.photosService.TriggerScan()
+			}
+		}
+	} else {
+		err = s.settingsStore.SetSetting(r.Context(), "photos.root_dir", newDir, false)
+		if s.photosService == nil && s.settingsStore != nil && s.settingsStore.DB() != nil {
+			s.photosService = photos.NewService(s.settingsStore.DB(), newDir, "", s.logger)
+		}
+		if s.photosService != nil {
+			s.photosService.SetRootDir(newDir)
+			s.photosService.TriggerScan()
+		}
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"saved":    true,
+		"root_dir": newDir,
+		"enabled":  s.photosService != nil && s.photosService.IsEnabled(),
+	})
+}
+

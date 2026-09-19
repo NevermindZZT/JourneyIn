@@ -98,7 +98,7 @@ func main() {
 	api.SetShareService(journeyshare.NewService(journeyshare.NewSQLiteStore(database)), envOr("JOURNEYIN_PUBLIC_URL", "http://"+listen))
 	api.SetSyncStore(database)
 
-	photosDir := os.Getenv("JOURNEYIN_PHOTOS_DIR")
+	photosDir := settingValue(ctx, database, "photos.root_dir", os.Getenv("JOURNEYIN_PHOTOS_DIR"))
 	cacheDir := ""
 	if dataPath != ":memory:" {
 		cacheDir = filepath.Join(filepath.Dir(dataPath), "cache", "thumbnails")
