@@ -1564,10 +1564,43 @@ async function createTrip() {
   for (let index = 0; index < total; index++) days.push({ id: makeID('day'), date: dateAfter(start, index), title: '第 ' + (index + 1) + ' 天', notes_markdown: '', stops: [], legs: [] })
   actionLoading.value = true
   try {
-    const response = await apiFetch('/api/v1/trips', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ schema_version: 1, title: newTitle.value.trim(), status: 'draft', locale: 'zh-CN', timezone: newTimezone.value, date_range: { start, end }, description_markdown: newDescription.value, links: [], map: { preferred_provider: defaultMapProvider.value, enabled_providers: ['baidu', 'amap'], default_mode: 'walking' }, days, metadata: { source: 'human' } }) })
-    if (!response.ok) { const payload = await response.json() as { error?: { message?: string } }; throw new Error(payload.error?.message || '新建旅行规划失败') }
+    const response = await apiFetch('/api/v1/trips', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        schema_version: 1,
+        title: newTitle.value.trim(),
+        status: 'draft',
+        locale: 'zh-CN',
+        timezone: newTimezone.value,
+        date_range: { start, end },
+        description_markdown: newDescription.value,
+        links: [],
+        map: { preferred_provider: defaultMapProvider.value, enabled_providers: ['baidu', 'amap'], default_mode: 'walking' },
+        days,
+        metadata: { source: 'human' }
+      })
+    })
+    const payload = await response.json() as { error?: { message?: string } } & TripSummary & { document?: TripDocument }
+    if (!response.ok) throw new Error(payload.error?.message || '新建旅行规划失败')
     newTripOpen.value = false
     await loadTrips()
+    if (payload.id) {
+      const summaryItem: TripSummary = {
+        id: payload.id,
+        title: payload.title || newTitle.value.trim(),
+        status: payload.status || 'draft',
+        start_date: payload.start_date || start,
+        end_date: payload.end_date || end,
+        timezone: payload.timezone || newTimezone.value,
+        revision: payload.revision || 1,
+        days: payload.days ?? total,
+        stops: payload.stops ?? 0,
+        show_in_atlas: payload.show_in_atlas ?? true,
+        updated_at: payload.updated_at
+      }
+      navigateToTrip(summaryItem, 'push')
+    }
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '新建旅行规划失败' } finally { actionLoading.value = false }
 }
 
@@ -3564,8 +3597,25 @@ async function importTrip(event: Event) {
     const validationPayload = await validation.json() as { error?: { message?: string; details?: { issues?: Array<{ path?: string; message?: string }> } } }
     if (!validation.ok) throw new Error(importErrorMessage(validationPayload, 'Trip 校验失败'))
     const response = await apiFetch('/api/v1/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: document })
-    if (!response.ok) { const payload = await response.json() as { error?: { message?: string; details?: { issues?: Array<{ path?: string; message?: string }> } } }; throw new Error(importErrorMessage(payload, '导入失败')) }
+    const payload = await response.json() as { error?: { message?: string; details?: { issues?: Array<{ path?: string; message?: string }> } } } & TripSummary
+    if (!response.ok) throw new Error(importErrorMessage(payload, '导入失败'))
     await loadTrips()
+    if (payload.id) {
+      const summaryItem: TripSummary = {
+        id: payload.id,
+        title: payload.title,
+        status: payload.status || 'draft',
+        start_date: payload.start_date,
+        end_date: payload.end_date,
+        timezone: payload.timezone,
+        revision: payload.revision || 1,
+        days: payload.days,
+        stops: payload.stops,
+        show_in_atlas: payload.show_in_atlas ?? true,
+        updated_at: payload.updated_at
+      }
+      navigateToTrip(summaryItem, 'push')
+    }
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '导入失败' } finally { actionLoading.value = false; input.value = '' }
 }
 async function downloadTrip() {
