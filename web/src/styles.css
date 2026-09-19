@@ -163,7 +163,7 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 8px;
-  padding: 10px 18px 8px;
+  padding: 10px 0 6px;
 }
 
 .atlas-metric-card {
@@ -179,6 +179,15 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .atlas-metric-card.highlight {
   background: color-mix(in srgb, var(--p) 10%, var(--surface));
   border-color: color-mix(in srgb, var(--p) 35%, transparent);
+}
+
+.atlas-metric-card.highlight-photo {
+  background: color-mix(in srgb, #2563eb 10%, var(--surface));
+  border-color: color-mix(in srgb, #2563eb 32%, transparent);
+}
+
+.atlas-metric-card.highlight-photo strong {
+  color: #3b82f6;
 }
 
 .atlas-metric-card span {
@@ -1369,6 +1378,34 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
   .point-editor-related .text-action { width: 100%; }
 }
 /* ==================== 足迹漫游照片图层样式 (Photo Atlas) ==================== */
+.atlas-photo-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  position: relative;
+  transition: all 0.16s ease;
+}
+.atlas-photo-toggle-btn.active {
+  border-color: color-mix(in srgb, var(--p) 45%, var(--line)) !important;
+  background: color-mix(in srgb, var(--p) 12%, var(--surface)) !important;
+  color: var(--p) !important;
+}
+.atlas-photo-btn-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  background: color-mix(in srgb, var(--line) 70%, transparent);
+  color: var(--ink);
+}
+.atlas-photo-toggle-btn.active .atlas-photo-btn-badge {
+  background: var(--p);
+  color: #ffffff;
+}
 .photo-atlas-pin {
   position: relative;
   width: 44px;
@@ -1430,70 +1467,88 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
   pointer-events: none;
 }
 
-/* 图层控制条 */
-.atlas-layers-bar {
+/* 图层过滤工具条 (M3 药丸胶囊风格) */
+.atlas-filter-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 8px 12px;
-  margin: 10px 0;
-  background: color-mix(in srgb, var(--surface) 92%, var(--md-surface-container-low));
-  border: 1px solid var(--line);
-  border-radius: 12px;
+  padding: 6px 0 8px;
+  margin: 4px 0 8px;
+  border-bottom: 1px dashed color-mix(in srgb, var(--line) 65%, transparent);
 }
-.atlas-layers-chips {
+.atlas-filter-chips {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  flex-wrap: wrap;
 }
-.atlas-layer-chip {
+.atlas-pill-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 5px 10px;
+  gap: 6px;
+  padding: 5px 12px;
   border-radius: 999px;
-  border: 1px solid var(--line);
-  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  background: color-mix(in srgb, var(--surface) 60%, var(--md-surface-container-low));
   color: var(--muted);
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.18s cubic-bezier(0.2, 0, 0, 1);
+  user-select: none;
 }
-.atlas-layer-chip input[type="checkbox"] {
-  accent-color: var(--p);
-  margin: 0;
-  cursor: pointer;
+.atlas-pill-btn ion-icon {
+  font-size: 14px;
 }
-.atlas-layer-chip.active {
+.atlas-pill-btn:hover {
   border-color: color-mix(in srgb, var(--p) 45%, var(--line));
-  background: color-mix(in srgb, var(--p) 8%, var(--surface));
   color: var(--ink);
 }
-.atlas-layer-chip-badge {
-  font-size: 10px;
-  padding: 1px 5px;
+.atlas-pill-btn.active {
+  border-color: color-mix(in srgb, var(--p) 60%, var(--line));
+  background: color-mix(in srgb, var(--p) 14%, var(--surface));
+  color: var(--p);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+.atlas-pill-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 6px;
   border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.2;
   background: color-mix(in srgb, var(--line) 70%, transparent);
-  color: var(--ink);
+  color: var(--muted);
+  transition: all 0.18s ease;
 }
-.atlas-sync-btn {
+.atlas-pill-btn.active .atlas-pill-badge {
+  background: var(--p);
+  color: #ffffff;
+}
+.atlas-refresh-action {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 5px 8px;
+  padding: 5px 9px;
   border-radius: 8px;
-  border: 1px solid var(--line);
-  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  background: transparent;
   color: var(--muted);
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
+  transition: all 0.16s ease;
 }
-.atlas-sync-btn:hover {
+.atlas-refresh-action:hover {
   color: var(--ink);
   border-color: var(--p);
+}
+.atlas-refresh-action:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 .atlas-sync-spin {
   animation: spin 1s linear infinite;

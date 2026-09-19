@@ -239,7 +239,7 @@ interface PhotoCluster {
 const photoStatus = ref<PhotoStatus | null>(null)
 const atlasPhotos = ref<PhotoAtlasItem[]>([])
 const atlasShowTrips = ref(true)
-const atlasShowPhotos = ref(true)
+const atlasShowPhotos = ref<boolean>(localStorage.getItem('journeyin.atlasShowPhotos') !== 'false')
 let atlasPhotoMarkers: any[] = []
 const selectedPhotoCluster = ref<PhotoCluster | null>(null)
 const previewPhoto = ref<{ id: string; file_name: string; taken_at: string; url: string } | null>(null)
@@ -2750,6 +2750,16 @@ function openPhotoPreview(photo: PhotoAtlasItem) {
   }
 }
 
+function toggleAtlasPhotos(val?: boolean) {
+  const next = typeof val === 'boolean' ? val : !atlasShowPhotos.value
+  atlasShowPhotos.value = next
+  localStorage.setItem('journeyin.atlasShowPhotos', next ? 'true' : 'false')
+  renderAtlasPhotoMarkers()
+  if (next && (!atlasPhotos.value || !atlasPhotos.value.length)) {
+    void loadAtlasPhotos().then(() => renderAtlasPhotoMarkers())
+  }
+}
+
 function formatPhotoTime(val?: string) {
   if (!val) return ''
   const d = new Date(val)
@@ -4606,6 +4616,19 @@ onUnmounted(() => {
                 <span>‹</span><small>行程</small>
               </button>
               <div class="workspace-top-actions">
+                <button
+                  v-if="photoStatus?.enabled"
+                  class="workspace-tool-trigger atlas-photo-toggle-btn"
+                  :class="{ active: atlasShowPhotos }"
+                  type="button"
+                  :aria-pressed="atlasShowPhotos"
+                  :title="atlasShowPhotos ? '点击隐藏足迹照片' : '点击显示足迹照片'"
+                  @click="toggleAtlasPhotos()"
+                >
+                  <IonIcon :icon="imageOutline" />
+                  <span>{{ atlasShowPhotos ? '照片' : '隐藏' }}</span>
+                  <span v-if="atlasPhotos.length" class="atlas-photo-btn-badge">{{ atlasPhotos.length }}</span>
+                </button>
                 <button class="workspace-tool-trigger" type="button" :aria-expanded="mobileMapToolsOpen" aria-label="打开地图选项" @click="toggleMobileMapTools">
                   <IonIcon :icon="mapOutline" /><span>地图选项</span>
                 </button>
@@ -4622,6 +4645,13 @@ onUnmounted(() => {
               <div class="map-tool-row"><span>图层</span><div class="provider-segment layer-segment" role="group" aria-label="地图图层"><button type="button" :class="{ active: mapType === 'normal' }" :aria-pressed="mapType === 'normal'" @click="setMapType('normal')">标准图</button><button type="button" :class="{ active: mapType === 'satellite' }" :aria-pressed="mapType === 'satellite'" @click="setMapType('satellite')">卫星图</button></div></div>
               <div class="map-tool-row"><span>地图标签</span><div class="provider-segment label-segment" role="group" aria-label="地图标签显示模式"><button type="button" :class="{ active: mapLabelMode === 'auto' }" @click="setMapLabelMode('auto')">自动</button><button type="button" :class="{ active: mapLabelMode === 'always' }" @click="setMapLabelMode('always')">全部</button><button type="button" :class="{ active: mapLabelMode === 'none' }" @click="setMapLabelMode('none')">隐藏</button></div></div>
               <p class="map-tool-hint">{{ mapLabelMode === 'auto' ? '自动：有空间时显示，密集时自动防重叠' : mapLabelMode === 'always' ? '全部：始终展开全部地名与路线标签' : '隐藏：仅保留图钉，隐藏浮动文字' }}</p>
+              <div v-if="photoStatus?.enabled" class="map-tool-row">
+                <span>足迹相片</span>
+                <div class="provider-segment">
+                  <button type="button" :class="{ active: atlasShowPhotos }" @click="toggleAtlasPhotos(true)">显示 ({{ atlasPhotos.length }})</button>
+                  <button type="button" :class="{ active: !atlasShowPhotos }" @click="toggleAtlasPhotos(false)">隐藏</button>
+                </div>
+              </div>
             </div>
 
             <!-- 足迹漫游浮层：成就看板与行程高亮列表 (完全复用 workspace-panel / stop-detail-panel 的设计与结构) -->
@@ -4670,51 +4700,72 @@ onUnmounted(() => {
                 </div>
               </header>
 
-              <!-- 成就数据卡片 -->
-              <div class="atlas-metrics-grid">
-                <div class="atlas-metric-card">
-                  <span>点亮行程</span>
-                  <strong>{{ atlasData?.total_trips || 0 }} <em>次</em></strong>
-                </div>
-                <div class="atlas-metric-card">
-                  <span>累计天数</span>
-                  <strong>{{ atlasData?.total_days || 0 }} <em>天</em></strong>
-                </div>
-                <div class="atlas-metric-card">
-                  <span>规划地点</span>
-                  <strong>{{ atlasData?.total_stops || 0 }} <em>处</em></strong>
-                </div>
-                <div class="atlas-metric-card highlight">
-                  <span>足迹总里程</span>
-                  <strong>{{ formatDistance(atlasData?.total_distance_m) || '0 km' }}</strong>
-                </div>
-                <div v-if="photoStatus?.enabled" class="atlas-metric-card">
-                  <span>足迹照片</span>
-                  <strong>{{ photoStatus.gps_photos || 0 }} <em>张</em></strong>
-                </div>
-              </div>
-
-              <!-- 图层切换与照片库同步 -->
-              <div v-if="photoStatus?.enabled" class="atlas-layers-bar">
-                <div class="atlas-layers-chips">
-                  <label class="atlas-layer-chip" :class="{ active: atlasShowTrips }">
-                    <input type="checkbox" v-model="atlasShowTrips" @change="renderAtlasMap(true)" />
-                    <span>路线轨迹</span>
-                  </label>
-                  <label class="atlas-layer-chip" :class="{ active: atlasShowPhotos }">
-                    <input type="checkbox" v-model="atlasShowPhotos" @change="renderAtlasMap(true)" />
-                    <span>足迹照片</span>
-                    <span class="atlas-layer-chip-badge">{{ atlasPhotos.length }}</span>
-                  </label>
-                </div>
-                <button type="button" class="atlas-sync-btn" :disabled="photoSyncing || photoStatus.scanning" @click="triggerPhotoSync" title="重新扫描照片目录">
-                  <IonIcon :icon="refreshOutline" :class="{ 'atlas-sync-spin': photoSyncing || photoStatus.scanning }" />
-                  <span>{{ photoSyncing || photoStatus.scanning ? '扫描中' : '刷新相册' }}</span>
-                </button>
-              </div>
-
-              <!-- 行程列表与筛选 -->
+              <!-- 统一的可滚动区域：信息小卡片、图层过滤与行程列表整体参与滚动，优化小屏视野 -->
               <div class="atlas-trip-scroll">
+                <!-- 成就数据卡片 -->
+                <div class="atlas-metrics-grid">
+                  <div class="atlas-metric-card">
+                    <span>点亮行程</span>
+                    <strong>{{ atlasData?.total_trips || 0 }} <em>次</em></strong>
+                  </div>
+                  <div class="atlas-metric-card">
+                    <span>累计天数</span>
+                    <strong>{{ atlasData?.total_days || 0 }} <em>天</em></strong>
+                  </div>
+                  <div class="atlas-metric-card">
+                    <span>规划地点</span>
+                    <strong>{{ atlasData?.total_stops || 0 }} <em>处</em></strong>
+                  </div>
+                  <div class="atlas-metric-card highlight">
+                    <span>足迹总里程</span>
+                    <strong>{{ formatDistance(atlasData?.total_distance_m) || '0 km' }}</strong>
+                  </div>
+                  <div v-if="photoStatus?.enabled" class="atlas-metric-card highlight-photo">
+                    <span>足迹照片</span>
+                    <strong>{{ photoStatus.gps_photos || 0 }} <em>张</em></strong>
+                  </div>
+                </div>
+
+                <!-- 图层切换与照片库同步：M3 胶囊 Chip 风格，完全融入整体质感 -->
+                <div class="atlas-filter-toolbar">
+                  <div class="atlas-filter-chips">
+                    <button
+                      type="button"
+                      class="atlas-pill-btn"
+                      :class="{ active: atlasShowTrips }"
+                      :aria-pressed="atlasShowTrips"
+                      @click="atlasShowTrips = !atlasShowTrips; renderAtlasMap(true)"
+                    >
+                      <IonIcon :icon="footstepsOutline" />
+                      <span>路线轨迹</span>
+                    </button>
+                    <button
+                      v-if="photoStatus?.enabled"
+                      type="button"
+                      class="atlas-pill-btn"
+                      :class="{ active: atlasShowPhotos }"
+                      :aria-pressed="atlasShowPhotos"
+                      @click="toggleAtlasPhotos()"
+                    >
+                      <IonIcon :icon="imageOutline" />
+                      <span>足迹照片</span>
+                      <span v-if="atlasPhotos.length" class="atlas-pill-badge">{{ atlasPhotos.length }}</span>
+                    </button>
+                  </div>
+                  <button
+                    v-if="photoStatus?.enabled"
+                    type="button"
+                    class="atlas-refresh-action"
+                    :disabled="photoSyncing || photoStatus.scanning"
+                    @click="triggerPhotoSync"
+                    title="重新扫描照片目录"
+                  >
+                    <IonIcon :icon="refreshOutline" :class="{ 'atlas-sync-spin': photoSyncing || photoStatus.scanning }" />
+                    <span>{{ photoSyncing || photoStatus.scanning ? '扫描中…' : '刷新' }}</span>
+                  </button>
+                </div>
+
+                <!-- 行程列表与筛选 -->
                 <div class="atlas-list-title">
                   <span>全部足迹路线</span>
                   <small v-if="selectedAtlasTripID">已聚焦 1 条路线 · <a href="javascript:void(0)" @click="clearSelectedAtlasTrip">重置全景</a></small>
