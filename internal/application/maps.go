@@ -206,7 +206,9 @@ func (s *MapService) persistPlaceDirectory(ctx context.Context, result journeyma
 				Location      journeymaps.GeoPoint
 			}{item.Name, item.Address, item.Location})
 		}
+		s.cacheWriteMu.Lock()
 		_ = s.store.UpsertPlaceDirectory(ctx, store.PlaceDirectoryRecord{Provider: string(item.Provider), ProviderID: providerID, Name: item.Name, Address: item.Address, Region: region, Category: category, LocationJSON: location, CreatedAt: now, LastSeenAt: now, ExpiresAt: now.Add(7 * 24 * time.Hour)})
+		s.cacheWriteMu.Unlock()
 	}
 }
 

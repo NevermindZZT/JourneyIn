@@ -13,8 +13,23 @@ import (
 	"time"
 
 	"journeyin/internal/domain"
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
 )
+
+func init() {
+	sqlite.RegisterConnectionHook(func(conn sqlite.ExecQuerierContext, dsn string) error {
+		for _, pragma := range []string{
+			"PRAGMA foreign_keys = ON;",
+			"PRAGMA busy_timeout = 10000;",
+			"PRAGMA synchronous = NORMAL;",
+		} {
+			if _, err := conn.ExecContext(context.Background(), pragma, nil); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
 
 type Store struct{ db *sql.DB }
 
