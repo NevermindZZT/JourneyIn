@@ -123,7 +123,8 @@ const sortedTrips = computed(() => {
   const items = [...trips.value]
   return items.sort((a, b) => {
     if (tripSortMode.value === 'date') {
-      const dateOrder = a.start_date.localeCompare(b.start_date) || a.end_date.localeCompare(b.end_date)
+      // 最近的行程排在最前面（降序）
+      const dateOrder = b.start_date.localeCompare(a.start_date) || b.end_date.localeCompare(a.end_date)
       if (dateOrder) return dateOrder
     }
     const updatedA = Date.parse(a.updated_at || '') || 0
