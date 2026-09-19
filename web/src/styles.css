@@ -1338,6 +1338,26 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .detail-location-actions .text-action:disabled { cursor: not-allowed; opacity: .45; }
 .detail-navigation-button:disabled { cursor: not-allowed; border-color: var(--line); color: var(--muted); opacity: .6; }
 .map-pick-context { margin: -6px 0 13px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.map-pick-segment-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 4px 0 6px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 75%, var(--md-surface-container-low));
+  border: 1px solid var(--line);
+}
+.map-pick-segment-row > span {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.map-pick-segment-row .provider-segment {
+  margin: 0;
+}
 .location-search-title-field { border-top: 1px solid var(--line); padding-top: 10px; }
 .point-editor-backdrop { z-index: 120; }
 .point-editor-panel { display: flex; width: min(520px, calc(100vw - 32px)); max-height: min(760px, calc(100dvh - 32px)); min-height: 0; flex-direction: column; padding: 0; overflow: hidden; }

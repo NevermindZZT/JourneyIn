@@ -400,6 +400,9 @@ const mapPickAddress = ref('')
 const mapPickDayID = ref('')
 const mapPickLocation = ref<Coord & { crs: string } | null>(null)
 const mapPickTargetID = ref('')
+type MapPickKind = 'stop' | 'substop'
+const mapPickKind = ref<MapPickKind>('stop')
+const mapPickParentStopId = ref<string>('')
 const panelMode = ref<'journey' | 'search'>('journey')
 const searchQuery = ref('')
 const searchRegion = ref('')
@@ -479,6 +482,22 @@ const visibleDays = computed(() => {
   return selectedDay.value === 'all' ? tripDocument.value.days : tripDocument.value.days.filter((_, index) => index + 1 === selectedDay.value)
 })
 const tripDayOptions = computed(() => (tripDocument.value?.days || []).map((day, index) => ({ value: day.id, label: 'D' + (index + 1) + ' · ' + formatDate(day.date), description: day.title || '第 ' + (index + 1) + ' 天' })))
+const mapPickAvailableParentStops = computed(() => {
+  if (!tripDocument.value || !mapPickDayID.value) return []
+  const targetDay = tripDocument.value.days.find(d => d.id === mapPickDayID.value)
+  return targetDay?.stops || []
+})
+const mapPickParentStopOptions = computed(() => {
+  return mapPickAvailableParentStops.value.map((stop, idx) => ({
+    value: stop.id,
+    label: String(idx + 1).padStart(2, '0') + '. ' + stop.title,
+    description: stop.address || (stop.children?.length ? stop.children.length + ' 个子地点' : '无子地点')
+  }))
+})
+const mapPickParentStopTitle = computed(() => {
+  if (!mapPickParentStopId.value) return ''
+  return findPlanningPoint(mapPickParentStopId.value)?.title || ''
+})
 function orderedStops(stops: Stop[]) { return [...stops].sort((a, b) => a.sequence - b.sequence) }
 const visibleStops = computed(() => visibleDays.value.flatMap(day => orderedStops(day.stops || [])))
 const carryOverStop = computed<Stop | null>(() => {
@@ -3758,8 +3777,19 @@ function promptAddMapPoint(info: { point: Coord & { crs: string }; title: string
   const initialTitle = target?.title || (info.title && info.title !== '地图地点' ? info.title : '')
   mapPickTitle.value = initialTitle
   mapPickAddress.value = target?.address || info.address || ''
-  const day = target ? dayForStop(target) : selectedDay.value === 'all' ? tripDocument.value.days[0] : tripDocument.value.days[selectedDay.value - 1]
-  mapPickDayID.value = day?.id || tripDocument.value.days[0]?.id || ''
+
+  if (selectedStop.value && !selectedSubStopId.value && !mapPickTargetID.value) {
+    mapPickKind.value = 'substop'
+    mapPickParentStopId.value = selectedStop.value.id
+    const parentDay = dayForStop(selectedStop.value)
+    mapPickDayID.value = parentDay?.id || tripDocument.value.days[0]?.id || ''
+  } else {
+    mapPickKind.value = 'stop'
+    const day = target ? dayForStop(target) : selectedDay.value === 'all' ? tripDocument.value.days[0] : tripDocument.value.days[selectedDay.value - 1]
+    mapPickDayID.value = day?.id || tripDocument.value.days[0]?.id || ''
+    mapPickParentStopId.value = (day?.stops && day.stops[0]?.id) || ''
+  }
+
   mapPickMode.value = false
   mapPickOpen.value = true
   error.value = ''
@@ -3898,8 +3928,19 @@ function handleMapClick(event: any) {
   mapPickLocation.value = point
   mapPickTitle.value = target?.title || ''
   mapPickAddress.value = target?.address || ''
-  const day = target ? dayForStop(target) : selectedDay.value === 'all' ? tripDocument.value.days[0] : tripDocument.value.days[selectedDay.value - 1]
-  mapPickDayID.value = day?.id || tripDocument.value.days[0]?.id || ''
+
+  if (selectedStop.value && !selectedSubStopId.value && !mapPickTargetID.value) {
+    mapPickKind.value = 'substop'
+    mapPickParentStopId.value = selectedStop.value.id
+    const parentDay = dayForStop(selectedStop.value)
+    mapPickDayID.value = parentDay?.id || tripDocument.value.days[0]?.id || ''
+  } else {
+    mapPickKind.value = 'stop'
+    const day = target ? dayForStop(target) : selectedDay.value === 'all' ? tripDocument.value.days[0] : tripDocument.value.days[selectedDay.value - 1]
+    mapPickDayID.value = day?.id || tripDocument.value.days[0]?.id || ''
+    mapPickParentStopId.value = (day?.stops && day.stops[0]?.id) || ''
+  }
+
   mapPickMode.value = false
   mapPickOpen.value = true
   if (!mapPickAddress.value) {
@@ -3917,6 +3958,8 @@ function cancelMapPick() {
   mapPickMode.value = false
   mapPickTargetID.value = ''
   mapPickDayID.value = ''
+  mapPickKind.value = 'stop'
+  mapPickParentStopId.value = ''
   mapPickLocation.value = null
   mapPickTitle.value = ''
   mapPickAddress.value = ''
@@ -3928,21 +3971,47 @@ async function saveMapPick() {
   error.value = ''
   const point = mapPickLocation.value
   const provider = selectedMapProvider.value
+  const addedTitle = mapPickTitle.value.trim()
   try {
     if (mapPickTargetID.value) {
       const target = findPlanningPoint(mapPickTargetID.value)
       if (!target) throw new Error('找不到要更新的规划点')
-      await persistPlanningPointUpdate(target, { title: mapPickTitle.value.trim(), address: mapPickAddress.value.trim(), location: locationForMapPoint(point, provider) })
+      await persistPlanningPointUpdate(target, { title: addedTitle, address: mapPickAddress.value.trim(), location: locationForMapPoint(point, provider) })
       cancelMapPick()
       return
     }
     if (!mapPickDayID.value) { error.value = '请选择行程日期'; return }
-    const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(mapPickDayID.value) + '/stops', { method: 'POST', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision }, body: JSON.stringify({ stop: { title: mapPickTitle.value.trim(), address: mapPickAddress.value.trim(), location: locationForMapPoint(point, provider) } }) })
+
+    if (mapPickKind.value === 'substop') {
+      const parentID = mapPickParentStopId.value
+      if (!parentID) { error.value = '请选择所属主规划点'; return }
+      const endpoint = '/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(mapPickDayID.value) + '/stops/' + encodeURIComponent(parentID) + '/children'
+      const response = await apiFetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision },
+        body: JSON.stringify({ stop: { title: addedTitle, address: mapPickAddress.value.trim(), location: locationForMapPoint(point, provider) } })
+      })
+      const payload = await response.json() as { document?: TripDocument; revision?: number; stops?: number; days?: number; error?: { message?: string } }
+      if (!response.ok) throw new Error(payload.error?.message || '保存子规划点失败')
+      applyTripPayload(payload)
+      selectedDay.value = tripDocument.value.days.findIndex(day => day.id === mapPickDayID.value) + 1
+      selectedStopId.value = parentID
+      selectedSubStopId.value = ''
+      const parentTitle = findPlanningPoint(parentID)?.title || '主规划点'
+      cancelMapPick()
+      tripDetailsNotice.value = '已将“' + addedTitle + '”添加为“' + parentTitle + '”的子规划点'
+      return
+    }
+
+    const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(mapPickDayID.value) + '/stops', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision },
+      body: JSON.stringify({ stop: { title: addedTitle, address: mapPickAddress.value.trim(), location: locationForMapPoint(point, provider) } })
+    })
     const payload = await response.json() as { document?: TripDocument; revision?: number; stops?: number; days?: number; error?: { message?: string } }
     if (!response.ok) throw new Error(payload.error?.message || '保存规划点失败')
     applyTripPayload(payload)
     selectedDay.value = tripDocument.value.days.findIndex(day => day.id === mapPickDayID.value) + 1
-    const addedTitle = mapPickTitle.value.trim()
     cancelMapPick()
     tripDetailsNotice.value = '已将“' + addedTitle + '”添加至行程规划'
   } catch (cause) {
@@ -5071,7 +5140,83 @@ onUnmounted(() => {
       <div v-if="pointEditorOpen && !readOnlyView" class="modal-backdrop point-editor-backdrop" @click.self="cancelEditPoint"><section class="modal-panel point-editor-panel" role="dialog" aria-modal="true" aria-labelledby="point-editor-title" aria-describedby="point-editor-description"><header class="point-editor-header"><div><p class="eyebrow">POINT EDITOR</p><h2 id="point-editor-title">编辑规划点</h2><p id="point-editor-description">名称、地址和坐标分开处理；不会因为改名而替换位置。</p></div><button class="modal-close" type="button" :disabled="pointEditorSaving" aria-label="关闭规划点编辑" @click="cancelEditPoint">×</button></header><form id="point-editor-form" class="point-editor-form" @submit.prevent="savePointDetails"><label>规划点名称<input ref="pointEditorTitleInput" v-model="pointEditorTitleDraft" maxlength="200" required placeholder="例如：西湖断桥" /></label><label>地址或补充定位线索<input v-model="pointEditorAddressDraft" maxlength="500" placeholder="用于确认候选，不会自动猜坐标" /></label><section class="point-editor-location" :class="{ missing: !pointEditorPoint() }"><div class="point-editor-location-head"><div><strong>{{ pointEditorLocationStatus() }}</strong><small v-if="pointEditorPoint()">{{ pointEditorPoint()?.crs }} · {{ pointEditorPoint()?.lat.toFixed(6) }}, {{ pointEditorPoint()?.lng.toFixed(6) }}</small><small v-else>没有可靠坐标，路线与导航暂不可用。</small></div><span class="location-state-label">{{ pointEditorPoint() ? '已保存' : '待处理' }}</span></div><small v-if="pointEditorPoint()">来源：{{ pointEditorLocationSource() }}</small><p v-else>请从候选中选择一个明确地点，或在地图上点击准确位置。不会根据数字外观补造 CRS。</p><div class="point-editor-location-actions"><button class="secondary-action compact-action" type="button" @click="openPointSearchFromEditor">重新搜索候选</button><button class="secondary-action compact-action" type="button" :disabled="!mapReady" @click="startMapPickFromEditor">地图选点更新</button></div></section><p class="point-editor-note">重新搜索或地图选点会清除受影响的路线和该点天气；保存名称和地址本身不会改变路线。</p><p v-if="error" class="point-editor-error" role="alert">{{ error }}</p><div class="point-editor-related"><span><strong>更多编辑</strong><small>说明、时间窗口、日期、顺序和删除仍在详情页中管理。</small></span><button class="text-action" type="button" @click="beginEditDescriptionFromPointEditor">编辑说明与时间</button></div></form><div class="modal-actions point-editor-actions"><button type="button" :disabled="pointEditorSaving" @click="cancelEditPoint">取消</button><button class="primary" type="submit" form="point-editor-form" :disabled="pointEditorSaving || !pointEditorTitleDraft.trim()">{{ pointEditorSaving ? '保存中…' : '保存名称和地址' }}</button></div></section></div>
       <div v-if="descriptionFullscreen && descriptionEditing && !readOnlyView" class="fullscreen-editor-backdrop"><section class="fullscreen-editor" role="dialog" aria-modal="true" aria-labelledby="fullscreen-description-title"><header><h2 id="fullscreen-description-title">编辑规划点信息</h2><button class="modal-close" type="button" aria-label="退出全屏编辑" @click="closeDescriptionFullscreen">×</button></header><MarkdownEditor class="fullscreen-markdown-editor" v-model="descriptionDraft" v-model:mode="descriptionEditorMode" :preview-html="renderMarkdown(descriptionDraft)" :rows="12" editor-label="MARKDOWN" preview-label="地点说明预览" editor-aria-label="地点说明 Markdown 原始文本" placeholder="补充门票、开放时间、行程备注等信息" /><div class="description-actions"><button class="text-button" type="button" @click="cancelEditDescription">取消</button><button class="primary-text-button" type="button" :disabled="descriptionSaving" @click="saveDescription">{{ descriptionSaving ? '保存中…' : '保存规划点' }}</button></div></section></div>
       <div v-if="tripDescriptionFullscreen && tripDescriptionEditing && !readOnlyView" class="fullscreen-editor-backdrop"><section class="fullscreen-editor" role="dialog" aria-modal="true" aria-labelledby="fullscreen-trip-description-title"><header><h2 id="fullscreen-trip-description-title">编辑行程总体说明</h2><button class="modal-close" type="button" aria-label="退出全屏编辑" @click="closeTripDescriptionFullscreen">×</button></header><MarkdownEditor class="fullscreen-markdown-editor" v-model="tripDescriptionDraft" v-model:mode="tripDescriptionEditorMode" :preview-html="renderMarkdown(tripDescriptionDraft)" :rows="12" editor-label="MARKDOWN" preview-label="行程说明预览" editor-aria-label="行程说明 Markdown 原始文本" placeholder="补充整个行程的背景、节奏和注意事项" /><div class="description-actions"><button class="text-button" type="button" @click="cancelEditTripDescription">取消</button><button class="primary-text-button" type="button" :disabled="tripDescriptionSaving" @click="saveTripDescription">{{ tripDescriptionSaving ? '保存中…' : '保存说明' }}</button></div></section></div>
-      <div v-if="mapPickOpen" class="modal-backdrop" @click.self="cancelMapPick"><section class="modal-panel map-pick-panel" role="dialog" aria-modal="true" aria-labelledby="map-pick-title"><button class="modal-close" aria-label="取消添加" @click="cancelMapPick">×</button><p class="eyebrow">MAP POINT</p><h2 id="map-pick-title">{{ mapPickTargetID ? '更新规划点位置' : mapPickTitle ? '添加地点到行程' : '保存地图选点' }}</h2><p class="map-pick-coordinate">{{ mapPickLocation?.crs }} · {{ mapPickLocation?.lat.toFixed(6) }}, {{ mapPickLocation?.lng.toFixed(6) }}</p><p class="map-pick-context">{{ mapPickTargetID ? '点击保存后会替换当前坐标，并清除受影响的路线和天气。' : (mapPickTitle && mapPickTitle !== '地图地点') ? '确认将地图上的「' + mapPickTitle + '」添加至当前规划吗？' : '确认将该地图地点添加至当前规划吗？' }}</p><label>地点名称<input v-model="mapPickTitle" required autofocus placeholder="请输入地点名称" /></label><label>地址或备注（可选）<input v-model="mapPickAddress" placeholder="补充位置说明" /></label><label v-if="!mapPickTargetID" class="select-field">加入日期<UiSelect v-model="mapPickDayID" aria-label="加入日期" :options="tripDayOptions" /></label><p v-if="error" class="modal-form-error" role="alert">{{ error }}</p><div class="modal-actions"><button type="button" @click="cancelMapPick">取消</button><button type="button" class="primary" :disabled="actionLoading || !mapPickTitle.trim()" @click="saveMapPick">{{ actionLoading ? '保存中…' : mapPickTargetID ? '更新规划点' : '确认添加' }}</button></div></section></div>
+      <div v-if="mapPickOpen" class="modal-backdrop" @click.self="cancelMapPick">
+        <section class="modal-panel map-pick-panel" role="dialog" aria-modal="true" aria-labelledby="map-pick-title">
+          <button class="modal-close" aria-label="取消添加" @click="cancelMapPick">×</button>
+          <p class="eyebrow">MAP POINT</p>
+          <h2 id="map-pick-title">
+            {{
+              mapPickTargetID ? '更新规划点位置' :
+              mapPickKind === 'substop' ? '添加子规划点' :
+              (mapPickTitle && mapPickTitle !== '地图地点') ? '添加地点到行程' : '保存地图选点'
+            }}
+          </h2>
+          <p class="map-pick-coordinate">{{ mapPickLocation?.crs }} · {{ mapPickLocation?.lat.toFixed(6) }}, {{ mapPickLocation?.lng.toFixed(6) }}</p>
+          <p class="map-pick-context">
+            {{
+              mapPickTargetID ? '点击保存后会替换当前坐标，并清除受影响的路线和天气。' :
+              (mapPickKind === 'substop' && mapPickParentStopTitle) ?
+                ('确认将地图上的「' + (mapPickTitle || '此地点') + '」添加为「' + mapPickParentStopTitle + '」的子规划点吗？') :
+              (mapPickTitle && mapPickTitle !== '地图地点') ?
+                ('确认将地图上的「' + mapPickTitle + '」添加至当前规划吗？') :
+              '确认将该地图地点添加至当前规划吗？'
+            }}
+          </p>
+          <label>地点名称<input v-model="mapPickTitle" required autofocus placeholder="请输入地点名称" /></label>
+          <label>地址或备注（可选）<input v-model="mapPickAddress" placeholder="补充位置说明" /></label>
+
+          <!-- 仅在新增地点（非更新坐标）时显示级别分段器与关联设置 -->
+          <template v-if="!mapPickTargetID">
+            <div class="map-pick-segment-row">
+              <span>规划点类型</span>
+              <div class="provider-segment">
+                <button
+                  type="button"
+                  :class="{ active: mapPickKind === 'stop' }"
+                  @click="mapPickKind = 'stop'"
+                >
+                  主规划点
+                </button>
+                <button
+                  type="button"
+                  :class="{ active: mapPickKind === 'substop' }"
+                  :disabled="!mapPickAvailableParentStops.length"
+                  @click="mapPickKind = 'substop'"
+                >
+                  子规划点 {{ mapPickAvailableParentStops.length ? '' : '(当天无主点)' }}
+                </button>
+              </div>
+            </div>
+
+            <label class="select-field">
+              加入日期
+              <UiSelect v-model="mapPickDayID" aria-label="加入日期" :options="tripDayOptions" />
+            </label>
+
+            <label v-if="mapPickKind === 'substop'" class="select-field">
+              所属主规划点
+              <UiSelect
+                v-model="mapPickParentStopId"
+                aria-label="所属主规划点"
+                :options="mapPickParentStopOptions"
+              />
+            </label>
+          </template>
+
+          <p v-if="error" class="modal-form-error" role="alert">{{ error }}</p>
+          <div class="modal-actions">
+            <button type="button" @click="cancelMapPick">取消</button>
+            <button
+              type="button"
+              class="primary"
+              :disabled="actionLoading || !mapPickTitle.trim() || (mapPickKind === 'substop' && !mapPickParentStopId)"
+              @click="saveMapPick"
+            >
+              {{ actionLoading ? '保存中…' : mapPickTargetID ? '更新规划点' : mapPickKind === 'substop' ? '确认添加为子点' : '确认添加' }}
+            </button>
+          </div>
+        </section>
+      </div>
       <div v-if="tripDetailsEditing && !readOnlyView" class="modal-backdrop trip-details-backdrop" @click.self="cancelEditTripDetails">
         <section class="modal-panel trip-details-panel" role="dialog" aria-modal="true" aria-labelledby="trip-details-title">
           <header class="trip-details-header"><div><p class="eyebrow">TRIP DETAILS</p><h2 id="trip-details-title">编辑行程信息</h2><p>名称和日期会作为一次更改保存。</p></div><button class="modal-close" type="button" :disabled="tripDetailsSaving" aria-label="关闭编辑行程信息" @click="cancelEditTripDetails">×</button></header>
