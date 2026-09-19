@@ -5,7 +5,7 @@ import {
 } from '@ionic/vue'
 import BMapLoader from '@baidumap/jsapi-loader'
 import AMapLoader from '@amap/amap-jsapi-loader'
-import { addOutline, chevronDownOutline, chevronUpOutline, closeOutline, cloudOfflineOutline, createOutline, footstepsOutline, imageOutline, linkOutline, logInOutline, mapOutline, menuOutline, navigateOutline, searchOutline, settingsOutline, sunnyOutline } from 'ionicons/icons'
+import { addOutline, chevronDownOutline, chevronUpOutline, closeOutline, cloudOfflineOutline, createOutline, footstepsOutline, imageOutline, linkOutline, logInOutline, mapOutline, menuOutline, navigateOutline, refreshOutline, searchOutline, settingsOutline, sunnyOutline } from 'ionicons/icons'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 import PrototypePreview from './PrototypePreview.vue'
@@ -208,6 +208,42 @@ type AtlasSummaryResponse = {
 const atlasLoading = ref(false)
 const atlasData = ref<AtlasSummaryResponse | null>(null)
 const selectedAtlasTripID = ref<string>('')
+
+interface PhotoStatus {
+  enabled: boolean
+  root_dir?: string
+  total_photos?: number
+  gps_photos?: number
+  scanning?: boolean
+  last_scan_at?: string
+}
+
+interface PhotoAtlasItem {
+  id: string
+  file_name: string
+  taken_at: string
+  lat: number
+  lng: number
+  thumb_url: string
+}
+
+interface PhotoCluster {
+  id: string
+  lat: number
+  lng: number
+  count: number
+  cover: PhotoAtlasItem
+  photos: PhotoAtlasItem[]
+}
+
+const photoStatus = ref<PhotoStatus | null>(null)
+const atlasPhotos = ref<PhotoAtlasItem[]>([])
+const atlasShowTrips = ref(true)
+const atlasShowPhotos = ref(true)
+let atlasPhotoMarkers: any[] = []
+const selectedPhotoCluster = ref<PhotoCluster | null>(null)
+const previewPhoto = ref<{ id: string; file_name: string; taken_at: string; url: string } | null>(null)
+const photoSyncing = ref(false)
 const ATLAS_PALETTE = [
   '#24695c',
   '#e56a4d',
@@ -2113,6 +2149,7 @@ function resetMapSDK() {
   currentStopMarkers = []
   atlasStopMarkers = []
   atlasTripLabels = []
+  atlasPhotoMarkers = []
   if (mapZoomDebounceTimer !== null) { window.clearTimeout(mapZoomDebounceTimer); mapZoomDebounceTimer = null }
   amapSatelliteLayer = null
   mapReady.value = false
@@ -2546,6 +2583,180 @@ async function loadAtlasData() {
   }
 }
 
+async function loadPhotoStatus() {
+  try {
+    const resp = await apiFetch('/api/v1/photos/status')
+    if (resp.ok) {
+      photoStatus.value = (await resp.json()) as PhotoStatus
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+async function loadAtlasPhotos() {
+  if (!photoStatus.value?.enabled) return
+  try {
+    const crs = selectedMapProvider.value === 'baidu' ? 'bd09ll' : 'gcj02'
+    const resp = await apiFetch('/api/v1/photos/atlas?crs=' + crs)
+    if (resp.ok) {
+      atlasPhotos.value = (await resp.json()) as PhotoAtlasItem[]
+    }
+  } catch (cause) {
+    console.warn('load atlas photos failed:', cause)
+  }
+}
+
+async function triggerPhotoSync() {
+  if (photoSyncing.value) return
+  photoSyncing.value = true
+  try {
+    await apiFetch('/api/v1/photos/sync', { method: 'POST' })
+    window.setTimeout(async () => {
+      await loadPhotoStatus()
+      await loadAtlasPhotos()
+      photoSyncing.value = false
+      if (tripView.value === 'atlas') void renderAtlasMap(true)
+    }, 1500)
+  } catch {
+    photoSyncing.value = false
+  }
+}
+
+function clusterPhotos(photos: PhotoAtlasItem[], zoom: number): PhotoCluster[] {
+  if (!photos || !photos.length) return []
+  if (zoom >= 17) {
+    return photos.map(p => ({
+      id: 'single_' + p.id,
+      lat: p.lat,
+      lng: p.lng,
+      count: 1,
+      cover: p,
+      photos: [p]
+    }))
+  }
+  // 按照屏幕像素聚合跨度 64px 动态计算经纬度网格步长
+  const gridSize = (360 / (Math.pow(2, zoom) * 256)) * 64
+  const grid = new Map<string, PhotoAtlasItem[]>()
+  for (const p of photos) {
+    const gx = Math.floor(p.lng / gridSize)
+    const gy = Math.floor(p.lat / gridSize)
+    const key = gx + '_' + gy
+    const list = grid.get(key)
+    if (list) list.push(p)
+    else grid.set(key, [p])
+  }
+
+  const clusters: PhotoCluster[] = []
+  grid.forEach((items, key) => {
+    let sumLat = 0
+    let sumLng = 0
+    for (const item of items) {
+      sumLat += item.lat
+      sumLng += item.lng
+    }
+    const sorted = [...items].sort((a, b) => b.taken_at.localeCompare(a.taken_at))
+    clusters.push({
+      id: 'cluster_' + key,
+      lat: sumLat / items.length,
+      lng: sumLng / items.length,
+      count: items.length,
+      cover: sorted[0],
+      photos: sorted
+    })
+  })
+  return clusters
+}
+
+function clearAtlasPhotoMarkers() {
+  if (selectedMapProvider.value === 'amap') {
+    atlasPhotoMarkers.forEach(m => {
+      try { mapInstance?.remove?.(m) } catch {}
+    })
+  } else {
+    atlasPhotoMarkers.forEach(m => {
+      try { mapInstance?.removeOverlay?.(m) } catch {}
+    })
+  }
+  atlasPhotoMarkers = []
+}
+
+function renderAtlasPhotoMarkers() {
+  clearAtlasPhotoMarkers()
+  if (!atlasShowPhotos.value || !photoStatus.value?.enabled || !atlasPhotos.value.length || !mapInstance) return
+  const zoom = mapInstance.getZoom?.() || 5
+  const clusters = clusterPhotos(atlasPhotos.value, zoom)
+
+  clusters.forEach(cluster => {
+    const badgeHTML = cluster.count > 1 ? '<span class="photo-cluster-badge">' + cluster.count + '</span>' : ''
+    const markerHTML = '<div class="photo-atlas-pin" data-cluster-id="' + cluster.id + '">' +
+      '<div class="photo-atlas-pin-box">' +
+        '<img src="' + cluster.cover.thumb_url + '?size=120" class="photo-atlas-pin-img" loading="lazy" />' +
+      '</div>' +
+      badgeHTML +
+      '<div class="photo-atlas-pin-triangle"></div>' +
+    '</div>'
+
+    if (selectedMapProvider.value === 'amap') {
+      const marker = addAMapOverlay(new mapAPI.Marker({
+        position: [cluster.lng, cluster.lat],
+        content: markerHTML,
+        offset: new mapAPI.Pixel(-22, -50),
+        zIndex: 140 + (cluster.count > 1 ? 20 : 0)
+      }))
+      marker.on?.('click', () => handlePhotoClusterClick(cluster))
+      atlasPhotoMarkers.push(marker)
+    } else {
+      const pt = new mapAPI.Point(cluster.lng, cluster.lat)
+      const label = new mapAPI.Label(markerHTML, {
+        position: pt,
+        offset: new mapAPI.Size(-22, -50)
+      })
+      label.setStyle({
+        backgroundColor: 'transparent',
+        border: 'none',
+        padding: '0',
+        cursor: 'pointer'
+      })
+      label.addEventListener?.('click', () => handlePhotoClusterClick(cluster))
+      mapInstance.addOverlay(label)
+      atlasPhotoMarkers.push(label)
+    }
+  })
+}
+
+function handlePhotoClusterClick(cluster: PhotoCluster) {
+  selectedPhotoCluster.value = cluster
+  if (cluster.count > 1) {
+    const currentZoom = mapInstance?.getZoom?.() || 8
+    if (currentZoom < 17) {
+      if (selectedMapProvider.value === 'amap') {
+        mapInstance?.setZoomAndCenter?.(Math.min(currentZoom + 2, 17), [cluster.lng, cluster.lat])
+      } else {
+        mapInstance?.centerAndZoom?.(new mapAPI.Point(cluster.lng, cluster.lat), Math.min(currentZoom + 2, 17))
+      }
+    }
+  } else {
+    openPhotoPreview(cluster.cover)
+  }
+}
+
+function openPhotoPreview(photo: PhotoAtlasItem) {
+  previewPhoto.value = {
+    id: photo.id,
+    file_name: photo.file_name,
+    taken_at: photo.taken_at,
+    url: '/api/v1/photos/' + photo.id + '/file'
+  }
+}
+
+function formatPhotoTime(val?: string) {
+  if (!val) return ''
+  const d = new Date(val)
+  if (isNaN(d.getTime())) return val
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')
+}
+
 function navigateToAtlas() {
   historyOpen.value = false
   historyView.value = null
@@ -2559,7 +2770,7 @@ function navigateToAtlas() {
   tripMenuID.value = ''
   detailMoreOpen.value = false
   resetMapSDK()
-  void loadAtlasData().then(() => {
+  void Promise.all([loadAtlasData(), loadPhotoStatus().then(() => loadAtlasPhotos())]).then(() => {
     void nextTick().then(() => renderAtlasMap())
   })
 }
@@ -2850,9 +3061,10 @@ async function renderAtlasAMap(preserveView = false) {
   clearAMapOverlays()
   atlasStopMarkers = []
   atlasTripLabels = []
+  atlasPhotoMarkers = []
 
   const allPoints: any[] = []
-  const tripsToRender = atlasData.value?.trips || []
+  const tripsToRender = atlasShowTrips.value ? (atlasData.value?.trips || []) : []
 
   tripsToRender.forEach((tripItem, tIdx) => {
     const isSelected = selectedAtlasTripID.value === tripItem.id
@@ -2953,6 +3165,11 @@ async function renderAtlasAMap(preserveView = false) {
   })
 
   updateAtlasLabelsVisibility()
+  renderAtlasPhotoMarkers()
+
+  if (allPoints.length === 0 && atlasShowPhotos.value && atlasPhotos.value.length > 0) {
+    atlasPhotos.value.slice(0, 50).forEach(p => allPoints.push([p.lng, p.lat]))
+  }
 
   if (!preserveView) {
     if (allPoints.length > 0) {
@@ -3001,9 +3218,10 @@ async function renderAtlasBaidu(preserveView = false) {
   mapInstance.clearOverlays()
   atlasStopMarkers = []
   atlasTripLabels = []
+  atlasPhotoMarkers = []
 
   const allPoints: any[] = []
-  const tripsToRender = atlasData.value?.trips || []
+  const tripsToRender = atlasShowTrips.value ? (atlasData.value?.trips || []) : []
 
   tripsToRender.forEach((tripItem, tIdx) => {
     const isSelected = selectedAtlasTripID.value === tripItem.id
@@ -3094,6 +3312,11 @@ async function renderAtlasBaidu(preserveView = false) {
   })
 
   updateAtlasLabelsVisibility()
+  renderAtlasPhotoMarkers()
+
+  if (allPoints.length === 0 && atlasShowPhotos.value && atlasPhotos.value.length > 0) {
+    atlasPhotos.value.slice(0, 50).forEach(p => allPoints.push(new mapAPI.Point(p.lng, p.lat)))
+  }
 
   if (!preserveView) {
     if (allPoints.length > 0) {
@@ -3308,14 +3531,18 @@ function updateStopLabelsVisibility() {
 
 let mapZoomDebounceTimer: number | null = null
 function handleMapZoomChange() {
+  if (tripView.value === 'atlas') {
+    if (mapZoomDebounceTimer !== null) window.clearTimeout(mapZoomDebounceTimer)
+    mapZoomDebounceTimer = window.setTimeout(() => {
+      if (mapLabelMode.value === 'auto') updateAtlasLabelsVisibility()
+      renderAtlasPhotoMarkers()
+    }, 120)
+    return
+  }
   if (mapLabelMode.value !== 'auto') return
   if (mapZoomDebounceTimer !== null) window.clearTimeout(mapZoomDebounceTimer)
   mapZoomDebounceTimer = window.setTimeout(() => {
-    if (tripView.value === 'atlas') {
-      updateAtlasLabelsVisibility()
-    } else {
-      if (isMobileViewport()) updateStopLabelsVisibility()
-    }
+    if (isMobileViewport()) updateStopLabelsVisibility()
   }, 120)
 }
 
@@ -4352,6 +4579,25 @@ onUnmounted(() => {
               </div>
 
               <div v-if="mapWarning" class="map-warning"><span>{{ mapWarning }}</span><button type="button" @click="retryMap">重新加载</button></div>
+
+              <!-- 照片聚类详情抽屉 (点击聚簇 Marker 呼出) -->
+              <div v-if="selectedPhotoCluster" class="atlas-photo-drawer">
+                <div class="atlas-photo-drawer-head">
+                  <strong>该区域照片 ({{ selectedPhotoCluster.photos.length }} 张)</strong>
+                  <button type="button" @click="selectedPhotoCluster = null">×</button>
+                </div>
+                <div class="atlas-photo-grid">
+                  <div
+                    v-for="p in selectedPhotoCluster.photos"
+                    :key="p.id"
+                    class="atlas-photo-item-card"
+                    @click="openPhotoPreview(p)"
+                  >
+                    <img :src="p.thumb_url + '?size=120'" class="atlas-photo-item-img" loading="lazy" />
+                    <span class="atlas-photo-item-date">{{ formatPhotoTime(p.taken_at) }}</span>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <!-- 足迹漫游顶栏：左侧返回按钮与右侧地图选项/设置操作 -->
@@ -4442,6 +4688,29 @@ onUnmounted(() => {
                   <span>足迹总里程</span>
                   <strong>{{ formatDistance(atlasData?.total_distance_m) || '0 km' }}</strong>
                 </div>
+                <div v-if="photoStatus?.enabled" class="atlas-metric-card">
+                  <span>足迹照片</span>
+                  <strong>{{ photoStatus.gps_photos || 0 }} <em>张</em></strong>
+                </div>
+              </div>
+
+              <!-- 图层切换与照片库同步 -->
+              <div v-if="photoStatus?.enabled" class="atlas-layers-bar">
+                <div class="atlas-layers-chips">
+                  <label class="atlas-layer-chip" :class="{ active: atlasShowTrips }">
+                    <input type="checkbox" v-model="atlasShowTrips" @change="renderAtlasMap(true)" />
+                    <span>路线轨迹</span>
+                  </label>
+                  <label class="atlas-layer-chip" :class="{ active: atlasShowPhotos }">
+                    <input type="checkbox" v-model="atlasShowPhotos" @change="renderAtlasMap(true)" />
+                    <span>足迹照片</span>
+                    <span class="atlas-layer-chip-badge">{{ atlasPhotos.length }}</span>
+                  </label>
+                </div>
+                <button type="button" class="atlas-sync-btn" :disabled="photoSyncing || photoStatus.scanning" @click="triggerPhotoSync" title="重新扫描照片目录">
+                  <IonIcon :icon="refreshOutline" :class="{ 'atlas-sync-spin': photoSyncing || photoStatus.scanning }" />
+                  <span>{{ photoSyncing || photoStatus.scanning ? '扫描中' : '刷新相册' }}</span>
+                </button>
               </div>
 
               <!-- 行程列表与筛选 -->
@@ -4714,6 +4983,18 @@ onUnmounted(() => {
       </div>
       <div v-if="false && settingsOpen" class="modal-backdrop" @click.self="settingsOpen = false"><section class="modal-panel settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title"><button class="modal-close" aria-label="关闭" @click="settingsOpen = false">×</button><p class="eyebrow">JOURNEYIN SETTINGS</p><h2 id="settings-title">设置</h2><p class="settings-intro">当前主题：{{ themeLabel }}。Key 配置保存到 SQLite，服务端 Key 不会回显。</p><section class="settings-section"><h3>外观</h3><p class="settings-label">主题：{{ themeLabel }}</p><div class="theme-options"><button type="button" :class="{ selected: theme === 'system' }" @click="setTheme('system')">跟随系统</button><button type="button" :class="{ selected: theme === 'light' }" @click="setTheme('light')">浅色</button><button type="button" :class="{ selected: theme === 'dark' }" @click="setTheme('dark')">深色</button></div></section><section class="settings-section"><h3>服务端连接</h3><label>当前服务地址<input v-model="serverURL" readonly /></label><label>兼容 REST API Token<input v-model="authTokenInput" type="password" placeholder="仅用于兼容旧客户端，可留空" autocomplete="off" /></label><div class="modal-actions"><button type="button" @click="logout">清除令牌</button><button type="button" class="primary" @click="saveAuth">保存令牌</button></div><p v-if="settingsMessage" class="settings-message">{{ settingsMessage }}</p></section><section class="settings-section"><h3>默认地图</h3><label>默认地图 Provider<select v-model="defaultMapProvider"><option value="baidu">百度地图</option><option value="amap">高德地图</option></select></label><p class="key-help">用于没有单独地图偏好的新行程和查看页面；单个行程已保存的地图 Provider 不会被覆盖。地图工具仍可临时切换 Provider。</p><div class="modal-actions"><button type="button" class="primary" :disabled="settingsSaving" @click="saveDefaultMapProvider">{{ settingsSaving ? '保存中…' : '保存默认地图' }}</button></div></section><section class="settings-section"><h3>百度地图</h3><p class="key-status">浏览器端 Key：<strong>{{ baiduKey ? '已配置' : '未配置' }}</strong> · 服务端 Key：<strong>{{ settingsData?.map?.baidu?.server_key_configured ? '已配置' : '未配置' }}</strong></p><label>百度浏览器端 Key<input v-model="baiduBrowserKeyInput" type="password" :placeholder="settingsData?.map?.baidu?.browser_key_configured ? '已配置，输入新 Key 可替换' : '用于 JSAPI 4.0/BMap 网页地图'" autocomplete="off" /></label><label>百度服务端 Key<input v-model="baiduServerKeyInput" type="password" placeholder="已配置时输入新 Key 可替换；留空保持当前值" autocomplete="off" /></label><p class="key-help">浏览器端 Key 用于地图底图；服务端 Key 用于 POI 搜索、地理编码、路线和天气。请确认当前访问 host 在百度控制台白名单内。</p><a href="https://lbsyun.baidu.com/apiconsole/key" target="_blank" rel="noopener noreferrer">申请/管理百度地图 Key ↗</a></section><section class="settings-section"><h3>高德地图</h3><p class="key-status">JS Key：<strong>{{ settingsData?.map?.amap?.js_key_configured ? '已配置' : '未配置' }}</strong> · 服务端 Key：<strong>{{ settingsData?.map?.amap?.server_key_configured ? '已配置' : '未配置' }}</strong> · 安全密钥：<strong>{{ settingsData?.map?.amap?.security_js_code_configured ? '已配置' : '未配置' }}</strong></p><label>高德 JS Key<input v-model="amapJSKeyInput" type="password" placeholder="用于高德 Web 地图" autocomplete="off" /></label><label>高德服务端 Key<input v-model="amapServerKeyInput" type="password" placeholder="已配置时输入新 Key 可替换；留空保持当前值" autocomplete="off" /></label><label>高德 JS 安全密钥<input v-model="amapSecurityJSCodeInput" type="password" placeholder="用于 JSAPI 安全代理；已配置时输入新密钥可替换" autocomplete="off" /></label><a href="https://console.amap.com/dev/key/app" target="_blank" rel="noopener noreferrer">申请/管理高德 Key ↗</a><p class="key-help">保存后，规划点会优先使用已经保存的坐标，不会因为重新绘制地图重复查询。</p><div class="modal-actions"><button type="button" class="primary" :disabled="settingsSaving" @click="saveMapKeys">{{ settingsSaving ? '保存中…' : '保存地图 Key 到数据库' }}</button></div></section><section class="settings-section"><h3>地点检索</h3><label>优先 Provider<select v-model="poiProviderPriority"><option value="amap">高德优先</option><option value="baidu">百度优先</option></select></label><p class="key-help">当前策略会先查询本地地点目录；未命中后使用所选 Provider，Provider 不可用时自动尝试另一家。新搜索结果只保留 7 天。</p><p class="key-status">本地地点记录：<strong>{{ localDirectoryCount }}</strong> 条</p><div class="modal-actions"><button type="button" @click="savePOIPreferences">保存检索优先级</button><button type="button" @click="clearLocalDirectory">清除本地记录</button></div></section><section class="settings-section"><h3>MCP</h3><p>MCP 地址：{{ capabilities?.mcp?.http_endpoint || '/mcp' }}</p><p class="key-help">Docker 远程部署时设置 JOURNEYIN_MCP_TOKEN；本地 localhost 调试可不设置。</p></section></section></div>
       <div v-if="authOpen" class="modal-backdrop" @click.self="authOpen = false"><section class="modal-panel auth-panel" role="dialog" aria-modal="true" aria-labelledby="auth-title"><IonIcon class="auth-icon" :icon="logInOutline" /><h2 id="auth-title">登录 JourneyIn</h2><p>请输入 Docker 服务配置的账号和密码。登录成功后会在当前浏览器保存一个 HttpOnly 会话。</p><form class="auth-form" @submit.prevent="login"><label>账号<input v-model="loginUsername" type="text" autofocus autocomplete="username" /></label><label>密码<input v-model="loginPassword" type="password" autocomplete="current-password" /></label><p v-if="loginMessage" class="auth-error">{{ loginMessage }}</p><div class="modal-actions"><button type="button" @click="authOpen = false">稍后</button><button type="submit" class="primary" :disabled="loginLoading">{{ loginLoading ? '登录中…' : '登录' }}</button></div></form></section></div>
+      <!-- 全屏照片大图预览 Lightbox -->
+      <div v-if="previewPhoto" class="photo-lightbox-modal" @click.self="previewPhoto = null">
+        <div class="photo-lightbox-card">
+          <button type="button" class="photo-lightbox-close" @click="previewPhoto = null">×</button>
+          <img :src="previewPhoto.url" class="photo-lightbox-img" />
+          <div class="photo-lightbox-footer">
+            <strong>{{ previewPhoto.file_name }}</strong>
+            <span>拍摄于 {{ formatPhotoTime(previewPhoto.taken_at) }}</span>
+          </div>
+        </div>
+      </div>
+
       <TripPosterModal
         :is-open="posterModalOpen"
         :trip="tripDocument"

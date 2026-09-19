@@ -222,6 +222,57 @@ $payload = @{
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8080/api/v1/trips -ContentType application/json -Body $payload
 ~~~
 
+## 足迹漫游与相册地图 (Atlas & Photo Map)
+
+JourneyIn 的**足迹漫游 (Atlas)** 不仅支持全景汇聚展示所有历史行程的路线轨迹与关键地标，还支持关联本地照片库，将旅途中拍摄的照片自动投射在地图真实经纬度上：
+
+- **相册聚合标记 (Photo Clustering)**：在地图上呈现带白色精致立体相框的照片气泡标记；当多个点位在当前视野密集重叠时，自动计算空间网格聚合，右上角悬挂蓝色高亮徽标（如 `306`、`2713` 等）展示该区域照片总数。
+- **动态视野层级自适应**：缩放地图时自动聚合与散开；点击聚簇气泡可平滑放大视野并展开底部照片列表抽屉，点击单张照片可查看全屏高清原图 Lightbox。
+- **无偏坐标系自动校准**：数码相机与智能手机记录的 GPS 原始经纬度均为国际标准 `WGS-84`；系统在索引时会自动高精转换为 `GCJ-02`（高德地图）与 `BD-09LL`（百度地图），彻底避免了数百米的系统性漂移。
+- **多图层灵活控制**：在足迹漫游控制条中可自由勾选开启或关闭 `[✓] 路线轨迹` 与 `[✓] 足迹照片`，两者可无缝叠加显示。
+- **高性能海量大图防护**：
+  - **纯 Go 头段流式 EXIF 解析**：仅读取文件头前 128KB 字节流提取拍摄时间与 GPS，不把数十 MB 的图像解码进内存，零 CGO 依赖；
+  - **SQLite 增量索引缓存**：仅对比文件大小与修改时间，已索引的照片自动跳过，数万张原图二次启动与刷新扫描在 100~200ms 内完成；
+  - **正方形缩略图本地缓存**：纯 Go 双线性插值生成 120×120 WebP/JPEG 缩略图并落盘缓存，避免浏览器加载超大原图导致内存溢出。
+
+### 开启相册足迹配置
+
+通过设置环境变量 `JOURNEYIN_PHOTOS_DIR` 指定相册根目录即可启用该功能（支持递归扫描所有子文件夹，支持 `.jpg`, `.jpeg`, `.png`, `.webp`, `.heic`, `.tiff` 等格式）：
+
+**1. 本地运行 (PowerShell)**：
+
+~~~powershell
+$env:JOURNEYIN_PHOTOS_DIR = "D:/Photos"
+go run ./cmd/journeyin -listen 127.0.0.1:8080 -data D:/data/journeyin/journeyin.db
+~~~
+
+**2. Docker 部署 (推荐以只读卷挂载保障原始相册安全)**：
+
+~~~powershell
+docker run --detach --name journeyin \
+  --publish 8080:8080 \
+  --volume journeyin-data:/data \
+  --volume D:/Photos:/photos:ro \
+  --env JOURNEYIN_PHOTOS_DIR=/photos \
+  --env JOURNEYIN_AUTH_USERNAME=admin \
+  --env JOURNEYIN_AUTH_PASSWORD=<strong-login-password> \
+  nevermindzzt/journeyin:latest
+~~~
+
+**3. Docker Compose 部署**：
+
+在 `docker-compose.hub.yml` 的 `environment` 中添加 `JOURNEYIN_PHOTOS_DIR: /photos`，并在 `volumes` 中增加 `- /host/photos:/photos:ro` 即可。
+
+### 相册 API
+
+~~~text
+GET  /api/v1/photos/status                # 查询相册服务状态与已扫描照片总数/GPS点数
+POST /api/v1/photos/sync                  # 触发后台增量异步重新扫描
+GET  /api/v1/photos/atlas?crs=gcj02       # 获取适配当前地图 Provider 的足迹照片点集 (gcj02 或 bd09ll)
+GET  /api/v1/photos/{id}/thumbnail?size=120 # 获取正方形缩略图流 (支持 86400s 浏览器强缓存)
+GET  /api/v1/photos/{id}/file             # 获取照片原图 (支持 HTTP Range 断点续传，路径安全白名单保护)
+~~~
+
 ## 地图与分享 API
 
 ~~~text

@@ -18,6 +18,7 @@ import (
 	"journeyin/internal/application"
 	journeymaps "journeyin/internal/maps"
 	journeyshare "journeyin/internal/share"
+	"journeyin/internal/photos"
 	"journeyin/internal/store"
 	"journeyin/internal/transport/httpapi"
 	mcptransport "journeyin/internal/transport/mcp"
@@ -96,6 +97,19 @@ func main() {
 	api.SetSettingsStore(database)
 	api.SetShareService(journeyshare.NewService(journeyshare.NewSQLiteStore(database)), envOr("JOURNEYIN_PUBLIC_URL", "http://"+listen))
 	api.SetSyncStore(database)
+
+	photosDir := os.Getenv("JOURNEYIN_PHOTOS_DIR")
+	cacheDir := ""
+	if dataPath != ":memory:" {
+		cacheDir = filepath.Join(filepath.Dir(dataPath), "cache", "thumbnails")
+	}
+	photosSvc := photos.NewService(database.DB(), photosDir, cacheDir, logger)
+	if photosSvc.IsEnabled() {
+		logger.Info("photos service enabled", "dir", photosDir)
+		photosSvc.TriggerScan()
+	}
+	api.SetPhotoService(photosSvc)
+
 	mcpToken := strings.TrimSpace(os.Getenv("JOURNEYIN_MCP_TOKEN"))
 	if !isLoopback(listen) && mcpToken == "" {
 		logger.Error("remote listen address requires JOURNEYIN_MCP_TOKEN")

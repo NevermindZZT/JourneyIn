@@ -61,7 +61,8 @@ func Open(ctx context.Context, path string, migrations fs.FS) (*Store, error) {
 	return s, nil
 }
 
-func (s *Store) Close() error { return s.db.Close() }
+func (s *Store) Close() error   { return s.db.Close() }
+func (s *Store) DB() *sql.DB     { return s.db }
 
 func (s *Store) applyMigrations(ctx context.Context, migrations fs.FS) error {
 	if _, err := s.db.ExecContext(ctx, "CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL)"); err != nil {

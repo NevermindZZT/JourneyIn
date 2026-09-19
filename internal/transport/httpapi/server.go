@@ -16,6 +16,7 @@ import (
 	"journeyin/internal/domain"
 	journeymaps "journeyin/internal/maps"
 	journeyshare "journeyin/internal/share"
+	"journeyin/internal/photos"
 	"journeyin/internal/store"
 )
 
@@ -37,6 +38,7 @@ type Server struct {
 	syncStore          *store.Store
 	settingsStore      *store.Store
 	auth               *Authenticator
+	photosService      *photos.Service
 }
 
 func NewServer(trips *application.TripService, web, schema fs.FS, version string, logger *slog.Logger) *Server {
@@ -75,6 +77,7 @@ func (s *Server) SetShareService(service *journeyshare.Service, publicURL string
 func (s *Server) SetSyncStore(syncStore *store.Store)         { s.syncStore = syncStore }
 func (s *Server) SetSettingsStore(settingsStore *store.Store) { s.settingsStore = settingsStore }
 func (s *Server) SetAuthenticator(auth *Authenticator)        { s.auth = auth }
+func (s *Server) SetPhotoService(service *photos.Service)     { s.photosService = service }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -86,6 +89,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/validate", s.validateTrip)
 	mux.HandleFunc("GET /api/v1/trips", s.listTrips)
 	mux.HandleFunc("GET /api/v1/atlas", s.getAtlasSummary)
+	mux.HandleFunc("GET /api/v1/photos/status", s.getPhotoStatus)
+	mux.HandleFunc("POST /api/v1/photos/sync", s.syncPhotos)
+	mux.HandleFunc("GET /api/v1/photos/atlas", s.getAtlasPhotos)
+	mux.HandleFunc("GET /api/v1/photos/{id}/thumbnail", s.getPhotoThumbnail)
+	mux.HandleFunc("GET /api/v1/photos/{id}/file", s.getPhotoFile)
 	mux.HandleFunc("POST /api/v1/trips", s.createTrip)
 	mux.HandleFunc("POST /api/v1/import", s.importTrip)
 	mux.HandleFunc("GET /api/v1/trips/{id}", s.getTrip)

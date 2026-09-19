@@ -20,8 +20,12 @@ services:
       JOURNEYIN_AMAP_JS_KEY: ${JOURNEYIN_AMAP_JS_KEY:-}
       JOURNEYIN_AMAP_SERVER_KEY: ${JOURNEYIN_AMAP_SERVER_KEY:-}
       JOURNEYIN_AMAP_SECURITY_JS_CODE: ${JOURNEYIN_AMAP_SECURITY_JS_CODE:-}
+      # 足迹漫游相册扫描目录（可选）：配置后自动递归扫描照片 EXIF 地理位置与拍摄时间并聚类呈现
+      JOURNEYIN_PHOTOS_DIR: ${JOURNEYIN_PHOTOS_DIR:-}
     volumes:
       - "${JOURNEYIN_DATA_PATH:-journeyin-data}:/data"
+      # 若启用足迹相册，可将宿主机照片目录挂载至容器（建议 :ro 只读保护原相册，配合 JOURNEYIN_PHOTOS_DIR: /photos）
+      # - "${JOURNEYIN_PHOTOS_PATH:-./photos}:/photos:ro"
 
 volumes:
   journeyin-data:
