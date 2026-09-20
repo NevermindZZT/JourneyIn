@@ -1,5 +1,5 @@
 <template>
-  <div class="map-loading-container" :class="[mode || 'trip']" role="status" aria-live="polite">
+  <div class="map-loading-container" :class="[mode || 'trip', 'sheet-' + (sheet || 'half')]" role="status" aria-live="polite">
     <!-- 背景经纬网格与柔和光晕 -->
     <div class="map-loading-backdrop">
       <div class="map-loading-grid"></div>
@@ -105,6 +105,7 @@ defineProps<{
   subtitle?: string
   hint?: string
   mode?: 'trip' | 'atlas'
+  sheet?: 'peek' | 'half' | 'expanded'
 }>()
 
 // 独立 ID 保证 SVG defs 不冲突
@@ -334,14 +335,82 @@ const gradId = 'mlp_' + Math.random().toString(36).slice(2, 9)
   }
 }
 
-/* 桌面端避让左侧行程抽屉 */
+/* 移动端小屏幕避让底部抽屉 (默认半屏形式，避免动画与文字被卡片遮挡) */
+@media (max-width: 900px) {
+  .map-loading-container {
+    padding: max(60px, env(safe-area-inset-top) + 48px) 16px calc(53% + max(8px, env(safe-area-inset-bottom)));
+    transition: padding 0.2s ease, opacity 0.2s ease;
+  }
+
+  .map-loading-container.sheet-half {
+    padding-top: max(60px, env(safe-area-inset-top) + 48px);
+    padding-bottom: calc(53% + max(8px, env(safe-area-inset-bottom)));
+  }
+
+  .map-loading-container.sheet-half .map-loading-backdrop {
+    background: radial-gradient(circle at 50% 24%, color-mix(in srgb, var(--p) 9%, transparent) 0%, transparent 58%),
+                radial-gradient(circle at 50% 30%, color-mix(in srgb, var(--surface) 90%, var(--md-map)), color-mix(in srgb, var(--surface) 96%, var(--md-map)));
+  }
+
+  .map-loading-container.sheet-half .map-loading-grid {
+    mask-image: radial-gradient(circle at 50% 24%, black 28%, transparent 68%);
+    -webkit-mask-image: radial-gradient(circle at 50% 24%, black 28%, transparent 68%);
+  }
+
+  .map-loading-container.sheet-half .map-loading-graphic {
+    width: 120px;
+    height: 104px;
+    margin-bottom: 8px;
+  }
+
+  .map-loading-container.sheet-half .map-loading-title {
+    font-size: 15px;
+  }
+
+  .map-loading-container.sheet-half .map-loading-subtitle {
+    font-size: 11px;
+  }
+
+  .map-loading-container.sheet-half .map-loading-badge {
+    margin-top: 4px;
+    padding: 2px 8px;
+    font-size: 10px;
+  }
+
+  /* 抽屉收起到 peek 状态时 */
+  .map-loading-container.sheet-peek {
+    padding-bottom: calc(154px + max(8px, env(safe-area-inset-bottom)));
+  }
+
+  .atlas-workspace .map-loading-container.sheet-peek {
+    padding-bottom: calc(74px + max(8px, env(safe-area-inset-bottom)));
+  }
+
+  .map-loading-container.sheet-peek .map-loading-backdrop {
+    background: radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--p) 9%, transparent) 0%, transparent 58%),
+                radial-gradient(circle at 50% 46%, color-mix(in srgb, var(--surface) 90%, var(--md-map)), color-mix(in srgb, var(--surface) 96%, var(--md-map)));
+  }
+
+  .map-loading-container.sheet-peek .map-loading-grid {
+    mask-image: radial-gradient(circle at 50% 42%, black 28%, transparent 68%);
+    -webkit-mask-image: radial-gradient(circle at 50% 42%, black 28%, transparent 68%);
+  }
+
+  /* 抽屉展开至 expanded 全屏状态时 */
+  .map-loading-container.sheet-expanded {
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
+/* 桌面端避让左侧行程或漫游抽屉 */
 @media (min-width: 901px) {
   .map-loading-container {
     padding: 40px 40px 40px min(430px, 35vw);
   }
 
   .atlas-workspace .map-loading-container {
-    padding: 40px;
+    padding: 40px 40px 40px min(430px, 35vw);
   }
 }
 </style>

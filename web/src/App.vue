@@ -5086,6 +5086,7 @@ onUnmounted(() => {
                 subtitle="正在汇总历史行程路线与地标网络"
                 :hint="atlasLoading ? '汇总行程数据中' : (mapProviderLabel + '底图连接中')"
                 mode="atlas"
+                :sheet="sheetBreakpoint"
               />
 
               <div v-else-if="!keyConfigured || mapError" class="map-fallback">
@@ -5310,6 +5311,7 @@ onUnmounted(() => {
                 :title="!tripDocument ? '正在绘制旅途地图…' : '正在连接' + mapProviderLabel + '…'"
                 :subtitle="!tripDocument ? '正在解析地点坐标与路线拓扑' : '正在绘制图钉与路线网络'"
                 :hint="!tripDocument ? '读取行程规划中' : (mapProviderLabel + '底图连接中')"
+                :sheet="sheetBreakpoint"
               />
 
               <!-- 真异常或未配置 Key 降级面板 -->
