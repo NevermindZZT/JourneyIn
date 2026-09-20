@@ -900,6 +900,7 @@ function startSheetDrag(event: PointerEvent) {
 }
 
 function navigateToList(mode: 'push' | 'replace' = 'push') {
+  if (readOnlyView.value) return
   historyOpen.value = false
   historyView.value = null
   cancelEditTripDetails()
@@ -956,11 +957,13 @@ function navigateToStop(stop: Stop | SubStop, parent: Stop | null = null, mode: 
 
 async function applyNavigationRoute(route: NavigationURLState) {
   if (route.layer === 'list' || !route.tripID) {
+    if (readOnlyView.value) return
     navigateToList('replace')
     return
   }
-  const trip = trips.value.find(item => item.id === route.tripID)
+  const trip = trips.value.find(item => item.id === route.tripID) || (readOnlyView.value && selected.value?.id === route.tripID ? selected.value : null)
   if (!trip) {
+    if (readOnlyView.value) return
     navigateToList('replace')
     return
   }
@@ -1034,7 +1037,7 @@ function handleGlobalKeyDown(event: KeyboardEvent) {
   if (detailMoreOpen.value) { detailMoreOpen.value = false; event.preventDefault(); return }
   if (selectedSubStopId.value) { navigateBackFromSubStop(); event.preventDefault(); return }
   if (selectedStopId.value) { navigateBackFromStop(); event.preventDefault(); return }
-  if (tripView.value === 'detail') { navigateBackToList(); event.preventDefault() }
+  if (tripView.value === 'detail') { if (!readOnlyView.value) navigateBackToList(); event.preventDefault() }
 }
 
 function focusSelectedMapTarget() {
@@ -1320,6 +1323,21 @@ function handleViewportResize() {
 }
 
 function navigateBackTo(fallback: NavigationURLState) {
+  if (readOnlyView.value) {
+    if (fallback.layer === 'trip') {
+      closeDesktopStopDetail()
+      setSheetBreakpoint(fallback.sheet || 'half', 'replace', false)
+      return
+    }
+    if (fallback.layer === 'stop') {
+      selectedSubStopId.value = ''
+      detailMoreOpen.value = false
+      setSheetBreakpoint(fallback.sheet || 'half', 'replace', false)
+      void renderMap()
+      return
+    }
+    return
+  }
   const state = window.history.state as JourneyHistoryState | null
   if (state?.journeyin && (state.journeyin.depth || 0) > 0) window.history.back()
   else void applyNavigationRoute(fallback).then(() => syncNavigationURL('replace'))
@@ -1327,6 +1345,13 @@ function navigateBackTo(fallback: NavigationURLState) {
 
 function navigateBackFromSubStop() {
   if (!selected.value) return
+  if (readOnlyView.value) {
+    selectedSubStopId.value = ''
+    detailMoreOpen.value = false
+    setSheetBreakpoint('half', 'replace', false)
+    void renderMap()
+    return
+  }
   navigateBackTo({ layer: 'stop', tripID: selected.value.id, stopID: selectedStopId.value, day: selectedDay.value, sheet: 'half' })
 }
 
@@ -1344,6 +1369,11 @@ function closeDesktopStopDetail() {
 
 function navigateBackFromStop() {
   if (!selected.value) return
+  if (readOnlyView.value) {
+    closeDesktopStopDetail()
+    setSheetBreakpoint('half', 'replace', false)
+    return
+  }
   if (window.matchMedia('(min-width: 901px)').matches) {
     closeDesktopStopDetail()
     return
@@ -1352,6 +1382,7 @@ function navigateBackFromStop() {
 }
 
 function navigateBackToList() {
+  if (readOnlyView.value) return
   navigateBackTo({ layer: 'list' })
 }
 
