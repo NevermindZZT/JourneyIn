@@ -1078,13 +1078,43 @@ function mapVisibleRect(): { left: number; top: number; right: number; bottom: n
     }
     if (top < 70) top = 88
 
-    // 2. 底部避让：底部抽屉 (.stop-detail-panel 或 .workspace-panel)
-    const activeSheet = document.querySelector<HTMLElement>('.stop-detail-panel, .workspace-panel')
+    // 2. 底部避让：底部抽屉 (.stop-detail-panel 或 .workspace-panel / .atlas-floating-panel)
+    let sheetTop: number | null = null
+
+    // 优先匹配当前活动状态的抽屉
+    let activeSheet: HTMLElement | null = null
+    if (panelMode.value === 'search') {
+      activeSheet = document.querySelector<HTMLElement>('.itinerary-panel.panel-search-mode')
+    } else if (selectedStop.value) {
+      activeSheet = document.querySelector<HTMLElement>('.stop-detail-panel')
+    }
+    if (!activeSheet || !(activeSheet.offsetHeight > 0)) {
+      const candidates = Array.from(document.querySelectorAll<HTMLElement>('.stop-detail-panel, .workspace-panel, .atlas-floating-panel'))
+      activeSheet = candidates.find(el => el.offsetHeight > 0 && window.getComputedStyle(el).display !== 'none') || null
+    }
+
     if (activeSheet && activeSheet.offsetHeight > 0) {
       const sheetRect = activeSheet.getBoundingClientRect()
-      if (sheetRect.top < containerRect.bottom) {
-        bottom = Math.min(bottom, sheetRect.top - containerRect.top - 10)
+      if (sheetRect.top < containerRect.bottom && sheetRect.top > containerRect.top) {
+        sheetTop = sheetRect.top - containerRect.top
       }
+    }
+
+    // 抽屉目标高度保护：处理 CSS transition 过渡期间或尚未渲染完成时的几何位置
+    if (selectedStop.value) {
+      const expectedHeight = sheetHeightForBreakpoint(sheetBreakpoint.value)
+      const expectedTop = height - expectedHeight
+      // 若元素尚未挂载，或者仍在由底部弹起的过渡动画中（测量到的 top 大于预期 top），采用目标稳定高度
+      if (sheetTop === null || sheetTop > expectedTop + 8) {
+        sheetTop = expectedTop
+      }
+    } else if (sheetTop === null && panelOpen.value) {
+      const expectedHeight = sheetHeightForBreakpoint(sheetBreakpoint.value)
+      sheetTop = height - expectedHeight
+    }
+
+    if (sheetTop !== null) {
+      bottom = Math.min(bottom, sheetTop - 12)
     } else {
       bottom = height - 16
     }
@@ -1797,14 +1827,31 @@ function focusMapOnPoint(stop: Stop | SubStop) {
     if (focusVersion !== mapFocusVersion || typeof mapAPI.Pixel !== 'function' || typeof mapInstance.pixelToPoint !== 'function' || typeof mapInstance.setCenter !== 'function') return
     const viewport = mapFocusViewport()
     if (!viewport) return
-    const offsetX = viewport.x - viewport.width / 2
-    const offsetY = viewport.y - viewport.height / 2
-    if (Math.abs(offsetX) < 1 && Math.abs(offsetY) < 1) return
-    const shiftedPixel = new mapAPI.Pixel(viewport.width / 2 - offsetX, viewport.height / 2 - offsetY)
+    const container = mapContainer.value
+    const fullW = container?.clientWidth || 0
+    const fullH = container?.clientHeight || 0
+    if (!(fullW > 0) || !(fullH > 0)) return
+
+    const currentPixel = getMapPointScreenPixel(point)
+    const curX = currentPixel ? currentPixel.x : fullW / 2
+    const curY = currentPixel ? currentPixel.y : fullH / 2
+
+    const targetX = viewport.x
+    const targetY = isMobileViewport() ? Math.min(fullH - 36, viewport.y + 10) : viewport.y
+    const deltaX = targetX - curX
+    const deltaY = targetY - curY
+    if (Math.abs(deltaX) < 1.5 && Math.abs(deltaY) < 1.5) return
+
+    const shiftedPixel = new mapAPI.Pixel(fullW / 2 - deltaX, fullH / 2 - deltaY)
     const adjustedCenter = mapInstance.pixelToPoint(shiftedPixel)
     if (adjustedCenter) mapInstance.setCenter(adjustedCenter, { noAnimation: true })
   }
-  window.requestAnimationFrame(alignVisibleCenter)
+  window.requestAnimationFrame(() => {
+    alignVisibleCenter()
+    window.setTimeout(() => {
+      if (focusVersion === mapFocusVersion) alignVisibleCenter()
+    }, 120)
+  })
 }
 function selectStop(stop: Stop) { navigateToStop(stop) }
 function selectSubStop(child: SubStop, parent: Stop) { navigateToStop(child, parent) }
@@ -2398,8 +2445,14 @@ function focusAMapPoint(stop: Stop | SubStop) {
   const focusVersion = ++mapFocusVersion
   mapInstance.resize?.()
   const pt = amapPointToArray(point)
-  mapInstance.setCenter?.(pt, true)
-  mapInstance.setZoom?.(SELECTED_STOP_ZOOM, true)
+
+  if (typeof mapInstance.setZoomAndCenter === 'function') {
+    mapInstance.setZoomAndCenter(SELECTED_STOP_ZOOM, pt, true)
+  } else {
+    mapInstance.setZoom?.(SELECTED_STOP_ZOOM, true)
+    mapInstance.setCenter?.(pt, true)
+  }
+
   const alignVisibleCenter = () => {
     if (focusVersion !== mapFocusVersion || !mapAPI?.Pixel || !mapInstance?.containerToLngLat) return
     const viewport = mapFocusViewport()
@@ -2407,14 +2460,29 @@ function focusAMapPoint(stop: Stop | SubStop) {
     const container = mapContainer.value
     const fullW = container?.clientWidth || 0
     const fullH = container?.clientHeight || 0
-    const offsetX = viewport.x - fullW / 2
-    const offsetY = viewport.y - fullH / 2
-    if (Math.abs(offsetX) < 2 && Math.abs(offsetY) < 2) return
-    const targetPixel = new mapAPI.Pixel(fullW / 2 - offsetX, fullH / 2 - offsetY)
+    if (!(fullW > 0) || !(fullH > 0)) return
+
+    const currentPixel = getMapPointScreenPixel(point)
+    const curX = currentPixel ? currentPixel.x : fullW / 2
+    const curY = currentPixel ? currentPixel.y : fullH / 2
+
+    const targetX = viewport.x
+    const targetY = isMobileViewport() ? Math.min(fullH - 36, viewport.y + 10) : viewport.y
+    const deltaX = targetX - curX
+    const deltaY = targetY - curY
+    if (Math.abs(deltaX) < 1.5 && Math.abs(deltaY) < 1.5) return
+
+    const targetPixel = new mapAPI.Pixel(fullW / 2 - deltaX, fullH / 2 - deltaY)
     const adjustedCenter = mapInstance.containerToLngLat(targetPixel)
     if (adjustedCenter) mapInstance.setCenter(adjustedCenter, true)
   }
-  window.requestAnimationFrame(alignVisibleCenter)
+
+  window.requestAnimationFrame(() => {
+    alignVisibleCenter()
+    window.setTimeout(() => {
+      if (focusVersion === mapFocusVersion) alignVisibleCenter()
+    }, 120)
+  })
 }
 
 function searchResultMapPoint(result: PlaceCandidate, provider: 'baidu' | 'amap'): (Coord & { crs: string }) | null {
@@ -2450,8 +2518,8 @@ function focusMapOnSearchResult(result: PlaceCandidate) {
   mapInstance.resize?.()
   if (selectedMapProvider.value === 'amap') {
     const pt = amapPointToArray(point)
-    mapInstance.setCenter?.(pt, true)
-    mapInstance.setZoom?.(SELECTED_STOP_ZOOM, true)
+    if (typeof mapInstance.setZoomAndCenter === 'function') mapInstance.setZoomAndCenter(SELECTED_STOP_ZOOM, pt, true)
+    else { mapInstance.setZoom?.(SELECTED_STOP_ZOOM, true); mapInstance.setCenter?.(pt, true) }
   } else {
     const mapPoint = new mapAPI.Point(point.lng, point.lat)
     if (typeof mapInstance.centerAndZoom === 'function') mapInstance.centerAndZoom(mapPoint, SELECTED_STOP_ZOOM, { noAnimation: true })
@@ -2464,10 +2532,13 @@ function focusMapOnSearchResult(result: PlaceCandidate) {
     const container = mapContainer.value
     const fullW = container?.clientWidth || 0
     const fullH = container?.clientHeight || 0
+    if (!(fullW > 0) || !(fullH > 0)) return
     const visibleCenterX = (rect.left + rect.right) / 2
     const visibleCenterY = (rect.top + rect.bottom) / 2
-    const offsetX = visibleCenterX - fullW / 2
-    const offsetY = visibleCenterY - fullH / 2
+    const targetX = visibleCenterX
+    const targetY = isMobileViewport() ? Math.min(fullH - 36, visibleCenterY + 10) : visibleCenterY
+    const offsetX = targetX - fullW / 2
+    const offsetY = targetY - fullH / 2
     if (Math.abs(offsetX) < 2 && Math.abs(offsetY) < 2) return
     if (selectedMapProvider.value === 'amap') {
       if (!mapAPI?.Pixel || !mapInstance?.containerToLngLat) return
@@ -2481,7 +2552,12 @@ function focusMapOnSearchResult(result: PlaceCandidate) {
       if (adjustedCenter) mapInstance.setCenter(adjustedCenter, { noAnimation: true })
     }
   }
-  window.requestAnimationFrame(alignVisibleCenter)
+  window.requestAnimationFrame(() => {
+    alignVisibleCenter()
+    window.setTimeout(() => {
+      if (focusVersion === mapFocusVersion) alignVisibleCenter()
+    }, 120)
+  })
 }
 
 function renderSearchResultMarkers() {
