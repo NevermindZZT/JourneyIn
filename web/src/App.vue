@@ -341,6 +341,10 @@ const shareID = ref('')
 const shareExpiresAt = ref('')
 const shareCopyMessage = ref('')
 const shareNoticeVisible = ref(false)
+const shareModalOpen = ref(false)
+const shareExpiryType = ref<'1d' | '7d' | '30d' | '90d' | 'permanent' | 'custom'>('7d')
+const shareCustomDays = ref(30)
+const shareGenerating = ref(false)
 const posterModalOpen = ref(false)
 const actionLoading = ref(false)
 const settingsOpen = ref(false)
@@ -1031,6 +1035,7 @@ function handleGlobalKeyDown(event: KeyboardEvent) {
   if (historyView.value) { void exitTripHistory(); event.preventDefault(); return }
   if (mapPickOpen.value || mapPickMode.value) { cancelMapPick(); event.preventDefault(); return }
   if (newTripOpen.value) { newTripOpen.value = false; event.preventDefault(); return }
+  if (shareModalOpen.value) { shareModalOpen.value = false; event.preventDefault(); return }
   if (settingsOpen.value) { settingsOpen.value = false; event.preventDefault(); return }
   if (authOpen.value) { authOpen.value = false; event.preventDefault(); return }
   if (mobileMapToolsOpen.value) { mobileMapToolsOpen.value = false; event.preventDefault(); return }
@@ -4509,20 +4514,95 @@ function restoreShareState(tripID: string) {
   shareURL.value = ''; shareID.value = ''; shareExpiresAt.value = ''; shareCopyMessage.value = ''; shareNoticeVisible.value = false
   try {
     const saved = JSON.parse(localStorage.getItem(shareStorageKey(tripID)) || 'null') as { id?: string; url?: string; expires_at?: string } | null
-    if (!saved?.url || (saved.expires_at && Date.parse(saved.expires_at) <= Date.now())) { localStorage.removeItem(shareStorageKey(tripID)); return }
+    if (!saved?.url) { localStorage.removeItem(shareStorageKey(tripID)); return }
+    if (saved.expires_at && !Number.isNaN(Date.parse(saved.expires_at)) && Date.parse(saved.expires_at) <= Date.now()) {
+      localStorage.removeItem(shareStorageKey(tripID))
+      return
+    }
     shareID.value = saved.id || ''; shareURL.value = saved.url; shareExpiresAt.value = saved.expires_at || ''
   } catch { localStorage.removeItem(shareStorageKey(tripID)) }
 }
-async function createShare() {
+function openShareModal() {
   if (readOnlyView.value || !selected.value) return
-  const tripID = selected.value.id; const existingToken = shareTokenFromURL(shareURL.value) || (() => { try { const saved = JSON.parse(localStorage.getItem(shareStorageKey(tripID)) || 'null') as { url?: string } | null; return saved?.url ? shareTokenFromURL(saved.url) : '' } catch { return '' } })()
-  actionLoading.value = true; error.value = ''; shareCopyMessage.value = ''
+  shareCopyMessage.value = ''
+  error.value = ''
+  if (shareURL.value && !shareExpiresAt.value) {
+    shareExpiryType.value = 'permanent'
+  }
+  shareModalOpen.value = true
+}
+function openTripPosterFromShare() {
+  shareModalOpen.value = false
+  openTripPoster()
+}
+async function createShare(options?: { expiryType?: '1d' | '7d' | '30d' | '90d' | 'permanent' | 'custom'; customDays?: number; forceNew?: boolean }) {
+  if (readOnlyView.value || !selected.value) return
+  const tripID = selected.value.id
+  const type = options?.expiryType || shareExpiryType.value
+  let ttlSeconds: number | undefined = undefined
+  let permanent: boolean | undefined = undefined
+
+  if (type === 'permanent') {
+    permanent = true
+  } else if (type === '1d') {
+    ttlSeconds = 86400
+  } else if (type === '7d') {
+    ttlSeconds = 7 * 86400
+  } else if (type === '30d') {
+    ttlSeconds = 30 * 86400
+  } else if (type === '90d') {
+    ttlSeconds = 90 * 86400
+  } else if (type === 'custom') {
+    const rawDays = Number(options?.customDays ?? shareCustomDays.value)
+    const days = Math.max(1, Math.min(3650, Number.isFinite(rawDays) ? rawDays : 30))
+    shareCustomDays.value = days
+    ttlSeconds = days * 86400
+  }
+
+  let existingToken = ''
+  if (!options?.forceNew) {
+    existingToken = shareTokenFromURL(shareURL.value) || (() => {
+      try {
+        const saved = JSON.parse(localStorage.getItem(shareStorageKey(tripID)) || 'null') as { url?: string } | null
+        return saved?.url ? shareTokenFromURL(saved.url) : ''
+      } catch { return '' }
+    })()
+  }
+
+  shareGenerating.value = true
+  actionLoading.value = true
+  error.value = ''
+  shareCopyMessage.value = ''
+
   try {
-    const response = await apiFetch('/api/v1/shares', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trip_id: tripID, existing_token: existingToken || undefined }) })
-    const payload = await response.json() as { id?: string; url?: string; expires_at?: string; error?: { message?: string } }
+    const body: Record<string, any> = { trip_id: tripID }
+    if (permanent) {
+      body.permanent = true
+    } else if (typeof ttlSeconds === 'number') {
+      body.ttl_seconds = ttlSeconds
+    }
+    if (existingToken) {
+      body.existing_token = existingToken
+    }
+
+    const response = await apiFetch('/api/v1/shares', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+    const payload = await response.json() as { id?: string; url?: string; expires_at?: string; permanent?: boolean; error?: { message?: string } }
     if (!response.ok || !payload.url) throw new Error(payload.error?.message || '分享链接创建失败')
-    shareID.value = payload.id || ''; shareURL.value = payload.url; shareExpiresAt.value = payload.expires_at || ''; shareNoticeVisible.value = true; saveShareState(tripID)
-  } catch (cause) { error.value = cause instanceof Error ? cause.message : '分享链接创建失败' } finally { actionLoading.value = false }
+    shareID.value = payload.id || ''
+    shareURL.value = payload.url
+    shareExpiresAt.value = payload.expires_at || ''
+    shareNoticeVisible.value = true
+    saveShareState(tripID)
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '分享链接创建失败'
+  } finally {
+    actionLoading.value = false
+    shareGenerating.value = false
+  }
 }
 async function copyText(value: string) {
   try {
@@ -5470,7 +5550,7 @@ onUnmounted(() => {
                   <div v-if="visibleStops.length" class="redesign-stop-list"><article v-for="stop in visibleStops" :key="stop.id" class="redesign-stop-row" :class="{ selected: selectedStopId === stop.id, 'reorder-active': reorderMode, 'location-missing': !pointFor(stop) }"><button class="redesign-stop-main" type="button" @click="selectPlanningPointFromList(stop)"><span class="stop-number">{{ stop.sequence }}</span><span><strong>{{ stop.title }}</strong><small>{{ stopDate(stop) }} · {{ stop.address || '地址待补充' }}</small><em class="stop-location-badge" :class="{ missing: !pointFor(stop) }">{{ locationStatus(stop) }}</em></span><span class="row-chevron">›</span></button><div v-if="reorderMode && !readOnlyView" class="reorder-actions" @click.stop><button class="reorder-move-button" type="button" :disabled="actionLoading || !canMovePlanningPoint(stop, -1)" :aria-label="'上移规划点 ' + stop.title" @click="movePlanningPoint(stop, -1)"><IonIcon :icon="chevronUpOutline" /></button><button class="reorder-move-button" type="button" :disabled="actionLoading || !canMovePlanningPoint(stop, 1)" :aria-label="'下移规划点 ' + stop.title" @click="movePlanningPoint(stop, 1)"><IonIcon :icon="chevronDownOutline" /></button></div><button v-if="!readOnlyView" class="stop-delete-button" type="button" :aria-label="'删除规划点 ' + stop.title" @click.stop="deletePlanningPoint(stop)">×</button></article></div><p v-else class="muted compact-empty">当前日期还没有规划点。</p>
                   <button v-if="!readOnlyView" class="add-place-action" type="button" @click="openJourneySearch()"><IonIcon :icon="searchOutline" /> 搜索并添加规划点</button>
                 </div>
-                <div v-if="!readOnlyView" class="panel-data-actions"><button type="button" @click="openImportPicker">导入</button><button type="button" :disabled="actionLoading" @click="downloadTrip">导出 JSON</button><button type="button" :disabled="actionLoading" @click="createShare">在线分享</button><button type="button" @click="openTripPoster">生成海报</button></div><div v-else class="panel-data-actions"><button type="button" @click="openTripPoster">保存为图片</button></div>
+                <div v-if="!readOnlyView" class="panel-data-actions"><button type="button" @click="openImportPicker">导入</button><button type="button" :disabled="actionLoading" @click="downloadTrip">导出 JSON</button><button type="button" :disabled="actionLoading" @click="openShareModal">{{ shareURL ? '分享管理' : '在线分享' }}</button><button type="button" @click="openTripPoster">生成海报</button></div><div v-else class="panel-data-actions"><button type="button" @click="openTripPoster">保存为图片</button></div>
               </div>
             </aside>
 
@@ -5530,7 +5610,7 @@ onUnmounted(() => {
               <div v-if="historyView" class="history-readonly-banner"><span><strong>历史版本 · 只读</strong><small>{{ historyView.label || '保存于 ' + formatDateTime(historyView.created_at) }} · 工作版本 {{ historyView.source_revision }}</small></span><button type="button" @click="exitTripHistory">返回当前版本</button></div>
               <div v-if="error" class="global-error"><IonIcon :icon="cloudOfflineOutline" /><span>{{ error }}</span><button type="button" class="notice-close-btn" aria-label="关闭错误提示" @click="closeError">×</button></div>
               <div v-if="tripDetailsNotice" class="global-notice"><IonIcon :icon="createOutline" /><span>{{ tripDetailsNotice }}</span><button type="button" class="notice-close-btn" aria-label="关闭提示" @click="closeNotice">×</button></div>
-              <div v-if="shareNoticeVisible && shareURL" class="share-banner"><span><strong>只读分享已创建</strong><a :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><small v-if="shareExpiresAt">有效期至 {{ formatDateTime(shareExpiresAt) }}</small><small v-if="shareCopyMessage" class="share-copy-feedback">{{ shareCopyMessage }}</small></span><div class="share-actions"><button type="button" @click="copyShareURL">复制链接</button><button type="button" @click="openTripPoster">生成海报</button><button v-if="shareID" type="button" @click="revokeShare">撤销</button><button type="button" class="notice-close-btn" aria-label="关闭分享提示" @click="dismissShareNotice">×</button></div></div>
+              <div v-if="shareNoticeVisible && shareURL" class="share-banner"><span><strong>只读分享已创建</strong><a :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><small v-if="shareExpiresAt">有效期至 {{ formatDateTime(shareExpiresAt) }}</small><small v-else class="permanent-badge">永久有效</small><small v-if="shareCopyMessage" class="share-copy-feedback">{{ shareCopyMessage }}</small></span><div class="share-actions"><button type="button" @click="copyShareURL">复制链接</button><button type="button" @click="openShareModal">分享设置</button><button type="button" @click="openTripPoster">生成海报</button><button v-if="shareID" type="button" @click="revokeShare">撤销</button><button type="button" class="notice-close-btn" aria-label="关闭分享提示" @click="dismissShareNotice">×</button></div></div>
             </section>
           </section>
         </main>
@@ -5870,7 +5950,7 @@ onUnmounted(() => {
 
               <section v-else-if="settingsSection === 'sharing'" class="settings-page-section">
                 <div class="settings-section-heading"><span class="eyebrow">ONLINE SHARING</span><h3>在线分享</h3><p>集中管理当前行程的只读分享链接；分享状态不会遮挡地图。</p></div>
-                <div class="settings-card settings-share-card"><div class="settings-card-heading"><div><strong>{{ selected?.title || '当前行程' }}</strong><small>持有链接即可查看当前行程快照</small></div><span class="provider-status">{{ shareURL ? '已分享' : '未分享' }}</span></div><template v-if="selected"><a v-if="shareURL" class="settings-share-url" :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><p v-if="shareExpiresAt" class="settings-share-expiry">有效期至 {{ formatDateTime(shareExpiresAt) }}</p><p v-if="!shareURL" class="settings-help">当前行程还没有在线分享；点击下方按钮创建一个只读链接。</p><div class="settings-actions"><button v-if="shareURL" class="primary-action" type="button" @click="copyShareURL">复制链接</button><button class="secondary-action" type="button" @click="openTripPoster">分享海报</button><button v-if="shareURL && shareID" class="secondary-action" type="button" :disabled="actionLoading" @click="revokeShare">撤销分享</button><button v-else class="primary-action" type="button" :disabled="actionLoading" @click="createShare">{{ actionLoading ? '创建中…' : '在线分享' }}</button></div><p v-if="shareCopyMessage" class="settings-feedback">{{ shareCopyMessage }}</p></template><p v-else class="settings-help">请先选择一条行程，再管理它的在线分享链接。</p></div>
+                <div class="settings-card settings-share-card"><div class="settings-card-heading"><div><strong>{{ selected?.title || '当前行程' }}</strong><small>持有链接即可查看当前行程快照</small></div><span class="provider-status">{{ shareURL ? '已分享' : '未分享' }}</span></div><template v-if="selected"><a v-if="shareURL" class="settings-share-url" :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><p v-if="shareExpiresAt" class="settings-share-expiry">有效期至 {{ formatDateTime(shareExpiresAt) }}</p><p v-else-if="shareURL" class="settings-share-expiry settings-share-permanent">永久有效</p><p v-if="!shareURL" class="settings-help">当前行程还没有在线分享；点击下方按钮设置有效期并创建只读链接。</p><div class="settings-actions"><button v-if="shareURL" class="primary-action" type="button" @click="copyShareURL">复制链接</button><button class="secondary-action" type="button" @click="openTripPoster">分享海报</button><button v-if="shareURL" class="secondary-action" type="button" @click="openShareModal">分享设置</button><button v-if="shareURL && shareID" class="secondary-action" type="button" :disabled="actionLoading" @click="revokeShare">撤销分享</button><button v-else class="primary-action" type="button" :disabled="actionLoading" @click="openShareModal">{{ actionLoading ? '创建中…' : '在线分享' }}</button></div><p v-if="shareCopyMessage" class="settings-feedback">{{ shareCopyMessage }}</p></template><p v-else class="settings-help">请先选择一条行程，再管理它的在线分享链接。</p></div>
                 <div class="settings-note"><span class="settings-note-mark">i</span><span>分享链接是只读快照，默认有效期为 7 天。撤销后，持有链接的人将无法继续查看。</span></div>
               </section>
 
@@ -5891,6 +5971,151 @@ onUnmounted(() => {
       </div>
       <div v-if="false && settingsOpen" class="modal-backdrop" @click.self="settingsOpen = false"><section class="modal-panel settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title"><button class="modal-close" aria-label="关闭" @click="settingsOpen = false">×</button><p class="eyebrow">JOURNEYIN SETTINGS</p><h2 id="settings-title">设置</h2><p class="settings-intro">当前主题：{{ themeLabel }}。Key 配置保存到 SQLite，服务端 Key 不会回显。</p><section class="settings-section"><h3>外观</h3><p class="settings-label">主题：{{ themeLabel }}</p><div class="theme-options"><button type="button" :class="{ selected: theme === 'system' }" @click="setTheme('system')">跟随系统</button><button type="button" :class="{ selected: theme === 'light' }" @click="setTheme('light')">浅色</button><button type="button" :class="{ selected: theme === 'dark' }" @click="setTheme('dark')">深色</button></div></section><section class="settings-section"><h3>服务端连接</h3><label>当前服务地址<input v-model="serverURL" readonly /></label><label>兼容 REST API Token<input v-model="authTokenInput" type="password" placeholder="仅用于兼容旧客户端，可留空" autocomplete="off" /></label><div class="modal-actions"><button type="button" @click="logout">清除令牌</button><button type="button" class="primary" @click="saveAuth">保存令牌</button></div><p v-if="settingsMessage" class="settings-message">{{ settingsMessage }}</p></section><section class="settings-section"><h3>默认地图</h3><label>默认地图 Provider<select v-model="defaultMapProvider"><option value="baidu">百度地图</option><option value="amap">高德地图</option></select></label><p class="key-help">用于没有单独地图偏好的新行程和查看页面；单个行程已保存的地图 Provider 不会被覆盖。地图工具仍可临时切换 Provider。</p><div class="modal-actions"><button type="button" class="primary" :disabled="settingsSaving" @click="saveDefaultMapProvider">{{ settingsSaving ? '保存中…' : '保存默认地图' }}</button></div></section><section class="settings-section"><h3>百度地图</h3><p class="key-status">浏览器端 Key：<strong>{{ baiduKey ? '已配置' : '未配置' }}</strong> · 服务端 Key：<strong>{{ settingsData?.map?.baidu?.server_key_configured ? '已配置' : '未配置' }}</strong></p><label>百度浏览器端 Key<input v-model="baiduBrowserKeyInput" type="password" :placeholder="settingsData?.map?.baidu?.browser_key_configured ? '已配置，输入新 Key 可替换' : '用于 JSAPI 4.0/BMap 网页地图'" autocomplete="off" /></label><label>百度服务端 Key<input v-model="baiduServerKeyInput" type="password" placeholder="已配置时输入新 Key 可替换；留空保持当前值" autocomplete="off" /></label><p class="key-help">浏览器端 Key 用于地图底图；服务端 Key 用于 POI 搜索、地理编码、路线和天气。请确认当前访问 host 在百度控制台白名单内。</p><a href="https://lbsyun.baidu.com/apiconsole/key" target="_blank" rel="noopener noreferrer">申请/管理百度地图 Key ↗</a></section><section class="settings-section"><h3>高德地图</h3><p class="key-status">JS Key：<strong>{{ settingsData?.map?.amap?.js_key_configured ? '已配置' : '未配置' }}</strong> · 服务端 Key：<strong>{{ settingsData?.map?.amap?.server_key_configured ? '已配置' : '未配置' }}</strong> · 安全密钥：<strong>{{ settingsData?.map?.amap?.security_js_code_configured ? '已配置' : '未配置' }}</strong></p><label>高德 JS Key<input v-model="amapJSKeyInput" type="password" placeholder="用于高德 Web 地图" autocomplete="off" /></label><label>高德服务端 Key<input v-model="amapServerKeyInput" type="password" placeholder="已配置时输入新 Key 可替换；留空保持当前值" autocomplete="off" /></label><label>高德 JS 安全密钥<input v-model="amapSecurityJSCodeInput" type="password" placeholder="用于 JSAPI 安全代理；已配置时输入新密钥可替换" autocomplete="off" /></label><a href="https://console.amap.com/dev/key/app" target="_blank" rel="noopener noreferrer">申请/管理高德 Key ↗</a><p class="key-help">保存后，规划点会优先使用已经保存的坐标，不会因为重新绘制地图重复查询。</p><div class="modal-actions"><button type="button" class="primary" :disabled="settingsSaving" @click="saveMapKeys">{{ settingsSaving ? '保存中…' : '保存地图 Key 到数据库' }}</button></div></section><section class="settings-section"><h3>地点检索</h3><label>优先 Provider<select v-model="poiProviderPriority"><option value="amap">高德优先</option><option value="baidu">百度优先</option></select></label><p class="key-help">当前策略会先查询本地地点目录；未命中后使用所选 Provider，Provider 不可用时自动尝试另一家。新搜索结果只保留 7 天。</p><p class="key-status">本地地点记录：<strong>{{ localDirectoryCount }}</strong> 条</p><div class="modal-actions"><button type="button" @click="savePOIPreferences">保存检索优先级</button><button type="button" @click="clearLocalDirectory">清除本地记录</button></div></section><section class="settings-section"><h3>MCP</h3><p>MCP 地址：{{ capabilities?.mcp?.http_endpoint || '/mcp' }}</p><p class="key-help">Docker 远程部署时设置 JOURNEYIN_MCP_TOKEN；本地 localhost 调试可不设置。</p></section></section></div>
       <div v-if="authOpen" class="modal-backdrop" @click.self="authOpen = false"><section class="modal-panel auth-panel" role="dialog" aria-modal="true" aria-labelledby="auth-title"><IonIcon class="auth-icon" :icon="logInOutline" /><h2 id="auth-title">登录 JourneyIn</h2><p>请输入 Docker 服务配置的账号和密码。登录成功后会在当前浏览器保存一个 HttpOnly 会话。</p><form class="auth-form" @submit.prevent="login"><label>账号<input v-model="loginUsername" type="text" autofocus autocomplete="username" /></label><label>密码<input v-model="loginPassword" type="password" autocomplete="current-password" /></label><p v-if="loginMessage" class="auth-error">{{ loginMessage }}</p><div class="modal-actions"><button type="button" @click="authOpen = false">稍后</button><button type="submit" class="primary" :disabled="loginLoading">{{ loginLoading ? '登录中…' : '登录' }}</button></div></form></section></div>
+      <!-- 在线分享设置弹窗 -->
+      <div v-if="shareModalOpen && !readOnlyView" class="modal-backdrop share-modal-backdrop" @click.self="shareModalOpen = false">
+        <section class="modal-panel share-modal-panel" role="dialog" aria-modal="true" aria-labelledby="share-modal-title">
+          <header class="share-modal-header">
+            <div>
+              <p class="eyebrow">SHARE JOURNEY</p>
+              <h2 id="share-modal-title">{{ shareURL ? '管理在线分享' : '在线分享行程' }}</h2>
+              <p class="share-modal-subtitle">生成公开只读链接，任何持有链接的人均可查看当前行程快照与地图路线。</p>
+            </div>
+            <button class="modal-close" type="button" aria-label="关闭分享窗口" @click="shareModalOpen = false">×</button>
+          </header>
+
+          <div class="share-modal-content">
+            <!-- 行程简述 -->
+            <div class="share-trip-meta-box">
+              <span class="share-trip-meta-title">{{ selected?.title || '当前行程' }}</span>
+              <span class="share-trip-meta-detail">
+                {{ selected?.days || tripDocument?.days?.length || 0 }} 天行程
+                <template v-if="selected?.start_date && selected?.end_date"> · {{ selected.start_date }} 至 {{ selected.end_date }}</template>
+              </span>
+            </div>
+
+            <!-- 当前已分享状态卡片 -->
+            <div v-if="shareURL" class="share-active-box">
+              <div class="share-active-head">
+                <span class="share-status-pill">
+                  <span class="share-status-dot"></span>
+                  分享已开启
+                </span>
+                <span class="share-expiry-pill" :class="{ permanent: !shareExpiresAt }">
+                  {{ shareExpiresAt ? ('有效期至 ' + formatDateTime(shareExpiresAt)) : '永久有效' }}
+                </span>
+              </div>
+
+              <div class="share-url-row">
+                <input type="text" readonly :value="shareURL" class="share-url-field" @focus="($event.target as HTMLInputElement)?.select()" />
+                <button type="button" class="share-copy-btn" :class="{ copied: !!shareCopyMessage }" @click="copyShareURL">
+                  {{ shareCopyMessage ? '已复制 ✓' : '复制链接' }}
+                </button>
+              </div>
+              <p v-if="shareCopyMessage" class="share-copy-inline-hint">{{ shareCopyMessage }}</p>
+
+              <div class="share-action-buttons">
+                <a :href="shareURL" target="_blank" rel="noopener noreferrer" class="share-ext-link">打开预览 ↗</a>
+                <button type="button" class="share-sec-btn" @click="openTripPosterFromShare">分享海报</button>
+                <button type="button" class="share-danger-btn" :disabled="actionLoading" @click="revokeShare">撤销分享</button>
+              </div>
+
+              <!-- 修改有效期设置 -->
+              <details class="share-change-expiry-details">
+                <summary>修改有效日期 / 重新生成</summary>
+                <div class="share-reconfig-pane">
+                  <p class="share-reconfig-hint">选择新的有效期将更新当前行程的只读快照与过期规则：</p>
+                  <div class="share-expiry-grid">
+                    <button type="button" class="share-expiry-card" :class="{ selected: shareExpiryType === '1d' }" @click="shareExpiryType = '1d'">
+                      <strong>1 天</strong>
+                      <small>临时浏览</small>
+                    </button>
+                    <button type="button" class="share-expiry-card" :class="{ selected: shareExpiryType === '7d' }" @click="shareExpiryType = '7d'">
+                      <strong>7 天</strong>
+                      <small>常用推荐</small>
+                    </button>
+                    <button type="button" class="share-expiry-card" :class="{ selected: shareExpiryType === '30d' }" @click="shareExpiryType = '30d'">
+                      <strong>30 天</strong>
+                      <small>月度规划</small>
+                    </button>
+                    <button type="button" class="share-expiry-card" :class="{ selected: shareExpiryType === '90d' }" @click="shareExpiryType = '90d'">
+                      <strong>90 天</strong>
+                      <small>季度留存</small>
+                    </button>
+                    <button type="button" class="share-expiry-card permanent-card" :class="{ selected: shareExpiryType === 'permanent' }" @click="shareExpiryType = 'permanent'">
+                      <strong>永久有效</strong>
+                      <small>永不过期</small>
+                    </button>
+                    <button type="button" class="share-expiry-card" :class="{ selected: shareExpiryType === 'custom' }" @click="shareExpiryType = 'custom'">
+                      <strong>自定义</strong>
+                      <small>{{ shareExpiryType === 'custom' ? (shareCustomDays + ' 天') : '指定天数' }}</small>
+                    </button>
+                  </div>
+
+                  <div v-if="shareExpiryType === 'custom'" class="share-custom-row">
+                    <label>有效天数：</label>
+                    <input type="number" v-model.number="shareCustomDays" min="1" max="3650" placeholder="天数" />
+                    <span>天（可填 1 ~ 3650 天）</span>
+                  </div>
+
+                  <div class="share-reconfig-actions">
+                    <button type="button" class="share-reconfig-submit-btn" :disabled="actionLoading || shareGenerating" @click="createShare({ forceNew: true })">
+                      {{ shareGenerating ? '正在更新…' : '应用新有效期并更新分享' }}
+                    </button>
+                  </div>
+                </div>
+              </details>
+            </div>
+
+            <!-- 未分享时：选择有效期并创建 -->
+            <div v-else class="share-create-box">
+              <label class="share-section-title">设置分享有效期限</label>
+              <div class="share-expiry-grid">
+                <button type="button" class="share-expiry-card" :class="{ selected: shareExpiryType === '1d' }" @click="shareExpiryType = '1d'">
+                  <strong>1 天</strong>
+                  <small>临时查看</small>
+                </button>
+                <button type="button" class="share-expiry-card" :class="{ selected: shareExpiryType === '7d' }" @click="shareExpiryType = '7d'">
+                  <strong>7 天</strong>
+                  <small>常用推荐</small>
+                </button>
+                <button type="button" class="share-expiry-card" :class="{ selected: shareExpiryType === '30d' }" @click="shareExpiryType = '30d'">
+                  <strong>30 天</strong>
+                  <small>月度行程</small>
+                </button>
+                <button type="button" class="share-expiry-card" :class="{ selected: shareExpiryType === '90d' }" @click="shareExpiryType = '90d'">
+                  <strong>90 天</strong>
+                  <small>季度规划</small>
+                </button>
+                <button type="button" class="share-expiry-card permanent-card" :class="{ selected: shareExpiryType === 'permanent' }" @click="shareExpiryType = 'permanent'">
+                  <strong>永久有效</strong>
+                  <small>永不过期</small>
+                </button>
+                <button type="button" class="share-expiry-card" :class="{ selected: shareExpiryType === 'custom' }" @click="shareExpiryType = 'custom'">
+                  <strong>自定义</strong>
+                  <small>{{ shareExpiryType === 'custom' ? (shareCustomDays + ' 天') : '指定天数' }}</small>
+                </button>
+              </div>
+
+              <div v-if="shareExpiryType === 'custom'" class="share-custom-row">
+                <label>自定义有效天数：</label>
+                <input type="number" v-model.number="shareCustomDays" min="1" max="3650" placeholder="天数" />
+                <span>天（支持 1 ~ 3650 天）</span>
+              </div>
+
+              <div class="share-privacy-note">
+                <p><strong>隐私提示：</strong>分享将创建当前行程的只读快照；持有该链接的任何人均可查看，但不具备编辑权限，也不会泄露您的账户与敏感配置。您可以随时在此撤销。</p>
+              </div>
+
+              <div class="modal-actions share-modal-footer">
+                <button type="button" class="share-cancel-btn" @click="shareModalOpen = false">取消</button>
+                <button type="button" class="share-submit-btn" :disabled="actionLoading || shareGenerating" @click="createShare()">
+                  {{ shareGenerating ? '正在生成…' : '生成分享链接' }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
       <!-- 全屏照片大图预览 Lightbox (防坍塌视口 + 渐进式模糊占位 + Loading动效 + 左右切换) -->
       <div
         v-if="previewPhoto"

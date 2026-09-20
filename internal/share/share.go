@@ -81,8 +81,8 @@ func (s *Service) Create(tripID string, revision int, contentHash string, conten
 	if tripID == "" || revision < 1 || contentHash == "" {
 		return "", Record{}, errors.New("invalid share snapshot")
 	}
-	if ttl <= 0 {
-		return "", Record{}, errors.New("ttl must be positive")
+	if ttl < 0 {
+		return "", Record{}, errors.New("ttl cannot be negative")
 	}
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
@@ -91,7 +91,11 @@ func (s *Service) Create(tripID string, revision int, contentHash string, conten
 	token := base64.RawURLEncoding.EncodeToString(raw)
 	h := sha256.Sum256([]byte(token))
 	now := s.now().UTC()
-	r := Record{ID: base64.RawURLEncoding.EncodeToString(raw[:12]), TripID: tripID, Revision: revision, ContentHash: contentHash, TokenHash: h, ExpiresAt: now.Add(ttl), CreatedAt: now, Content: append([]byte(nil), content...)}
+	var expiresAt time.Time
+	if ttl > 0 {
+		expiresAt = now.Add(ttl)
+	}
+	r := Record{ID: base64.RawURLEncoding.EncodeToString(raw[:12]), TripID: tripID, Revision: revision, ContentHash: contentHash, TokenHash: h, ExpiresAt: expiresAt, CreatedAt: now, Content: append([]byte(nil), content...)}
 	if err := s.store.Put(r); err != nil {
 		return "", Record{}, err
 	}
@@ -107,7 +111,7 @@ func (s *Service) Resolve(token string) (Record, error) {
 	if r.RevokedAt != nil {
 		return Record{}, ErrRevoked
 	}
-	if !now.Before(r.ExpiresAt) {
+	if !r.ExpiresAt.IsZero() && !now.Before(r.ExpiresAt) {
 		return Record{}, ErrExpired
 	}
 	return r, nil

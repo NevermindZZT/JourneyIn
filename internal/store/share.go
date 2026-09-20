@@ -20,7 +20,11 @@ type ShareRecord struct {
 }
 
 func (s *Store) PutShare(ctx context.Context, record ShareRecord) error {
-	_, err := s.db.ExecContext(ctx, "INSERT INTO shares(id, trip_id, revision, content_hash, token_hash, snapshot_json, expires_at, revoked_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", record.ID, record.TripID, record.Revision, record.ContentHash, record.TokenHash[:], string(record.Snapshot), record.ExpiresAt.UTC().Format(time.RFC3339Nano), nullableTime(record.RevokedAt), record.CreatedAt.UTC().Format(time.RFC3339Nano))
+	var expiresStr string
+	if !record.ExpiresAt.IsZero() {
+		expiresStr = record.ExpiresAt.UTC().Format(time.RFC3339Nano)
+	}
+	_, err := s.db.ExecContext(ctx, "INSERT INTO shares(id, trip_id, revision, content_hash, token_hash, snapshot_json, expires_at, revoked_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", record.ID, record.TripID, record.Revision, record.ContentHash, record.TokenHash[:], string(record.Snapshot), expiresStr, nullableTime(record.RevokedAt), record.CreatedAt.UTC().Format(time.RFC3339Nano))
 	return err
 }
 
@@ -36,7 +40,9 @@ func (s *Store) GetShareByTokenHash(ctx context.Context, hash [32]byte) (ShareRe
 		return ShareRecord{}, err
 	}
 	copy(r.TokenHash[:], token)
-	r.ExpiresAt, _ = time.Parse(time.RFC3339Nano, expires.String)
+	if expires.Valid && expires.String != "" {
+		r.ExpiresAt, _ = time.Parse(time.RFC3339Nano, expires.String)
+	}
 	r.CreatedAt, _ = time.Parse(time.RFC3339Nano, created.String)
 	if revoked.Valid {
 		value, parseErr := time.Parse(time.RFC3339Nano, revoked.String)

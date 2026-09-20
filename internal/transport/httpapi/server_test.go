@@ -312,3 +312,84 @@ func TestMapKeysArePersistedWithoutReturningSecretValues(t *testing.T) {
 		t.Fatalf("unexpected AMap settings: %+v", result)
 	}
 }
+
+func TestSharePermanentAndCustomTTL(t *testing.T) {
+	server := testHTTPServer(t)
+	defer server.Close()
+
+	tripPayload := []byte(`{"schema_version":1,"title":"TTL Test Trip","status":"draft","timezone":"Asia/Shanghai","date_range":{"start":"2026-04-18","end":"2026-04-18"},"days":[{"id":"day-1","date":"2026-04-18","stops":[]}]}`)
+	createResp, err := http.Post(server.URL+"/api/v1/trips", "application/json", strings.NewReader(string(tripPayload)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer createResp.Body.Close()
+	var trip map[string]any
+	if err := json.NewDecoder(createResp.Body).Decode(&trip); err != nil {
+		t.Fatal(err)
+	}
+	tripID := trip["id"].(string)
+
+	// 1. Permanent share with permanent: true
+	permBody := `{"trip_id":"` + tripID + `","permanent":true}`
+	permResp, err := http.Post(server.URL+"/api/v1/shares", "application/json", strings.NewReader(permBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer permResp.Body.Close()
+	if permResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 for permanent share, got %d", permResp.StatusCode)
+	}
+	var permResult map[string]any
+	if err := json.NewDecoder(permResp.Body).Decode(&permResult); err != nil {
+		t.Fatal(err)
+	}
+	if permResult["permanent"] != true {
+		t.Fatalf("expected permanent=true, got %+v", permResult["permanent"])
+	}
+	if permResult["expires_at"] != nil {
+		t.Fatalf("expected nil expires_at for permanent share, got %+v", permResult["expires_at"])
+	}
+
+	permURL, _ := url.Parse(permResult["url"].(string))
+	viewResp, err := http.Get(server.URL + permURL.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer viewResp.Body.Close()
+	if viewResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for permanent share view, got %d", viewResp.StatusCode)
+	}
+
+	// 2. Custom TTL (e.g. 30 days = 2592000s)
+	customBody := `{"trip_id":"` + tripID + `","ttl_seconds":2592000}`
+	customResp, err := http.Post(server.URL+"/api/v1/shares", "application/json", strings.NewReader(customBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer customResp.Body.Close()
+	if customResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 for custom ttl share, got %d", customResp.StatusCode)
+	}
+	var customResult map[string]any
+	if err := json.NewDecoder(customResp.Body).Decode(&customResult); err != nil {
+		t.Fatal(err)
+	}
+	if customResult["permanent"] == true {
+		t.Fatalf("expected non-permanent share, got %+v", customResult)
+	}
+	if customResult["expires_at"] == nil {
+		t.Fatalf("expected expires_at for custom ttl, got nil")
+	}
+
+	// 3. Negative TTL rejection
+	negBody := `{"trip_id":"` + tripID + `","ttl_seconds":-60}`
+	negResp, err := http.Post(server.URL+"/api/v1/shares", "application/json", strings.NewReader(negBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer negResp.Body.Close()
+	if negResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for negative ttl, got %d", negResp.StatusCode)
+	}
+}
+

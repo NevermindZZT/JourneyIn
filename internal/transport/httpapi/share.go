@@ -28,7 +28,8 @@ const sharePageContentSecurityPolicy = "default-src 'self'; " +
 
 type createShareBody struct {
 	TripID        string `json:"trip_id"`
-	TTLSeconds    int    `json:"ttl_seconds,omitempty"`
+	TTLSeconds    *int   `json:"ttl_seconds,omitempty"`
+	Permanent     *bool  `json:"permanent,omitempty"`
 	ExistingToken string `json:"existing_token,omitempty"`
 }
 
@@ -51,22 +52,57 @@ func (s *Server) createShare(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "store_error", err.Error(), nil)
 		return
 	}
+
+	isPermanent := false
+	if body.Permanent != nil && *body.Permanent {
+		isPermanent = true
+	} else if body.TTLSeconds != nil && *body.TTLSeconds == 0 {
+		isPermanent = true
+	}
+
 	ttl := 7 * 24 * time.Hour
-	if body.TTLSeconds > 0 {
-		ttl = time.Duration(body.TTLSeconds) * time.Second
+	if isPermanent {
+		ttl = 0
+	} else if body.TTLSeconds != nil {
+		if *body.TTLSeconds < 0 {
+			writeError(w, http.StatusBadRequest, "invalid_ttl", "share TTL cannot be negative", nil)
+			return
+		}
+		ttl = time.Duration(*body.TTLSeconds) * time.Second
+		if ttl > 3650*24*time.Hour {
+			writeError(w, http.StatusBadRequest, "ttl_too_large", "share TTL cannot exceed 10 years", nil)
+			return
+		}
 	}
-	if ttl > 365*24*time.Hour {
-		writeError(w, http.StatusBadRequest, "ttl_too_large", "share TTL cannot exceed 365 days", nil)
-		return
-	}
+
 	if existingToken := strings.TrimSpace(body.ExistingToken); existingToken != "" {
 		if existing, resolveErr := s.shareService.Resolve(existingToken); resolveErr == nil && existing.TripID == record.ID {
-			shareURL := "/s/" + existingToken
-			if baseURL := s.shareBaseURL(r); baseURL != "" {
-				shareURL = baseURL + shareURL
+			reusable := false
+			if body.Permanent == nil && body.TTLSeconds == nil {
+				reusable = true
+			} else if isPermanent && existing.ExpiresAt.IsZero() {
+				reusable = true
 			}
-			writeJSON(w, http.StatusOK, map[string]any{"id": existing.ID, "trip_id": record.ID, "revision": record.Revision, "expires_at": existing.ExpiresAt, "url": shareURL, "reused": true})
-			return
+			if reusable {
+				shareURL := "/s/" + existingToken
+				if baseURL := s.shareBaseURL(r); baseURL != "" {
+					shareURL = baseURL + shareURL
+				}
+				var expiresAt any
+				if !existing.ExpiresAt.IsZero() {
+					expiresAt = existing.ExpiresAt
+				}
+				writeJSON(w, http.StatusOK, map[string]any{
+					"id":         existing.ID,
+					"trip_id":    record.ID,
+					"revision":   record.Revision,
+					"expires_at": expiresAt,
+					"permanent":  existing.ExpiresAt.IsZero(),
+					"url":        shareURL,
+					"reused":     true,
+				})
+				return
+			}
 		}
 	}
 	token, shareRecord, err := s.shareService.Create(record.ID, record.Revision, record.ContentHash, record.Document, ttl)
@@ -78,7 +114,18 @@ func (s *Server) createShare(w http.ResponseWriter, r *http.Request) {
 	if baseURL := s.shareBaseURL(r); baseURL != "" {
 		shareURL = baseURL + shareURL
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"id": shareRecord.ID, "trip_id": record.ID, "revision": record.Revision, "expires_at": shareRecord.ExpiresAt, "url": shareURL})
+	var expiresAt any
+	if !shareRecord.ExpiresAt.IsZero() {
+		expiresAt = shareRecord.ExpiresAt
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"id":         shareRecord.ID,
+		"trip_id":    record.ID,
+		"revision":   record.Revision,
+		"expires_at": expiresAt,
+		"permanent":  shareRecord.ExpiresAt.IsZero(),
+		"url":        shareURL,
+	})
 }
 
 func (s *Server) shareBaseURL(r *http.Request) string {

@@ -2148,4 +2148,503 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
     pointer-events: none !important;
   }
 }
+/* ==========================================================================
+   在线分享弹窗与多档有效期设置 (Share Modal & Expiry Options)
+   ========================================================================== */
+.share-modal-panel {
+  width: min(540px, calc(100vw - 32px));
+  padding: 24px;
+}
+
+.share-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.share-modal-header h2 {
+  margin: 2px 0 6px;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.share-modal-subtitle {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.share-modal-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.share-trip-meta-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 60%, var(--md-surface-container-low));
+}
+
+.share-trip-meta-title {
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.share-trip-meta-detail {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* 已激活分享状态卡片 */
+.share-active-box {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--p) 30%, var(--line));
+  background: color-mix(in srgb, var(--p) 4%, var(--surface));
+}
+
+.share-active-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.share-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #10b981;
+}
+
+.share-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 8px #10b981;
+  animation: pulseDot 2s infinite ease-in-out;
+}
+
+@keyframes pulseDot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.2); }
+}
+
+.share-expiry-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--line) 75%, transparent);
+  color: var(--ink);
+}
+
+.share-expiry-pill.permanent,
+.permanent-badge,
+.settings-share-permanent {
+  background: color-mix(in srgb, #10b981 16%, var(--surface)) !important;
+  color: #059669 !important;
+  font-weight: 800 !important;
+  border: 1px solid color-mix(in srgb, #10b981 35%, transparent) !important;
+}
+
+.share-url-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.share-url-field {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 40px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+  font-family: monospace;
+}
+
+.share-copy-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 40px;
+  min-width: 78px;
+  padding: 0 16px;
+  border-radius: 10px;
+  border: 1px solid var(--p);
+  background: var(--p);
+  color: var(--md-on-primary, #ffffff);
+  font-size: 12.5px;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--p) 25%, transparent);
+  transition: all 0.16s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.share-copy-btn:hover {
+  background: color-mix(in srgb, var(--p) 86%, #000);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--p) 38%, transparent);
+  transform: translateY(-1px);
+}
+
+.share-copy-btn:active {
+  transform: translateY(0);
+}
+
+.share-copy-btn.copied {
+  background: #10b981;
+  border-color: #10b981;
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.35);
+}
+
+.share-copy-inline-hint {
+  margin: -6px 0 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: #10b981;
+}
+
+.share-action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.share-ext-link,
+.share-sec-btn,
+.share-danger-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.16s ease;
+}
+
+.share-ext-link,
+.share-sec-btn {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.share-ext-link:hover,
+.share-sec-btn:hover {
+  border-color: var(--p);
+  color: var(--p);
+}
+
+.share-danger-btn {
+  border: 1px solid color-mix(in srgb, #ef4444 30%, transparent);
+  background: color-mix(in srgb, #ef4444 8%, transparent);
+  color: #ef4444;
+}
+
+.share-danger-btn:hover {
+  background: color-mix(in srgb, #ef4444 16%, transparent);
+  border-color: #ef4444;
+}
+
+/* 重新配置有效期折叠面板 */
+.share-change-expiry-details {
+  border-top: 1px dashed color-mix(in srgb, var(--line) 80%, transparent);
+  padding-top: 10px;
+  margin-top: 4px;
+}
+
+.share-change-expiry-details summary {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--p);
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+  padding: 4px 0;
+}
+
+.share-change-expiry-details summary:hover {
+  opacity: 0.85;
+}
+
+.share-reconfig-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 10px;
+}
+
+.share-reconfig-hint {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.share-reconfig-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.share-reconfig-submit-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 18px;
+  border-radius: 11px;
+  border: 1px solid var(--p);
+  background: var(--p);
+  color: var(--md-on-primary, #ffffff);
+  font-size: 12.5px;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--p) 25%, transparent);
+  transition: all 0.16s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.share-reconfig-submit-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--p) 86%, #000);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--p) 35%, transparent);
+  transform: translateY(-1px);
+}
+
+.share-reconfig-submit-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.share-reconfig-submit-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* 有效期卡片网格选择器 */
+.share-section-title {
+  display: block;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--ink);
+  margin-bottom: 8px;
+}
+
+.share-expiry-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.share-expiry-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: 58px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1.5px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 60%, var(--md-surface-container-low));
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.16s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.share-expiry-card strong {
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.share-expiry-card small {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.share-expiry-card:hover {
+  border-color: color-mix(in srgb, var(--p) 60%, var(--line));
+  transform: translateY(-1px);
+}
+
+.share-expiry-card.selected {
+  border-color: var(--p);
+  background: color-mix(in srgb, var(--p) 12%, var(--surface));
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--p) 20%, transparent);
+}
+
+.share-expiry-card.selected strong {
+  color: var(--p);
+}
+
+.share-expiry-card.permanent-card.selected {
+  border-color: #059669;
+  background: color-mix(in srgb, #10b981 12%, var(--surface));
+  box-shadow: 0 3px 10px color-mix(in srgb, #10b981 22%, transparent);
+}
+
+.share-expiry-card.permanent-card.selected strong {
+  color: #059669;
+}
+
+/* 自定义天数输入行 */
+.share-custom-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 11px;
+  background: var(--md-surface-container-low);
+  border: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.share-custom-row label {
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0 !important;
+}
+
+.share-custom-row input {
+  width: 80px !important;
+  min-height: 34px !important;
+  padding: 4px 8px !important;
+  border-radius: 8px !important;
+  border: 1px solid var(--line) !important;
+  background: var(--surface) !important;
+  color: var(--ink) !important;
+  text-align: center;
+  font-weight: 800;
+  font-size: 13px !important;
+}
+
+.share-custom-row span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.share-privacy-note {
+  padding: 10px 13px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--p) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--p) 18%, transparent);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.share-privacy-note strong {
+  color: var(--ink);
+}
+
+.share-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.share-cancel-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 11px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+
+.share-cancel-btn:hover {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+.share-submit-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 20px;
+  border-radius: 11px;
+  border: 1px solid var(--p);
+  background: var(--p);
+  color: var(--md-on-primary, #ffffff);
+  font-size: 12.5px;
+  font-weight: 800;
+  cursor: pointer;
+  user-select: none;
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--p) 25%, transparent);
+  transition: all 0.16s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.share-submit-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--p) 86%, #000);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--p) 35%, transparent);
+  transform: translateY(-1px);
+}
+
+.share-submit-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+@media (max-width: 520px) {
+  .share-expiry-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .share-reconfig-submit-btn,
+  .share-modal-footer .share-submit-btn,
+  .share-modal-footer .share-cancel-btn {
+    flex: 1;
+  }
+}
+
 
