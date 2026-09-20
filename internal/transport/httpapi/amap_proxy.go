@@ -28,7 +28,7 @@ func (s *Server) amapServiceProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := strings.TrimPrefix(r.URL.Path, amapProxyPrefix)
-	if path == "" || strings.Contains(path, "..") || (!strings.HasPrefix(path, "/v3/") && !strings.HasPrefix(path, "/v4/") && !strings.HasPrefix(path, "/v5/")) {
+	if path == "" || strings.Contains(path, "..") || (!strings.HasPrefix(path, "/v3/") && !strings.HasPrefix(path, "/v4/") && !strings.HasPrefix(path, "/v5/") && !strings.HasPrefix(path, "/theme/")) {
 		writeError(w, http.StatusNotFound, "amap_service_not_allowed", "AMap service path is not allowed", nil)
 		return
 	}
@@ -39,9 +39,11 @@ func (s *Server) amapServiceProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	query.Del("jscode")
-	query.Set("jscode", securityCode)
+	if !strings.HasPrefix(path, "/theme/") {
+		query.Set("jscode", securityCode)
+	}
 	targetHost := "restapi.amap.com"
-	if strings.HasPrefix(path, "/v4/map/styles") {
+	if strings.HasPrefix(path, "/v4/map/styles") || strings.HasPrefix(path, "/theme/") {
 		targetHost = "webapi.amap.com"
 	}
 	target := &url.URL{Scheme: "https", Host: targetHost, Path: path, RawQuery: query.Encode()}

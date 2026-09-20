@@ -2303,6 +2303,34 @@ function safeMapError(cause: unknown, fallback: string) { const message = cause 
 function amapPointToArray(point: Coord) { return [point.lng, point.lat] }
 function addAMapOverlay(overlay: any) { mapInstance?.add?.(overlay); mapOverlays.push(overlay); return overlay }
 function clearAMapOverlays() { mapInstance?.clearMap?.(); mapOverlays = []; currentStopMarkers = []; atlasStopMarkers = []; atlasTripLabels = [] }
+function renderStopPinHTML(sequence: number | string, isTarget: boolean, isCarryOver: boolean): string {
+  const bg = isTarget ? '#ff4d4f' : isCarryOver ? '#0284c7' : '#e11d48'
+  const text = isCarryOver ? '‹' : String(sequence)
+  const strokePath = isTarget
+    ? '<path d="M11 1C5.48 1 1 5.48 1 11C1 18.6 11 28.5 11 28.5C11 28.5 21 18.6 21 11C21 5.48 16.52 1 11 1Z" stroke="#ffe58f" stroke-width="1.2"/>'
+    : ''
+  const targetClass = isTarget ? ' is-target' : isCarryOver ? ' is-carry-over' : ''
+  return '<div class="journey-stop-pin' + targetClass + '">' +
+    '<svg width="20" height="27" viewBox="0 0 22 30" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+    '<path d="M11 0C4.925 0 0 4.925 0 11C0 19.25 11 30 11 30C11 30 22 19.25 22 11C22 4.925 17.075 0 11 0Z" fill="' + bg + '"/>' +
+    strokePath +
+    '<text x="11" y="14.5" text-anchor="middle" fill="#ffffff" font-size="10.5" font-weight="900" font-family="-apple-system, sans-serif">' + text + '</text>' +
+    '</svg>' +
+    '</div>'
+}
+
+function renderSubStopPinHTML(sequence: number | string, isTarget: boolean): string {
+  const bg = isTarget ? '#ff4d4f' : '#0e7490'
+  const targetClass = isTarget ? ' is-target' : ''
+  const strokePath = isTarget ? ' stroke="#ffe58f" stroke-width="1.2"' : ''
+  return '<div class="journey-stop-pin is-sub-stop' + targetClass + '">' +
+    '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+    '<circle cx="9" cy="9" r="8.5" fill="' + bg + '"' + strokePath + '/>' +
+    '<text x="9" y="12.5" text-anchor="middle" fill="#ffffff" font-size="9.5" font-weight="800" font-family="-apple-system, sans-serif">' + sequence + '</text>' +
+    '</svg>' +
+    '</div>'
+}
+
 function attachAMapLabel(marker: any, title: string, dayBadge = '', isTarget = false, shouldShow = true) {
   if (typeof marker.setLabel !== 'function') return
   if (!shouldShow) {
@@ -2315,7 +2343,7 @@ function attachAMapLabel(marker: any, title: string, dayBadge = '', isTarget = f
 
   // 智能自适应展开方向：若图钉位于视口右侧边缘附近，自动改为向左展开
   let direction: 'right' | 'left' = 'right'
-  let offset = new mapAPI.Pixel(12, -6)
+  let offset = new mapAPI.Pixel(14, -8)
   try {
     const pos = marker.getPosition?.()
     if (pos && mapInstance?.lngLatToContainer) {
@@ -2326,7 +2354,7 @@ function attachAMapLabel(marker: any, title: string, dayBadge = '', isTarget = f
       const rightLimit = rect ? rect.right : containerW
       if (typeof px === 'number' && px > rightLimit - 180) {
         direction = 'left'
-        offset = new mapAPI.Pixel(-12, -6)
+        offset = new mapAPI.Pixel(-14, -8)
       }
     }
   } catch {}
@@ -2584,9 +2612,15 @@ async function renderAMapMap(preserveView = false) {
       if (!point) continue
       const mapPoint = amapPointToArray(point)
       points.push(mapPoint)
-      const marker = addAMapOverlay(new mapAPI.Marker({ position: mapPoint, title: stop.title, anchor: 'bottom-center' }))
       const carryOver = carryOverStop.value?.id === stop.id && selectedDay.value !== 'all'
       const isTarget = selectedTarget.value?.id === stop.id
+      const marker = addAMapOverlay(new mapAPI.Marker({
+        position: mapPoint,
+        title: carryOver ? '前日终点 · ' + stop.title : stop.title,
+        content: renderStopPinHTML(stop.sequence, isTarget, carryOver),
+        offset: new mapAPI.Pixel(-10, -27),
+        zIndex: isTarget ? 150 : 100
+      }))
       marker.__journeyinStopId = stop.id
       marker.__journeyinCarryOver = carryOver
       marker.__journeyinStop = stop
@@ -2613,8 +2647,14 @@ async function renderAMapMap(preserveView = false) {
         const point = pointForProvider(child, 'amap')
         if (!point) continue
         const mapPoint = amapPointToArray(point)
-        const marker = addAMapOverlay(new mapAPI.Marker({ position: mapPoint, title: child.title, anchor: 'bottom-center' }))
         const isChildTarget = selectedTarget.value?.id === child.id
+        const marker = addAMapOverlay(new mapAPI.Marker({
+          position: mapPoint,
+          title: child.title,
+          content: renderSubStopPinHTML(child.sequence, isChildTarget),
+          offset: new mapAPI.Pixel(-9, -9),
+          zIndex: isChildTarget ? 150 : 90
+        }))
         marker.__journeyinSubStopId = child.id
         marker.__journeyinStop = child
         marker.__journeyinTitle = child.title
@@ -3730,6 +3770,17 @@ function updateStopLabelsVisibility() {
     const title = marker.__journeyinTitle || ''
     const badge = marker.__journeyinBadge || ''
     if (isAMap) {
+      if (typeof marker.setContent === 'function') {
+        const isCarryOver = Boolean(marker.__journeyinCarryOver)
+        const seq = marker.__journeyinStop?.sequence ?? ''
+        const pinHTML = isSubStop
+          ? renderSubStopPinHTML(seq, isTarget)
+          : renderStopPinHTML(seq, isTarget, isCarryOver)
+        marker.setContent(pinHTML)
+        if (typeof marker.setzIndex === 'function') {
+          marker.setzIndex(isTarget ? 150 : isSubStop ? 90 : 100)
+        }
+      }
       attachAMapLabel(marker, title, badge, isTarget, shouldShow)
     } else {
       attachMapLabel(marker, title, badge, isTarget, shouldShow)

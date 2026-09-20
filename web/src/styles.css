@@ -837,6 +837,26 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .search-result-pin > span { transform: rotate(45deg); }
 .search-result-pin.selected { background: #e56a4d; }
 
+/* 规划点与子规划点专用图钉 (优雅纤细矢量水滴 Pin，红底白字无粗白边，比例修长高对比) */
+.journey-stop-pin {
+  display: inline-flex;
+  filter: drop-shadow(0 2.5px 5px rgba(0, 0, 0, 0.45));
+  cursor: pointer;
+  user-select: none;
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+.journey-stop-pin:hover {
+  transform: scale(1.12);
+}
+.journey-stop-pin.is-target {
+  filter: drop-shadow(0 0 7px rgba(255, 77, 79, 0.85)) drop-shadow(0 3px 8px rgba(0, 0, 0, 0.55));
+  transform: scale(1.15);
+  z-index: 100;
+}
+.journey-stop-pin.is-sub-stop {
+  display: inline-flex;
+}
+
 /* Stop detail is a desktop drawer and the only mobile Sheet when a stop is selected. */
 .stop-detail-panel { position: absolute; z-index: 32; top: 18px; right: 18px; bottom: 18px; display: flex; width: min(420px, calc(100vw - 36px)); flex-direction: column; overflow: hidden; border-radius: 24px; }
 .detail-sheet-handle { display: none; }

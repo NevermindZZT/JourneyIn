@@ -31,6 +31,14 @@ func TestAMapServiceProxyRequiresSecurityCodeAndRestrictsPaths(t *testing.T) {
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("unsupported path proxy status=%d", response.Code)
 	}
+
+	// Theme assets (like default marker icons) should be allowed through to webapi.amap.com
+	request = httptest.NewRequest(http.MethodGet, "/_AMapService/theme/v1.3/markers/n/mark_bs.png?key=public-key", nil)
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code == http.StatusNotFound {
+		t.Fatalf("theme asset path unexpectedly blocked with 404: %d", response.Code)
+	}
 	request = httptest.NewRequest(http.MethodDelete, "/_AMapService/v3/geocode/geo", nil)
 	response = httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
