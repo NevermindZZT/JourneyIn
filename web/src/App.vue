@@ -405,6 +405,7 @@ const mapType = ref<'normal' | 'satellite'>((localStorage.getItem('journeyin.map
 type MapLabelMode = 'auto' | 'always' | 'none'
 const mapLabelMode = ref<MapLabelMode>((localStorage.getItem('journeyin.mapLabelMode') as MapLabelMode) || (localStorage.getItem('journeyin.mapLabels') === 'false' ? 'none' : 'auto'))
 const showMapLabels = computed(() => mapLabelMode.value !== 'none')
+const mapScale = ref<{ width: number; label: string } | null>(null)
 const mapPickMode = ref(false)
 const mapPickOpen = ref(false)
 const mapPickTitle = ref('')
@@ -2200,7 +2201,8 @@ async function renderBaiduMap(preserveView = false) {
       mapInstance.addEventListener?.('click', handleMapClick)
       mapInstance.addEventListener?.('spotclick', handleBaiduSpotClick)
       mapInstance.addEventListener?.('zoomend', handleMapZoomChange)
-      mapInstance.addEventListener?.('tilesloaded', () => { mapReady.value = true; mapError.value = ''; mapWarning.value = '' })
+      mapInstance.addEventListener?.('moveend', updateMapScale)
+      mapInstance.addEventListener?.('tilesloaded', () => { mapReady.value = true; mapError.value = ''; mapWarning.value = ''; updateMapScale(); alignBaiduAttributionElements() })
       if (mapReadyTimer !== null) window.clearTimeout(mapReadyTimer)
       mapReadyTimer = window.setTimeout(() => {
         if (!mapReady.value) mapWarning.value = '百度地图底图加载较慢；请检查浏览器端 AK、' + window.location.hostname + ' 域名白名单和网络连接。地图仍可继续尝试加载。'
@@ -2297,6 +2299,9 @@ function resetMapSDK() {
   if (mapZoomDebounceTimer !== null) { window.clearTimeout(mapZoomDebounceTimer); mapZoomDebounceTimer = null }
   amapSatelliteLayer = null
   mapReady.value = false
+  mapScale.value = null
+  baiduAttributionObserver?.disconnect()
+  baiduAttributionObserver = null
   mapWarning.value = ''
   if (mapReadyTimer !== null) { window.clearTimeout(mapReadyTimer); mapReadyTimer = null }
   if (mapContainer.value) {
@@ -2669,7 +2674,8 @@ async function renderAMapMap(preserveView = false) {
       })
       mapInstance.on?.('hotspotclick', handleAMapHotspotClick)
       mapInstance.on?.('zoomend', handleMapZoomChange)
-      mapInstance.on?.('complete', () => { mapReady.value = true; mapError.value = ''; mapWarning.value = '' })
+      mapInstance.on?.('moveend', updateMapScale)
+      mapInstance.on?.('complete', () => { mapReady.value = true; mapError.value = ''; mapWarning.value = ''; updateMapScale() })
       mapInstance.on?.('error', (err: any) => {
         console.error('AMap runtime error:', err)
         mapError.value = safeMapError(err, '高德地图运行异常')
@@ -3377,8 +3383,9 @@ async function renderAtlasAMap(preserveView = false) {
     if (mapInstance) { try { mapInstance.destroy?.() } catch {} }
     mapReady.value = false
     mapInstance = new mapAPI.Map(mapContainer.value, { viewMode: '2D', zoom: 5, center: [105, 35], resizeEnable: true })
-    mapInstance.on?.('complete', () => { mapReady.value = true; mapError.value = ''; mapWarning.value = '' })
+    mapInstance.on?.('complete', () => { mapReady.value = true; mapError.value = ''; mapWarning.value = ''; updateMapScale() })
     mapInstance.on?.('zoomend', handleMapZoomChange)
+    mapInstance.on?.('moveend', updateMapScale)
     loadedMapKey = ''
   }
   mapInstance.resize?.()
@@ -3537,7 +3544,8 @@ async function renderAtlasBaidu(preserveView = false) {
     mapInstance = new mapAPI.Map(mapContainer.value, { enableIconClick: false, fixCenterWhenResize: true })
     mapInstance.enableScrollWheelZoom()
     mapInstance.addEventListener?.('zoomend', handleMapZoomChange)
-    mapInstance.addEventListener?.('tilesloaded', () => { mapReady.value = true; mapError.value = ''; mapWarning.value = '' })
+    mapInstance.addEventListener?.('moveend', updateMapScale)
+    mapInstance.addEventListener?.('tilesloaded', () => { mapReady.value = true; mapError.value = ''; mapWarning.value = ''; updateMapScale(); alignBaiduAttributionElements() })
   }
   mapInstance.clearOverlays()
   atlasStopMarkers = []
@@ -3671,6 +3679,7 @@ async function renderAtlasBaidu(preserveView = false) {
     }
   }
   applyMapType()
+  observeBaiduAttribution()
 }
 
 function setMapProvider(provider: 'baidu' | 'amap') {
@@ -3864,8 +3873,87 @@ function updateStopLabelsVisibility() {
   }
 }
 
+const SCALE_STEPS = [
+  1, 2, 5, 10, 20, 50, 100, 200, 500,
+  1000, 2000, 5000, 10000, 20000, 50000,
+  100000, 200000, 500000, 1000000, 2000000
+]
+
+function updateMapScale() {
+  if (!mapInstance || !mapAPI) {
+    mapScale.value = null
+    return
+  }
+  try {
+    const zoom = typeof mapInstance.getZoom === 'function' ? Number(mapInstance.getZoom()) : 0
+    if (!(zoom > 0)) {
+      mapScale.value = null
+      return
+    }
+    const center = mapInstance.getCenter?.()
+    const lat = Number(center?.lat ?? center?.getLat?.() ?? 35)
+    if (!Number.isFinite(lat)) {
+      mapScale.value = null
+      return
+    }
+
+    const rad = (lat * Math.PI) / 180
+    const metersPerPx = (156543.03392 * Math.cos(rad)) / Math.pow(2, zoom)
+    if (!(metersPerPx > 0)) {
+      mapScale.value = null
+      return
+    }
+
+    const targetMeters = metersPerPx * 68
+    let bestStep = SCALE_STEPS[0]
+    let minDiff = Infinity
+    for (const step of SCALE_STEPS) {
+      const diff = Math.abs(step - targetMeters)
+      if (diff < minDiff) {
+        minDiff = diff
+        bestStep = step
+      }
+    }
+
+    const width = Math.max(36, Math.min(120, Math.round(bestStep / metersPerPx)))
+    const label = bestStep >= 1000 ? (bestStep / 1000) + ' km' : bestStep + ' m'
+    mapScale.value = { width, label }
+    if (selectedMapProvider.value === 'baidu') {
+      alignBaiduAttributionElements()
+    }
+  } catch {
+    mapScale.value = null
+  }
+}
+
+let baiduAttributionObserver: MutationObserver | null = null
+function alignBaiduAttributionElements() {
+  if (!mapContainer.value) return
+  const anchors = Array.from(mapContainer.value.querySelectorAll<HTMLElement>('.anchorBL, .BMap_cpyCtrl_w'))
+  for (const el of anchors) {
+    if (el.querySelector('img') || el.tagName === 'IMG') {
+      el.classList.add('journeyin-baidu-logo')
+      el.classList.remove('journeyin-baidu-copyright')
+    } else {
+      el.classList.add('journeyin-baidu-copyright')
+      el.classList.remove('journeyin-baidu-logo')
+    }
+  }
+}
+
+function observeBaiduAttribution() {
+  baiduAttributionObserver?.disconnect()
+  if (!mapContainer.value) return
+  alignBaiduAttributionElements()
+  baiduAttributionObserver = new MutationObserver(() => {
+    alignBaiduAttributionElements()
+  })
+  baiduAttributionObserver.observe(mapContainer.value, { childList: true, subtree: true })
+}
+
 let mapZoomDebounceTimer: number | null = null
 function handleMapZoomChange() {
+  updateMapScale()
   if (tripView.value === 'atlas') {
     if (mapZoomDebounceTimer !== null) window.clearTimeout(mapZoomDebounceTimer)
     mapZoomDebounceTimer = window.setTimeout(() => {
@@ -5075,9 +5163,24 @@ onUnmounted(() => {
           </section>
 
           <!-- 足迹漫游 (Atlas) 汇总全景视图 -->
-          <section v-else-if="tripView === 'atlas'" class="journey-workspace atlas-workspace" aria-label="足迹漫游工作区">
+          <section
+            v-else-if="tripView === 'atlas'"
+            class="journey-workspace atlas-workspace"
+            :class="'sheet-' + sheetBreakpoint"
+            :style="{
+              '--scale-width': (mapScale?.width ?? 50) + 'px',
+              '--map-logo-width': selectedMapProvider === 'amap' ? '92px' : '76px'
+            }"
+            aria-label="足迹漫游工作区"
+          >
             <div class="map-canvas redesign-map-canvas">
               <div v-if="keyConfigured && !mapError" :key="selectedMapProvider + '_atlas'" ref="mapContainer" id="map"></div>
+
+              <!-- 跨 Provider 比例尺胶囊 -->
+              <div v-if="mapReady && mapScale" class="journey-map-scale-chip" :class="['map-type-' + mapType]" aria-label="地图比例尺">
+                <span class="scale-bar-line" :style="{ width: mapScale.width + 'px' }"></span>
+                <span class="scale-bar-label">{{ mapScale.label }}</span>
+              </div>
 
               <!-- 足迹漫游微动效加载层 -->
               <MapLoadingState
@@ -5301,9 +5404,24 @@ onUnmounted(() => {
             </div>
           </section>
 
-          <section v-else class="journey-workspace" aria-label="地图工作区">
+          <section
+            v-else
+            class="journey-workspace"
+            :class="'sheet-' + sheetBreakpoint"
+            :style="{
+              '--scale-width': (mapScale?.width ?? 50) + 'px',
+              '--map-logo-width': selectedMapProvider === 'amap' ? '92px' : '76px'
+            }"
+            aria-label="地图工作区"
+          >
             <div class="map-canvas redesign-map-canvas" :class="{ 'map-pick-active': mapPickMode }">
               <div v-if="keyConfigured && tripDocument && !mapError" :key="selectedMapProvider" ref="mapContainer" id="map"></div>
+
+              <!-- 跨 Provider 比例尺胶囊 -->
+              <div v-if="mapReady && mapScale" class="journey-map-scale-chip" :class="['map-type-' + mapType]" aria-label="地图比例尺">
+                <span class="scale-bar-line" :style="{ width: mapScale.width + 'px' }"></span>
+                <span class="scale-bar-label">{{ mapScale.label }}</span>
+              </div>
 
               <!-- 全新旅行微动效加载层 -->
               <MapLoadingState

@@ -1966,3 +1966,186 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
   }
 }
 
+/* 地图审图号与官方 Logo 合规单行横向排布 (Logo -> 比例尺 -> 审图号) */
+#map .amap-logo,
+#map .amap-copyright,
+#map .journeyin-baidu-logo,
+#map .journeyin-baidu-copyright,
+#map .anchorBL {
+  z-index: 15 !important;
+  pointer-events: auto !important;
+  transition: bottom 0.2s ease, left 0.2s ease, opacity 0.2s ease !important;
+}
+
+/* 审图号调到最小字号并淡化显示，紧随比例尺之后单行展示 */
+#map .amap-copyright,
+#map .journeyin-baidu-copyright,
+#map .anchorBL:not(:has(img)),
+#map .BMap_cpyCtrl_w {
+  display: inline-block !important;
+  white-space: nowrap !important;
+  line-height: 18px !important;
+  font-size: 8px !important;
+  opacity: 0.62 !important;
+  transform: scale(0.82) !important;
+  transform-origin: left center !important;
+  max-width: calc(100vw - 180px) !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+/* 百度 Logo 图片对齐基准线 */
+#map .journeyin-baidu-logo img,
+#map .anchorBL:has(img) img {
+  vertical-align: bottom !important;
+}
+
+/* 比例尺：单行排布在 Logo 后面，高度 18px 与 Logo 同基线对齐 */
+.journey-map-scale-chip {
+  position: absolute;
+  z-index: 18;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 0;
+  height: 18px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  user-select: none;
+  pointer-events: none;
+  transition: bottom 0.2s ease, left 0.2s ease, opacity 0.2s ease;
+}
+
+/* 默认 / 标准图（浅色背景）：深炭黑标尺线与文字，附带纯白发光描边 */
+.journey-map-scale-chip .scale-bar-line {
+  display: block;
+  height: 4px;
+  border: 1.8px solid #222b38;
+  border-top: 0;
+  border-radius: 0 0 1px 1px;
+  filter: drop-shadow(0 0 1px #ffffff) drop-shadow(0 0 2px #ffffff);
+}
+
+.journey-map-scale-chip .scale-bar-label {
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+  color: #1e293b;
+  letter-spacing: -0.01em;
+  text-shadow:
+    0 0 2px #ffffff,
+    0 0 3px #ffffff,
+    0 1px 2px #ffffff,
+    -1px 0 1px #ffffff,
+    1px 0 1px #ffffff;
+}
+
+/* 卫星图（深色地貌）：纯白标尺线与文字，附带深黑描边 */
+.journey-map-scale-chip.map-type-satellite .scale-bar-line {
+  border-color: #ffffff;
+  filter: drop-shadow(0 0 1px #000000) drop-shadow(0 1px 2px #000000);
+}
+
+.journey-map-scale-chip.map-type-satellite .scale-bar-label {
+  color: #ffffff;
+  text-shadow:
+    0 0 2px #000000,
+    0 0 3px #000000,
+    0 1px 2px #000000,
+    -1px 0 1px #000000,
+    1px 0 1px #000000;
+}
+
+@media (min-width: 901px) {
+  /* 桌面端大屏幕：避开左侧 392px 卡片，单行排布 [Logo] -> [比例尺] -> [审图号] */
+  #map .amap-logo,
+  #map .journeyin-baidu-logo,
+  #map .anchorBL:has(img) {
+    left: min(416px, 36vw) !important;
+    bottom: 12px !important;
+  }
+
+  .journey-map-scale-chip {
+    left: calc(min(416px, 36vw) + var(--map-logo-width, 94px) + 8px);
+    bottom: 12px;
+  }
+
+  #map .amap-copyright,
+  #map .journeyin-baidu-copyright,
+  #map .anchorBL:not(:has(img)),
+  #map .BMap_cpyCtrl_w {
+    left: calc(min(416px, 36vw) + var(--map-logo-width, 94px) + 8px + var(--scale-width, 50px) + 8px) !important;
+    bottom: 12px !important;
+  }
+}
+
+@media (max-width: 900px) {
+  /* 移动端默认 (sheet-half)：单行避让底部 53% 半屏卡片 [Logo] -> [比例尺] -> [审图号] */
+  #map .amap-logo,
+  #map .journeyin-baidu-logo,
+  #map .anchorBL:has(img) {
+    left: 10px !important;
+    bottom: calc(53% + 10px) !important;
+  }
+
+  .journey-map-scale-chip {
+    left: calc(10px + var(--map-logo-width, 94px) + 8px);
+    bottom: calc(53% + 10px);
+  }
+
+  #map .amap-copyright,
+  #map .journeyin-baidu-copyright,
+  #map .anchorBL:not(:has(img)),
+  #map .BMap_cpyCtrl_w {
+    left: calc(10px + var(--map-logo-width, 94px) + 8px + var(--scale-width, 50px) + 8px) !important;
+    bottom: calc(53% + 10px) !important;
+  }
+
+  /* 抽屉收起 (sheet-peek) 时，整行随卡片降落至卡片上方 */
+  .journey-workspace.sheet-peek #map .amap-logo,
+  .journey-workspace.sheet-peek #map .journeyin-baidu-logo,
+  .journey-workspace.sheet-peek #map .anchorBL:has(img) {
+    bottom: calc(154px + 10px) !important;
+  }
+  .journey-workspace.sheet-peek .journey-map-scale-chip {
+    bottom: calc(154px + 10px);
+  }
+  .journey-workspace.sheet-peek #map .amap-copyright,
+  .journey-workspace.sheet-peek #map .journeyin-baidu-copyright,
+  .journey-workspace.sheet-peek #map .anchorBL:not(:has(img)),
+  .journey-workspace.sheet-peek #map .BMap_cpyCtrl_w {
+    bottom: calc(154px + 10px) !important;
+  }
+
+  .atlas-workspace.sheet-peek #map .amap-logo,
+  .atlas-workspace.sheet-peek #map .journeyin-baidu-logo,
+  .atlas-workspace.sheet-peek #map .anchorBL:has(img) {
+    bottom: calc(74px + 10px) !important;
+  }
+  .atlas-workspace.sheet-peek .journey-map-scale-chip {
+    bottom: calc(74px + 10px);
+  }
+  .atlas-workspace.sheet-peek #map .amap-copyright,
+  .atlas-workspace.sheet-peek #map .journeyin-baidu-copyright,
+  .atlas-workspace.sheet-peek #map .anchorBL:not(:has(img)),
+  .atlas-workspace.sheet-peek #map .BMap_cpyCtrl_w {
+    bottom: calc(74px + 10px) !important;
+  }
+
+  /* 抽屉展开至 expanded 全屏时整行渐隐 */
+  .journey-workspace.sheet-expanded #map .amap-logo,
+  .journey-workspace.sheet-expanded #map .amap-copyright,
+  .journey-workspace.sheet-expanded #map .journeyin-baidu-logo,
+  .journey-workspace.sheet-expanded #map .journeyin-baidu-copyright,
+  .journey-workspace.sheet-expanded #map .anchorBL,
+  .journey-workspace.sheet-expanded .journey-map-scale-chip {
+    opacity: 0 !important;
+    pointer-events: none !important;
+  }
+}
+
