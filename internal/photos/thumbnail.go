@@ -12,39 +12,58 @@ import (
 	"path/filepath"
 )
 
-// GenerateThumbnail 将源图像裁剪居中正方形并缩放到 size*size，以 JPEG 格式保存到 destPath
+// GenerateThumbnail 将源图像裁剪居中正方形并缩放到 size*size，以 JPEG 格式保存到 destPath。
+// 缩略图仅用于地图图钉和小尺寸列表，不应用于照片预览。
 func GenerateThumbnail(srcPath, destPath string, size int) error {
 	if size <= 0 {
 		size = 120
 	}
+	src, err := decodeImage(srcPath)
+	if err != nil {
+		return err
+	}
+	return writeJPEG(destPath, createSquareThumbnail(src, size), 82)
+}
+
+// GeneratePreview 按原始比例缩放图片，限制长边为 maxEdge，不裁切且不放大原图。
+// 预览图用于 Lightbox，避免浏览器在普通浏览时下载与解码原始大图。
+func GeneratePreview(srcPath, destPath string, maxEdge int) error {
+	if maxEdge <= 0 {
+		maxEdge = 1600
+	}
+	src, err := decodeImage(srcPath)
+	if err != nil {
+		return err
+	}
+	return writeJPEG(destPath, createAspectPreview(src, maxEdge), 84)
+}
+
+func decodeImage(srcPath string) (image.Image, error) {
 	f, err := os.Open(srcPath)
 	if err != nil {
-		return fmt.Errorf("open src image: %w", err)
+		return nil, fmt.Errorf("open src image: %w", err)
 	}
 	defer f.Close()
 
 	src, _, err := image.Decode(f)
 	if err != nil {
-		return fmt.Errorf("decode src image: %w", err)
+		return nil, fmt.Errorf("decode src image: %w", err)
 	}
+	return src, nil
+}
 
-	thumb := createSquareThumbnail(src, size)
-
+func writeJPEG(destPath string, img image.Image, quality int) error {
 	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
 		return fmt.Errorf("mkdir cache dir: %w", err)
 	}
-
 	out, err := os.Create(destPath)
 	if err != nil {
-		return fmt.Errorf("create dest thumbnail: %w", err)
+		return fmt.Errorf("create destination image: %w", err)
 	}
 	defer out.Close()
-
-	// 采用标准 JPEG 编码，质量 82 (体积小、清晰度高)
-	if err := jpeg.Encode(out, thumb, &jpeg.Options{Quality: 82}); err != nil {
-		return fmt.Errorf("encode thumbnail: %w", err)
+	if err := jpeg.Encode(out, img, &jpeg.Options{Quality: quality}); err != nil {
+		return fmt.Errorf("encode jpeg: %w", err)
 	}
-
 	return nil
 }
 
@@ -55,46 +74,70 @@ func createSquareThumbnail(src image.Image, size int) *image.RGBA {
 		return image.NewRGBA(image.Rect(0, 0, size, size))
 	}
 
-	// 1. 确定居中裁剪的正方形区域
+	// 确定居中裁剪的正方形区域。
 	side := w
 	if h < side {
 		side = h
 	}
 	startX := bounds.Min.X + (w-side)/2
 	startY := bounds.Min.Y + (h-side)/2
+	return resizeImage(src, image.Rect(startX, startY, startX+side, startY+side), size, size)
+}
 
-	dst := image.NewRGBA(image.Rect(0, 0, size, size))
+func createAspectPreview(src image.Image, maxEdge int) *image.RGBA {
+	bounds := src.Bounds()
+	w, h := bounds.Dx(), bounds.Dy()
+	if w <= 0 || h <= 0 {
+		return image.NewRGBA(image.Rect(0, 0, 1, 1))
+	}
 
-	// 2. 双线性插值缩放至 size x size
-	scale := float64(side) / float64(size)
-	for dy := 0; dy < size; dy++ {
-		sy := float64(startY) + (float64(dy)+0.5)*scale - 0.5
-		if sy < float64(bounds.Min.Y) {
-			sy = float64(bounds.Min.Y)
+	previewW, previewH := w, h
+	if w > maxEdge || h > maxEdge {
+		if w >= h {
+			previewW = maxEdge
+			previewH = max(1, (h*maxEdge+w/2)/w)
+		} else {
+			previewH = maxEdge
+			previewW = max(1, (w*maxEdge+h/2)/h)
 		}
-		if sy > float64(bounds.Max.Y-1) {
-			sy = float64(bounds.Max.Y - 1)
+	}
+	return resizeImage(src, bounds, previewW, previewH)
+}
+
+// resizeImage 对 source 区域做双线性插值缩放。
+func resizeImage(src image.Image, source image.Rectangle, width, height int) *image.RGBA {
+	if width <= 0 || height <= 0 || source.Dx() <= 0 || source.Dy() <= 0 {
+		return image.NewRGBA(image.Rect(0, 0, max(1, width), max(1, height)))
+	}
+
+	dst := image.NewRGBA(image.Rect(0, 0, width, height))
+	scaleX := float64(source.Dx()) / float64(width)
+	scaleY := float64(source.Dy()) / float64(height)
+	maxX := source.Max.X - 1
+	maxY := source.Max.Y - 1
+
+	for dy := 0; dy < height; dy++ {
+		sy := float64(source.Min.Y) + (float64(dy)+0.5)*scaleY - 0.5
+		if sy < float64(source.Min.Y) {
+			sy = float64(source.Min.Y)
+		}
+		if sy > float64(maxY) {
+			sy = float64(maxY)
 		}
 		y0 := int(sy)
-		y1 := y0 + 1
-		if y1 >= bounds.Max.Y {
-			y1 = bounds.Max.Y - 1
-		}
+		y1 := min(y0+1, maxY)
 		fy := sy - float64(y0)
 
-		for dx := 0; dx < size; dx++ {
-			sx := float64(startX) + (float64(dx)+0.5)*scale - 0.5
-			if sx < float64(bounds.Min.X) {
-				sx = float64(bounds.Min.X)
+		for dx := 0; dx < width; dx++ {
+			sx := float64(source.Min.X) + (float64(dx)+0.5)*scaleX - 0.5
+			if sx < float64(source.Min.X) {
+				sx = float64(source.Min.X)
 			}
-			if sx > float64(bounds.Max.X-1) {
-				sx = float64(bounds.Max.X - 1)
+			if sx > float64(maxX) {
+				sx = float64(maxX)
 			}
 			x0 := int(sx)
-			x1 := x0 + 1
-			if x1 >= bounds.Max.X {
-				x1 = bounds.Max.X - 1
-			}
+			x1 := min(x0+1, maxX)
 			fx := sx - float64(x0)
 
 			c00 := src.At(x0, y0)
@@ -111,7 +154,6 @@ func createSquareThumbnail(src image.Image, size int) *image.RGBA {
 			gTop := float64(g00)*(1-fx) + float64(g10)*fx
 			bTop := float64(b00)*(1-fx) + float64(b10)*fx
 			aTop := float64(a00)*(1-fx) + float64(a10)*fx
-
 			rBottom := float64(r01)*(1-fx) + float64(r11)*fx
 			gBottom := float64(g01)*(1-fx) + float64(g11)*fx
 			bBottom := float64(b01)*(1-fx) + float64(b11)*fx
@@ -121,17 +163,14 @@ func createSquareThumbnail(src image.Image, size int) *image.RGBA {
 			g := uint8((gTop*(1-fy) + gBottom*fy) / 257)
 			b := uint8((bTop*(1-fy) + bBottom*fy) / 257)
 			a := uint8((aTop*(1-fy) + aBottom*fy) / 257)
-
 			dst.SetRGBA(dx, dy, color.RGBA{R: r, G: g, B: b, A: a})
 		}
 	}
-
 	return dst
 }
 
-// FallbackThumbnailBytes 生成带相机图标风格的轻量通用占位图
+// FallbackThumbnailBytes 生成轻量通用占位图。
 func FallbackThumbnailBytes() []byte {
-	// 简单的 1x1 灰色像素 fallback
 	var buf bytes.Buffer
 	img := image.NewRGBA(image.Rect(0, 0, 48, 48))
 	for y := 0; y < 48; y++ {

@@ -1818,6 +1818,12 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
+.photo-lightbox-loading small {
+  color: #cbd5e1;
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
 .photo-lightbox-error {
   position: absolute;
   z-index: 15;
@@ -1858,6 +1864,38 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .photo-lightbox-footer span {
   opacity: 0.85;
   white-space: nowrap;
+}
+.photo-lightbox-footer-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+  flex-shrink: 0;
+}
+.photo-lightbox-original-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(148, 163, 184, 0.48);
+  border-radius: 8px;
+  color: #e2e8f0;
+  background: rgba(148, 163, 184, 0.12);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+.photo-lightbox-original-link:hover {
+  border-color: #38bdf8;
+  background: rgba(56, 189, 248, 0.16);
+  color: #f8fafc;
 }
 .photo-lightbox-title-wrap {
   display: flex;
@@ -1961,8 +1999,16 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
     padding: 10px 14px;
     flex-direction: column;
     align-items: flex-start;
-    gap: 4px;
+    gap: 7px;
     font-size: 11px;
+  }
+  .photo-lightbox-footer-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .photo-lightbox-original-link {
+    min-height: 34px;
+    padding-inline: 12px;
   }
 }
 

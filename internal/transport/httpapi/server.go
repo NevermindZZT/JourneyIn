@@ -15,8 +15,8 @@ import (
 	"journeyin/internal/application"
 	"journeyin/internal/domain"
 	journeymaps "journeyin/internal/maps"
-	journeyshare "journeyin/internal/share"
 	"journeyin/internal/photos"
+	journeyshare "journeyin/internal/share"
 	"journeyin/internal/store"
 	"journeyin/internal/weather"
 )
@@ -80,7 +80,7 @@ func (s *Server) SetSyncStore(syncStore *store.Store)         { s.syncStore = sy
 func (s *Server) SetSettingsStore(settingsStore *store.Store) { s.settingsStore = settingsStore }
 func (s *Server) SetAuthenticator(auth *Authenticator)        { s.auth = auth }
 func (s *Server) SetPhotoService(service *photos.Service)     { s.photosService = service }
-func (s *Server) SetWeatherService(service *weather.Service) { s.weatherService = service }
+func (s *Server) SetWeatherService(service *weather.Service)  { s.weatherService = service }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -96,6 +96,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/photos/sync", s.syncPhotos)
 	mux.HandleFunc("GET /api/v1/photos/atlas", s.getAtlasPhotos)
 	mux.HandleFunc("GET /api/v1/photos/{id}/thumbnail", s.getPhotoThumbnail)
+	mux.HandleFunc("GET /api/v1/photos/{id}/preview", s.getPhotoPreview)
 	mux.HandleFunc("GET /api/v1/photos/{id}/file", s.getPhotoFile)
 	mux.HandleFunc("POST /api/v1/trips", s.createTrip)
 	mux.HandleFunc("POST /api/v1/import", s.importTrip)
@@ -377,7 +378,7 @@ func (s *Server) staticHandler() http.Handler {
 func tripSummary(r store.TripRecord) map[string]any {
 	var document struct {
 		ShowInAtlas *bool `json:"show_in_atlas"`
-		Days []struct {
+		Days        []struct {
 			Stops []any `json:"stops"`
 		} `json:"days"`
 	}

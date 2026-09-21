@@ -17,12 +17,12 @@ import (
 	journeyin "journeyin"
 	"journeyin/internal/application"
 	journeymaps "journeyin/internal/maps"
-	journeyshare "journeyin/internal/share"
 	"journeyin/internal/photos"
+	journeyshare "journeyin/internal/share"
 	"journeyin/internal/store"
 	"journeyin/internal/transport/httpapi"
-	"journeyin/internal/weather"
 	mcptransport "journeyin/internal/transport/mcp"
+	"journeyin/internal/weather"
 )
 
 var version = journeyin.Version
@@ -102,7 +102,7 @@ func main() {
 	photosDir := settingValue(ctx, database, "photos.root_dir", os.Getenv("JOURNEYIN_PHOTOS_DIR"))
 	cacheDir := ""
 	if dataPath != ":memory:" {
-		cacheDir = filepath.Join(filepath.Dir(dataPath), "cache", "thumbnails")
+		cacheDir = filepath.Join(filepath.Dir(dataPath), "cache", "photos")
 	}
 	photosSvc := photos.NewService(database.DB(), photosDir, cacheDir, logger)
 	if photosSvc.IsEnabled() {

@@ -52,3 +52,52 @@ func TestGenerateThumbnail(t *testing.T) {
 		t.Fatalf("expected 120x120, got %dx%d", bounds.Dx(), bounds.Dy())
 	}
 }
+
+func TestGeneratePreviewPreservesAspectRatioAndDoesNotUpscale(t *testing.T) {
+	tempDir := t.TempDir()
+	widePath := filepath.Join(tempDir, "wide.png")
+	widePreviewPath := filepath.Join(tempDir, "wide-preview.jpg")
+	smallPath := filepath.Join(tempDir, "small.png")
+	smallPreviewPath := filepath.Join(tempDir, "small-preview.jpg")
+
+	writePNG := func(path string, width, height int) {
+		t.Helper()
+		file, err := os.Create(path)
+		if err != nil {
+			t.Fatalf("create %s: %v", path, err)
+		}
+		defer file.Close()
+		if err := png.Encode(file, image.NewRGBA(image.Rect(0, 0, width, height))); err != nil {
+			t.Fatalf("encode %s: %v", path, err)
+		}
+	}
+	decodeBounds := func(path string) image.Rectangle {
+		t.Helper()
+		file, err := os.Open(path)
+		if err != nil {
+			t.Fatalf("open %s: %v", path, err)
+		}
+		defer file.Close()
+		decoded, err := jpeg.Decode(file)
+		if err != nil {
+			t.Fatalf("decode %s: %v", path, err)
+		}
+		return decoded.Bounds()
+	}
+
+	writePNG(widePath, 300, 150)
+	if err := GeneratePreview(widePath, widePreviewPath, 120); err != nil {
+		t.Fatalf("GeneratePreview wide image failed: %v", err)
+	}
+	if bounds := decodeBounds(widePreviewPath); bounds.Dx() != 120 || bounds.Dy() != 60 {
+		t.Fatalf("expected 120x60 aspect preview, got %dx%d", bounds.Dx(), bounds.Dy())
+	}
+
+	writePNG(smallPath, 60, 30)
+	if err := GeneratePreview(smallPath, smallPreviewPath, 120); err != nil {
+		t.Fatalf("GeneratePreview small image failed: %v", err)
+	}
+	if bounds := decodeBounds(smallPreviewPath); bounds.Dx() != 60 || bounds.Dy() != 30 {
+		t.Fatalf("expected small image to remain 60x30, got %dx%d", bounds.Dx(), bounds.Dy())
+	}
+}

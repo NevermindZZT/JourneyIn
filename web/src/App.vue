@@ -233,6 +233,26 @@ interface PhotoAtlasItem {
   lat: number
   lng: number
   thumb_url: string
+  preview_url: string
+  cache_version: number
+}
+
+function photoCacheVersion(photo: PhotoAtlasItem) {
+  return Number.isFinite(photo.cache_version) ? String(photo.cache_version) : '0'
+}
+function photoThumbnailURL(photo: PhotoAtlasItem, size = 120) {
+  const base = photo.thumb_url || '/api/v1/photos/' + encodeURIComponent(photo.id) + '/thumbnail'
+  return base + '?size=' + size + '&v=' + encodeURIComponent(photoCacheVersion(photo))
+}
+function photoPreviewURL(photo: PhotoAtlasItem, maxEdge: 960 | 1600) {
+  const base = photo.preview_url || '/api/v1/photos/' + encodeURIComponent(photo.id) + '/preview'
+  return base + '?max_edge=' + maxEdge + '&v=' + encodeURIComponent(photoCacheVersion(photo))
+}
+function photoOriginalURL(photo: PhotoAtlasItem) {
+  return '/api/v1/photos/' + encodeURIComponent(photo.id) + '/file'
+}
+function photoPreviewCacheKey(photo: PhotoAtlasItem) {
+  return photo.id + ':' + photoCacheVersion(photo)
 }
 
 interface PhotoCluster {
@@ -254,16 +274,25 @@ const previewPhotoList = ref<PhotoAtlasItem[]>([])
 const previewPhotoIndex = ref<number>(-1)
 const previewPhotoLoading = ref<boolean>(false)
 const previewPhotoError = ref<boolean>(false)
+const previewPhotoLoadingElapsedSeconds = ref(0)
+const photoPreviewMaxEdge = ref<960 | 1600>(typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches ? 960 : 1600)
+let previewLoadTimer: number | null = null
+let previewLoadElapsedTimer: number | null = null
 const loadedPhotoMap = ref<Record<string, boolean>>({})
 const previewPhoto = computed(() => {
   if (previewPhotoIndex.value >= 0 && previewPhotoIndex.value < previewPhotoList.value.length) {
     const p = previewPhotoList.value[previewPhotoIndex.value]
+    const previewEdge = photoPreviewMaxEdge.value
+    const cacheKey = photoPreviewCacheKey(p)
     return {
       id: p.id,
       file_name: p.file_name,
       taken_at: p.taken_at,
-      url: '/api/v1/photos/' + p.id + '/file',
-      thumb_url: p.thumb_url
+      cache_key: cacheKey,
+      load_key: cacheKey + ':preview-' + previewEdge,
+      thumbnail_url: photoThumbnailURL(p),
+      preview_url: photoPreviewURL(p, previewEdge),
+      original_url: photoOriginalURL(p),
     }
   }
   return null
@@ -1353,6 +1382,7 @@ function recenterMapToVisibleViewport() {
 }
 
 function handleViewportResize() {
+  updatePhotoPreviewMaxEdge()
   window.requestAnimationFrame(() => {
     mapInstance?.resize?.()
     if (tripView.value === 'atlas') {
@@ -2921,7 +2951,7 @@ function renderAtlasPhotoMarkers() {
     const badgeHTML = cluster.count > 1 ? '<span class="photo-cluster-badge">' + cluster.count + '</span>' : ''
     const markerHTML = '<div class="photo-atlas-pin" data-cluster-id="' + cluster.id + '">' +
       '<div class="photo-atlas-pin-box">' +
-        '<img src="' + cluster.cover.thumb_url + '?size=120" class="photo-atlas-pin-img" loading="lazy" />' +
+        '<img src="' + photoThumbnailURL(cluster.cover) + '" class="photo-atlas-pin-img" loading="lazy" />' +
       '</div>' +
       badgeHTML +
       '<div class="photo-atlas-pin-triangle"></div>' +
@@ -2985,32 +3015,59 @@ function openPhotoPreview(photo: PhotoAtlasItem, list?: PhotoAtlasItem[]) {
   setPreviewIndex(idx >= 0 ? idx : 0)
 }
 
+const photoPreviewLoadTimeoutMS = 15000
+
+function clearPhotoPreviewLoadTimer() {
+  if (previewLoadTimer !== null) {
+    window.clearTimeout(previewLoadTimer)
+    previewLoadTimer = null
+  }
+  if (previewLoadElapsedTimer !== null) {
+    window.clearInterval(previewLoadElapsedTimer)
+    previewLoadElapsedTimer = null
+  }
+  previewPhotoLoadingElapsedSeconds.value = 0
+}
+
+function beginPhotoPreviewLoad() {
+  clearPhotoPreviewLoadTimer()
+  const loadKey = previewPhoto.value?.load_key
+  if (!loadKey) return
+  previewPhotoLoading.value = true
+  previewPhotoError.value = false
+  previewLoadElapsedTimer = window.setInterval(() => {
+    previewPhotoLoadingElapsedSeconds.value++
+  }, 1000)
+  previewLoadTimer = window.setTimeout(() => {
+    if (previewPhoto.value?.load_key === loadKey) {
+      clearPhotoPreviewLoadTimer()
+      previewPhotoLoading.value = false
+      previewPhotoError.value = true
+    }
+  }, photoPreviewLoadTimeoutMS)
+}
+
 function setPreviewIndex(idx: number) {
   if (idx < 0 || idx >= previewPhotoList.value.length) return
   previewPhotoIndex.value = idx
   const current = previewPhotoList.value[idx]
   if (!current) return
-
-  if (loadedPhotoMap.value[current.id]) {
-    previewPhotoLoading.value = false
-    previewPhotoError.value = false
-  } else {
-    previewPhotoLoading.value = true
-    previewPhotoError.value = false
-  }
+  beginPhotoPreviewLoad()
   preloadNeighborPhotos(idx)
 }
 
-function onPreviewPhotoLoaded(id: string) {
-  if (previewPhoto.value?.id === id) {
+function onPreviewPhotoLoaded(loadKey: string) {
+  if (previewPhoto.value?.load_key === loadKey) {
+    clearPhotoPreviewLoadTimer()
     previewPhotoLoading.value = false
     previewPhotoError.value = false
   }
-  loadedPhotoMap.value[id] = true
+  loadedPhotoMap.value[loadKey] = true
 }
 
-function onPreviewPhotoError(id: string) {
-  if (previewPhoto.value?.id === id) {
+function onPreviewPhotoError(loadKey: string) {
+  if (previewPhoto.value?.load_key === loadKey) {
+    clearPhotoPreviewLoadTimer()
     previewPhotoLoading.value = false
     previewPhotoError.value = true
   }
@@ -3021,17 +3078,28 @@ function preloadNeighborPhotos(idx: number) {
   if (!list.length) return
   const nextIdx = (idx + 1) % list.length
   const prevIdx = (idx - 1 + list.length) % list.length
-  const idsToPreload = [list[nextIdx]?.id, list[prevIdx]?.id].filter(Boolean)
-  idsToPreload.forEach(id => {
-    if (id && !loadedPhotoMap.value[id]) {
+  const previewEdge = photoPreviewMaxEdge.value
+  const photosToPreload = [list[nextIdx], list[prevIdx]].filter((photo): photo is PhotoAtlasItem => Boolean(photo))
+  photosToPreload.forEach(photo => {
+    const cacheKey = photoPreviewCacheKey(photo) + ':preview-' + previewEdge
+    if (!loadedPhotoMap.value[cacheKey]) {
       const img = new Image()
-      img.onload = () => { loadedPhotoMap.value[id] = true }
-      img.src = '/api/v1/photos/' + id + '/file'
+      img.onload = () => { loadedPhotoMap.value[cacheKey] = true }
+      // 与当前设备实际使用的档位一致，避免移动端误拉取 1600px 图。
+      img.src = photoPreviewURL(photo, previewEdge)
     }
   })
 }
 
+function updatePhotoPreviewMaxEdge() {
+  const nextEdge: 960 | 1600 = isMobileViewport() ? 960 : 1600
+  if (photoPreviewMaxEdge.value === nextEdge) return
+  photoPreviewMaxEdge.value = nextEdge
+  if (previewPhoto.value) beginPhotoPreviewLoad()
+}
+
 function closePhotoPreview() {
+  clearPhotoPreviewLoadTimer()
   previewPhotoIndex.value = -1
   previewPhotoList.value = []
   previewPhotoLoading.value = false
@@ -6131,7 +6199,7 @@ onUnmounted(() => {
           @touchmove.passive="handleLightboxTouchMove"
           @touchend="handleLightboxTouchEnd"
         >
-          <button type="button" class="photo-lightbox-close" aria-label="关闭预览" @click="closePhotoPreview()">×</button>
+          <button type="button" class="photo-lightbox-close" aria-label="关闭预览" @pointerdown.stop @click.stop="closePhotoPreview()">×</button>
           
           <!-- 左侧上一张切换按钮 -->
           <button
@@ -6139,41 +6207,42 @@ onUnmounted(() => {
             type="button"
             class="photo-lightbox-nav prev"
             aria-label="上一张照片"
-            @click.stop="prevPreviewPhoto"
+            @pointerdown.stop @click.stop="prevPreviewPhoto"
           >
             <IonIcon :icon="chevronBackOutline" />
           </button>
 
-          <!-- 稳定的固定比例图片视口：彻底解决弱网大图未加载时的布局坍塌 -->
+          <!-- 稳定的固定比例图片视口：预览资源在当前窗口显示。 -->
           <div class="photo-lightbox-viewport">
-            <!-- 1. 底层即时模糊缩略图占位 (几 KB，几乎 0 延迟，避免白屏或黑屏) -->
+            <!-- 1. 底层即时模糊缩略图占位（地图同源 120px 缩略图） -->
             <img
-              :src="previewPhoto.thumb_url + '?size=120'"
+              :src="previewPhoto.thumbnail_url"
               class="photo-lightbox-blur-bg"
               aria-hidden="true"
             />
 
-            <!-- 2. 高清大图 (异步加载，加载完成后平滑淡入覆盖) -->
+            <!-- 2. 等比清晰预览；原图由底部链接在新的浏览器标签页直接打开。 -->
             <img
-              :key="previewPhoto.id"
-              :src="previewPhoto.url"
+              :key="previewPhoto.load_key"
+              :src="previewPhoto.preview_url"
               class="photo-lightbox-img"
               :class="{ 'photo-loaded': !previewPhotoLoading && !previewPhotoError }"
-              alt="大图预览"
-              @load="onPreviewPhotoLoaded(previewPhoto.id)"
-              @error="onPreviewPhotoError(previewPhoto.id)"
+              :alt="previewPhoto.file_name + ' 预览'"
+              @load="onPreviewPhotoLoaded(previewPhoto.load_key)"
+              @error="onPreviewPhotoError(previewPhoto.load_key)"
             />
 
-            <!-- 3. 加载中微动效覆盖层 (明确展示加载反馈，防止操作迟滞感) -->
+            <!-- 3. 加载中微动效覆盖层 -->
             <div v-if="previewPhotoLoading" class="photo-lightbox-loading">
               <div class="photo-loading-spinner"></div>
-              <span>正在加载大图…</span>
+              <span>正在加载清晰预览…</span>
+              <small v-if="previewPhotoLoadingElapsedSeconds">已等待 {{ previewPhotoLoadingElapsedSeconds }} 秒</small>
             </div>
 
-            <!-- 4. 加载异常提示与重试 -->
+            <!-- 4. 加载异常提示与可恢复的返回预览入口。 -->
             <div v-if="previewPhotoError" class="photo-lightbox-error">
-              <span>大图加载超时或网络异常</span>
-              <button type="button" @click="setPreviewIndex(previewPhotoIndex)">重新加载</button>
+              <span>清晰预览生成或加载时间过长，可重试或查看原图</span>
+              <button type="button" @click="setPreviewIndex(previewPhotoIndex)">重新加载预览</button>
             </div>
           </div>
 
@@ -6183,7 +6252,7 @@ onUnmounted(() => {
             type="button"
             class="photo-lightbox-nav next"
             aria-label="下一张照片"
-            @click.stop="nextPreviewPhoto"
+            @pointerdown.stop @click.stop="nextPreviewPhoto"
           >
             <IonIcon :icon="chevronForwardOutline" />
           </button>
@@ -6193,7 +6262,10 @@ onUnmounted(() => {
               <strong>{{ previewPhoto.file_name }}</strong>
               <small v-if="previewPhotoList.length > 1" class="photo-lightbox-counter">{{ previewPhotoIndex + 1 }} / {{ previewPhotoList.length }}</small>
             </div>
-            <span>拍摄于 {{ formatPhotoTime(previewPhoto.taken_at) }}</span>
+            <div class="photo-lightbox-footer-actions">
+              <span>拍摄于 {{ formatPhotoTime(previewPhoto.taken_at) }}</span>
+              <a :href="previewPhoto.original_url" target="_blank" rel="noopener noreferrer" class="photo-lightbox-original-link">查看原图 ↗</a>
+            </div>
           </div>
         </div>
       </div>

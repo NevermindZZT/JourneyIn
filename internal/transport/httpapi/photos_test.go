@@ -118,6 +118,37 @@ func TestPhotosHTTPEndpoints(t *testing.T) {
 	}
 	thumbResp.Body.Close()
 
+	previewResp, err := http.Get(server.URL + "/api/v1/photos/" + photoID + "/preview?max_edge=960&v=1")
+	if err != nil {
+		t.Fatalf("preview request error: %v", err)
+	}
+	if previewResp.StatusCode != http.StatusOK {
+		previewResp.Body.Close()
+		t.Fatalf("preview status: %d", previewResp.StatusCode)
+	}
+	if previewResp.Header.Get("Content-Type") != "image/jpeg" || previewResp.Header.Get("Cache-Control") != "public, max-age=31536000, immutable" {
+		previewResp.Body.Close()
+		t.Fatalf("unexpected preview headers: %+v", previewResp.Header)
+	}
+	previewImage, decodeErr := jpeg.Decode(previewResp.Body)
+	previewResp.Body.Close()
+	if decodeErr != nil {
+		t.Fatalf("decode preview image: %v", decodeErr)
+	}
+	if bounds := previewImage.Bounds(); bounds.Dx() != 80 || bounds.Dy() != 80 {
+		t.Fatalf("unexpected preview bounds: %v", bounds)
+	}
+
+	invalidPreviewResp, err := http.Get(server.URL + "/api/v1/photos/" + photoID + "/preview?max_edge=1200")
+	if err != nil {
+		t.Fatalf("invalid preview request error: %v", err)
+	}
+	if invalidPreviewResp.StatusCode != http.StatusBadRequest {
+		invalidPreviewResp.Body.Close()
+		t.Fatalf("invalid preview status: %d", invalidPreviewResp.StatusCode)
+	}
+	invalidPreviewResp.Body.Close()
+
 	fileResp, err := http.Get(server.URL + "/api/v1/photos/" + photoID + "/file")
 	if err != nil || fileResp.StatusCode != http.StatusOK {
 		t.Fatalf("file error: %v, code=%d", err, fileResp.StatusCode)

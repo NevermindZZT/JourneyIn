@@ -35,12 +35,14 @@ type PhotoRecord struct {
 }
 
 type PhotoAtlasItem struct {
-	ID       string  `json:"id"`
-	FileName string  `json:"file_name"`
-	TakenAt  string  `json:"taken_at"`
-	Lat      float64 `json:"lat"`
-	Lng      float64 `json:"lng"`
-	ThumbURL string  `json:"thumb_url"`
+	ID           string  `json:"id"`
+	FileName     string  `json:"file_name"`
+	TakenAt      string  `json:"taken_at"`
+	Lat          float64 `json:"lat"`
+	Lng          float64 `json:"lng"`
+	ThumbURL     string  `json:"thumb_url"`
+	PreviewURL   string  `json:"preview_url"`
+	CacheVersion int64   `json:"cache_version"`
 }
 
 type PhotoStatus struct {
@@ -158,11 +160,11 @@ func (s *Service) TriggerScan() bool {
 
 	go func() {
 		defer func() {
-		s.mu.Lock()
-		s.scanning = false
-		s.lastScanAt = time.Now()
-		s.mu.Unlock()
-	}()
+			s.mu.Lock()
+			s.scanning = false
+			s.lastScanAt = time.Now()
+			s.mu.Unlock()
+		}()
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
 		if err := s.scanDirectory(ctx); err != nil {
@@ -274,6 +276,7 @@ func (s *Service) scanDirectory(ctx context.Context) error {
 	for oldPath, meta := range cached {
 		if _, ok := discovered[oldPath]; !ok {
 			_, _ = s.db.ExecContext(ctx, "DELETE FROM photo_index WHERE id = ?", meta.id)
+			s.purgeCachedRenditions(meta.id)
 		}
 	}
 
@@ -281,6 +284,9 @@ func (s *Service) scanDirectory(ctx context.Context) error {
 }
 
 func (s *Service) indexPhotoFile(ctx context.Context, id, path, fileName string, info fs.FileInfo, now string) {
+	// The stable ID is derived from the relative path, so invalidate all prior
+	// renditions whenever the file is new or its size/modification time changed.
+	s.purgeCachedRenditions(id)
 	file, err := os.Open(path)
 	if err != nil {
 		return
@@ -342,7 +348,7 @@ func (s *Service) GetAtlasPhotos(ctx context.Context, crs string) ([]PhotoAtlasI
 		latCol, lngCol = "lat_bd09ll", "lng_bd09ll"
 	}
 
-	query := fmt.Sprintf("SELECT id, file_name, taken_at, %s, %s FROM photo_index WHERE has_gps = 1 ORDER BY taken_at ASC", latCol, lngCol)
+	query := fmt.Sprintf("SELECT id, file_name, taken_at, mod_time, %s, %s FROM photo_index WHERE has_gps = 1 ORDER BY taken_at ASC", latCol, lngCol)
 	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("query atlas photos: %w", err)
@@ -352,10 +358,11 @@ func (s *Service) GetAtlasPhotos(ctx context.Context, crs string) ([]PhotoAtlasI
 	var items []PhotoAtlasItem
 	for rows.Next() {
 		var item PhotoAtlasItem
-		if err := rows.Scan(&item.ID, &item.FileName, &item.TakenAt, &item.Lat, &item.Lng); err != nil {
+		if err := rows.Scan(&item.ID, &item.FileName, &item.TakenAt, &item.CacheVersion, &item.Lat, &item.Lng); err != nil {
 			continue
 		}
 		item.ThumbURL = "/api/v1/photos/" + item.ID + "/thumbnail"
+		item.PreviewURL = "/api/v1/photos/" + item.ID + "/preview"
 		items = append(items, item)
 	}
 	if items == nil {
@@ -383,30 +390,83 @@ func (s *Service) GetPhotoByID(ctx context.Context, id string) (*PhotoRecord, er
 	return &p, nil
 }
 
+const (
+	DefaultThumbnailSize = 120
+	PreviewSmallEdge     = 960
+	PreviewLargeEdge     = 1600
+)
+
+func isSupportedPreviewEdge(maxEdge int) bool {
+	return maxEdge == PreviewSmallEdge || maxEdge == PreviewLargeEdge
+}
+
 func (s *Service) GetThumbnail(ctx context.Context, id string, size int) ([]byte, error) {
 	if size <= 0 {
-		size = 120
+		size = DefaultThumbnailSize
 	}
-	if s.cacheDir != "" {
-		thumbPath := filepath.Join(s.cacheDir, fmt.Sprintf("%s_%d.jpg", id, size))
-		if data, err := os.ReadFile(thumbPath); err == nil && len(data) > 0 {
-			return data, nil
-		}
-	}
-
 	photo, err := s.GetPhotoByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
+	return s.getCachedRendition(photo, "thumbnails", size, GenerateThumbnail)
+}
 
-	if s.cacheDir != "" {
-		thumbPath := filepath.Join(s.cacheDir, fmt.Sprintf("%s_%d.jpg", id, size))
-		if err := GenerateThumbnail(photo.FilePath, thumbPath, size); err == nil {
-			return os.ReadFile(thumbPath)
+// GetPreview returns an aspect-ratio-preserving JPEG rendition for the Lightbox.
+// Only fixed 960px and 1600px long-edge tiers are supported to bound cache growth.
+func (s *Service) GetPreview(ctx context.Context, id string, maxEdge int) ([]byte, error) {
+	if maxEdge == 0 {
+		maxEdge = PreviewLargeEdge
+	}
+	if !isSupportedPreviewEdge(maxEdge) {
+		return nil, fmt.Errorf("unsupported preview max edge: %d", maxEdge)
+	}
+	photo, err := s.GetPhotoByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return s.getCachedRendition(photo, "previews", maxEdge, GeneratePreview)
+}
+
+type renditionGenerator func(srcPath, destPath string, size int) error
+
+func (s *Service) getCachedRendition(photo *PhotoRecord, kind string, size int, generate renditionGenerator) ([]byte, error) {
+	if s.cacheDir == "" {
+		return FallbackThumbnailBytes(), nil
+	}
+	cachePath := s.renditionCachePath(kind, photo.ID, photo.ModTime, size)
+	if data, err := os.ReadFile(cachePath); err == nil && len(data) > 0 {
+		return data, nil
+	}
+	if err := generate(photo.FilePath, cachePath, size); err == nil {
+		if data, readErr := os.ReadFile(cachePath); readErr == nil && len(data) > 0 {
+			return data, nil
 		}
 	}
-
+	// Unsupported formats (for example HEIC without a decoder) retain the existing
+	// graceful image fallback. The UI exposes an explicit original-file action.
 	return FallbackThumbnailBytes(), nil
+}
+
+func (s *Service) renditionCachePath(kind, id string, modTime int64, size int) string {
+	return filepath.Join(s.cacheDir, kind, fmt.Sprintf("%s_%d_%d.jpg", id, modTime, size))
+}
+
+func (s *Service) purgeCachedRenditions(id string) {
+	if s.cacheDir == "" || id == "" {
+		return
+	}
+	for _, kind := range []string{"thumbnails", "previews"} {
+		dir := filepath.Join(s.cacheDir, kind)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() && strings.HasPrefix(entry.Name(), id+"_") {
+				_ = os.Remove(filepath.Join(dir, entry.Name()))
+			}
+		}
+	}
 }
 
 func (s *Service) GetPhotoFilePath(ctx context.Context, id string) (string, error) {

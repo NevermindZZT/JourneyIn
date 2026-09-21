@@ -182,6 +182,9 @@ func TestPhotoServiceLifecycle(t *testing.T) {
 	if math.Abs(atlasItemsGCJ[0].Lat-39) > 0.5 {
 		t.Fatalf("unexpected lat: %f", atlasItemsGCJ[0].Lat)
 	}
+	if atlasItemsGCJ[0].ThumbURL == "" || atlasItemsGCJ[0].PreviewURL == "" || atlasItemsGCJ[0].CacheVersion == 0 {
+		t.Fatalf("atlas rendition metadata missing: %+v", atlasItemsGCJ[0])
+	}
 
 	atlasItemsBD, err := svc.GetAtlasPhotos(ctx, "bd09ll")
 	if err != nil || len(atlasItemsBD) != 1 {
@@ -200,7 +203,51 @@ func TestPhotoServiceLifecycle(t *testing.T) {
 		t.Fatalf("cached thumbnail mismatch: %v", err)
 	}
 
-	// 6. 安全读取文件路径
+	// 6. Lightbox preview uses a separate, versioned, aspect-ratio-preserving cache.
+	previewBytes, err := svc.GetPreview(ctx, pID, PreviewSmallEdge)
+	if err != nil || len(previewBytes) == 0 {
+		t.Fatalf("GetPreview failed: %v", err)
+	}
+	photo, err := svc.GetPhotoByID(ctx, pID)
+	if err != nil {
+		t.Fatalf("GetPhotoByID failed: %v", err)
+	}
+	previewPath := svc.renditionCachePath("previews", pID, photo.ModTime, PreviewSmallEdge)
+	if _, err := os.Stat(previewPath); err != nil {
+		t.Fatalf("expected preview cache file at %s: %v", previewPath, err)
+	}
+	previewCached, err := svc.GetPreview(ctx, pID, PreviewSmallEdge)
+	if err != nil || len(previewCached) != len(previewBytes) {
+		t.Fatalf("cached preview mismatch: %v", err)
+	}
+	if _, err := svc.GetPreview(ctx, pID, 1200); err == nil {
+		t.Fatal("expected unsupported preview size to fail")
+	}
+
+	// A file update keeps its stable ID but invalidates the prior versioned cache.
+	updatedModTime := time.Unix(photo.ModTime+2, 0)
+	if err := os.Chtimes(photo1Path, updatedModTime, updatedModTime); err != nil {
+		t.Fatalf("update photo mod time: %v", err)
+	}
+	if err := svc.ScanSync(ctx); err != nil {
+		t.Fatalf("scan changed photo: %v", err)
+	}
+	if _, err := os.Stat(previewPath); !os.IsNotExist(err) {
+		t.Fatalf("expected old preview rendition to be removed, stat err=%v", err)
+	}
+	updatedPhoto, err := svc.GetPhotoByID(ctx, pID)
+	if err != nil || updatedPhoto.ModTime != updatedModTime.Unix() {
+		t.Fatalf("unexpected updated photo metadata: %+v, err=%v", updatedPhoto, err)
+	}
+	if _, err := svc.GetPreview(ctx, pID, PreviewSmallEdge); err != nil {
+		t.Fatalf("generate preview after update: %v", err)
+	}
+	updatedPreviewPath := svc.renditionCachePath("previews", pID, updatedPhoto.ModTime, PreviewSmallEdge)
+	if _, err := os.Stat(updatedPreviewPath); err != nil {
+		t.Fatalf("expected updated preview cache file at %s: %v", updatedPreviewPath, err)
+	}
+
+	// 7. 安全读取文件路径
 	safePath, err := svc.GetPhotoFilePath(ctx, pID)
 	if err != nil || safePath != photo1Path {
 		t.Fatalf("unexpected file path: %s, err=%v", safePath, err)

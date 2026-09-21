@@ -79,8 +79,45 @@ func (s *Server) getPhotoThumbnail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "image/jpeg")
-	w.Header().Set("Cache-Control", "public, max-age=86400")
+	setVersionedPhotoCacheHeaders(w, r)
 	_, _ = w.Write(thumbBytes)
+}
+
+func (s *Server) getPhotoPreview(w http.ResponseWriter, r *http.Request) {
+	if s.photosService == nil || !s.photosService.IsEnabled() {
+		http.NotFound(w, r)
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		http.NotFound(w, r)
+		return
+	}
+	maxEdge := photos.PreviewLargeEdge
+	if raw := strings.TrimSpace(r.URL.Query().Get("max_edge")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || (parsed != photos.PreviewSmallEdge && parsed != photos.PreviewLargeEdge) {
+			writeError(w, http.StatusBadRequest, "invalid_preview_size", "preview max_edge must be 960 or 1600", nil)
+			return
+		}
+		maxEdge = parsed
+	}
+	previewBytes, err := s.photosService.GetPreview(r.Context(), id, maxEdge)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	setVersionedPhotoCacheHeaders(w, r)
+	_, _ = w.Write(previewBytes)
+}
+
+func setVersionedPhotoCacheHeaders(w http.ResponseWriter, r *http.Request) {
+	if strings.TrimSpace(r.URL.Query().Get("v")) != "" {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		return
+	}
+	w.Header().Set("Cache-Control", "public, max-age=86400")
 }
 
 func (s *Server) getPhotoFile(w http.ResponseWriter, r *http.Request) {
