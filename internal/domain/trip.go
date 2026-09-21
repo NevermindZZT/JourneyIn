@@ -67,7 +67,10 @@ type Stop struct {
 	DescriptionMarkdown string          `json:"description_markdown,omitempty"`
 	Links               []Link          `json:"links,omitempty"`
 	Weather             json.RawMessage `json:"weather,omitempty"`
-	Children            []SubStop       `json:"children,omitempty"`
+	// ExcludeFromRoute keeps this main planning point visible in the itinerary and
+	// on the map, while omitting it from generated route segments.
+	ExcludeFromRoute bool      `json:"exclude_from_route,omitempty"`
+	Children         []SubStop `json:"children,omitempty"`
 }
 
 type SubStop struct {

@@ -270,8 +270,16 @@ func (s *TripService) PlanTrip(ctx context.Context, tripID string, expectedRevis
 	return s.Replace(ctx, tripID, expectedRevision, normalized, source)
 }
 
+// orderedRouteStops returns main planning points that participate in route
+// generation. Excluded points remain part of the itinerary and map; they simply
+// do not create a route waypoint or segment.
 func orderedRouteStops(stops []domain.Stop) []domain.Stop {
-	ordered := append([]domain.Stop(nil), stops...)
+	ordered := make([]domain.Stop, 0, len(stops))
+	for _, stop := range stops {
+		if !stop.ExcludeFromRoute {
+			ordered = append(ordered, stop)
+		}
+	}
 	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Sequence < ordered[j].Sequence })
 	return ordered
 }

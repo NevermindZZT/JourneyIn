@@ -12,10 +12,11 @@ import (
 )
 
 type updatePlanningPointBody struct {
-	Title       *string
-	Address     *string
-	Location    json.RawMessage
-	LocationSet bool
+	Title            *string
+	Address          *string
+	Location         json.RawMessage
+	LocationSet      bool
+	ExcludeFromRoute *bool
 }
 
 func (body *updatePlanningPointBody) UnmarshalJSON(data []byte) error {
@@ -27,7 +28,7 @@ func (body *updatePlanningPointBody) UnmarshalJSON(data []byte) error {
 		return errors.New("planning point update must be a JSON object")
 	}
 	for key := range raw {
-		if key != "title" && key != "address" && key != "location" {
+		if key != "title" && key != "address" && key != "location" && key != "exclude_from_route" {
 			return fmt.Errorf("planning point update.%s is not supported", key)
 		}
 	}
@@ -58,6 +59,16 @@ func (body *updatePlanningPointBody) UnmarshalJSON(data []byte) error {
 		body.Location = append(json.RawMessage(nil), value...)
 		body.LocationSet = true
 	}
+	if value, ok := raw["exclude_from_route"]; ok {
+		if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			return errors.New("planning point update.exclude_from_route must not be null")
+		}
+		var excludeFromRoute bool
+		if err := json.Unmarshal(value, &excludeFromRoute); err != nil {
+			return fmt.Errorf("planning point update.exclude_from_route must be a boolean: %w", err)
+		}
+		body.ExcludeFromRoute = &excludeFromRoute
+	}
 	return nil
 }
 
@@ -72,7 +83,7 @@ func (s *Server) updatePlanningPoint(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
 		return
 	}
-	record, changes, err := s.trips.UpdatePlanningPoint(r.Context(), r.PathValue("id"), expected, r.PathValue("dayID"), r.PathValue("stopID"), application.UpdatePlanningPointInput{Title: body.Title, Address: body.Address, Location: body.Location, LocationSet: body.LocationSet}, "rest:update_planning_point")
+	record, changes, err := s.trips.UpdatePlanningPoint(r.Context(), r.PathValue("id"), expected, r.PathValue("dayID"), r.PathValue("stopID"), application.UpdatePlanningPointInput{Title: body.Title, Address: body.Address, Location: body.Location, LocationSet: body.LocationSet, ExcludeFromRoute: body.ExcludeFromRoute}, "rest:update_planning_point")
 	if err != nil {
 		writePlanningPointError(w, err)
 		return

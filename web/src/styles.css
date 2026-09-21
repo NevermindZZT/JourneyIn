@@ -901,6 +901,13 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .detail-location { display: grid; gap: 3px; margin-top: 15px; padding: 10px 11px; border-radius: 12px; color: var(--p); background: color-mix(in srgb, var(--p) 9%, var(--surface)); }
 .detail-location span { font-size: 11px; font-weight: 900; }
 .detail-location small { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; }
+.detail-route-participation { display: flex; min-height: 64px; align-items: center; justify-content: space-between; gap: 12px; margin-top: 13px; padding: 10px 11px; border: 1px solid color-mix(in srgb, var(--p) 24%, var(--line)); border-radius: 14px; background: color-mix(in srgb, var(--p) 6%, var(--surface)); }
+.detail-route-participation.excluded { border-color: color-mix(in srgb, var(--md-warning) 42%, var(--line)); background: color-mix(in srgb, var(--md-warning) 8%, var(--surface)); }
+.detail-route-participation > div { display: grid; min-width: 0; gap: 4px; }
+.detail-route-participation strong { color: var(--ink); font-size: 12px; }
+.detail-route-participation small { color: var(--muted); font-size: 10px; line-height: 1.45; }
+.detail-route-participation button { flex: 0 0 auto; min-height: 40px; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--p) 42%, var(--line)); border-radius: 10px; color: var(--p); background: var(--surface); font-size: 11px; font-weight: 900; }
+.detail-route-participation.excluded button { border-color: color-mix(in srgb, var(--md-warning) 48%, var(--line)); color: var(--md-warning); }
 .detail-primary-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin-top: 13px; }
 .detail-navigation-button { display: inline-flex; min-width: 0; min-height: 48px; align-items: center; justify-content: center; gap: 7px; padding: 10px 11px; border: 1px solid var(--p); border-radius: 14px; color: var(--p); background: transparent; font-size: 12px; font-weight: 900; }
 .detail-navigation-button ion-icon { flex: 0 0 auto; font-size: 17px; }
@@ -1346,6 +1353,8 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .redesign-stop-row.location-missing { border-color: color-mix(in srgb, var(--md-warning) 30%, var(--line)); background: color-mix(in srgb, var(--md-warning) 4%, var(--surface)); }
 .stop-location-badge { display: inline-flex; width: max-content; min-height: 17px; align-items: center; margin-top: 4px; padding: 2px 6px; border: 1px solid color-mix(in srgb, var(--md-success) 34%, var(--line)); border-radius: 999px; color: var(--md-success); background: color-mix(in srgb, var(--md-success) 8%, var(--surface)); font-size: 9px; font-style: normal; font-weight: 900; }
 .stop-location-badge.missing { border-color: color-mix(in srgb, var(--md-warning) 42%, var(--line)); color: var(--md-warning); background: color-mix(in srgb, var(--md-warning) 10%, var(--surface)); }
+.redesign-stop-row.route-excluded { border-style: dashed; border-color: color-mix(in srgb, var(--md-warning) 36%, var(--line)); background: color-mix(in srgb, var(--md-warning) 5%, var(--surface)); }
+.stop-route-excluded-badge { display: inline-flex; width: max-content; min-height: 17px; align-items: center; margin-top: 4px; margin-left: 4px; padding: 2px 6px; border: 1px solid color-mix(in srgb, var(--md-warning) 44%, var(--line)); border-radius: 999px; color: var(--md-warning); background: color-mix(in srgb, var(--md-warning) 9%, var(--surface)); font-size: 9px; font-style: normal; font-weight: 900; }
 .detail-location { gap: 6px; }
 .detail-location.location-missing { border: 1px solid color-mix(in srgb, var(--md-warning) 38%, var(--line)); color: var(--md-warning); background: color-mix(in srgb, var(--md-warning) 9%, var(--surface)); }
 .detail-location-heading, .point-editor-location-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

@@ -126,3 +126,36 @@ func TestPlanTripSingleDayUsesPreviousDayLastStop(t *testing.T) {
 		t.Fatalf("route calls=%d, want 1", fake.routeCalls.Load())
 	}
 }
+
+func TestPlanTripSkipsExcludedStopsIncludingDayBoundary(t *testing.T) {
+	service := testService(t)
+	fake := &fakePlanningProvider{}
+	service.SetMapService(NewMapService(service.store, journeymaps.NewRegistry(fake), 2, 0))
+	excludedMiddle := multiDayStop("b", "备选中途点", 2, 30.21, 120.11)
+	excludedMiddle.ExcludeFromRoute = true
+	excludedFirst := multiDayStop("d", "备选次日首点", 1, 30.23, 120.13)
+	excludedFirst.ExcludeFromRoute = true
+	tripID, revision := createMultiDayTrip(t, service, []domain.Day{
+		{ID: "day-1", Date: "2026-04-18", Stops: []domain.Stop{
+			multiDayStop("a", "第一天起点", 1, 30.20, 120.10),
+			excludedMiddle,
+			multiDayStop("c", "第一天终点", 3, 30.22, 120.12),
+		}},
+		{ID: "day-2", Date: "2026-04-19", Stops: []domain.Stop{
+			excludedFirst,
+			multiDayStop("e", "第二天终点", 2, 30.24, 120.14),
+		}},
+	})
+
+	record, err := service.PlanTrip(context.Background(), tripID, revision, PlanInput{Provider: "fake", Mode: journeymaps.ModeWalking}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	trip := decodeTripDocument(t, record.Document)
+	if got := fake.routeCalls.Load(); got != 2 {
+		t.Fatalf("route calls=%d, want 2", got)
+	}
+	if got := [][]string{{trip.Days[0].Legs[0].FromStopID, trip.Days[0].Legs[0].ToStopID}, {trip.Days[1].Legs[0].FromStopID, trip.Days[1].Legs[0].ToStopID}}; !reflect.DeepEqual(got, [][]string{{"a", "c"}, {"c", "e"}}) {
+		t.Fatalf("route legs=%v, want only included planning points", got)
+	}
+}

@@ -19,28 +19,30 @@ const (
 )
 
 type UpdatePlanningPointInput struct {
-	Title       *string
-	Address     *string
-	Location    json.RawMessage
-	LocationSet bool
+	Title            *string
+	Address          *string
+	Location         json.RawMessage
+	LocationSet      bool
+	ExcludeFromRoute *bool
 }
 
 type UpdatePlanningPointChanges struct {
-	Changed          bool `json:"changed"`
-	TitleChanged     bool `json:"title_changed"`
-	AddressChanged   bool `json:"address_changed"`
-	LocationChanged  bool `json:"location_changed"`
-	RouteInvalidated bool `json:"route_invalidated"`
-	WeatherCleared   bool `json:"weather_cleared"`
+	Changed              bool `json:"changed"`
+	TitleChanged         bool `json:"title_changed"`
+	AddressChanged       bool `json:"address_changed"`
+	LocationChanged      bool `json:"location_changed"`
+	RouteExcludedChanged bool `json:"route_excluded_changed"`
+	RouteInvalidated     bool `json:"route_invalidated"`
+	WeatherCleared       bool `json:"weather_cleared"`
 }
 
 var ErrPlanningPointUpdateEmpty = errors.New("planning point update must include title, address, or location")
 
 // UpdatePlanningPoint updates a main Stop or a nested SubStop by stable ID.
 // It edits the stored raw JSON tree so untouched fields and provider-specific
-// data survive the revision. A main-stop location change invalidates the
-// current day's route and the next day's cross-day route, and clears weather
-// tied to the old location.
+// data survive the revision. A main-stop location or route-participation
+// change invalidates the current day's route and the next day's cross-day
+// route; a location change also clears weather tied to the old location.
 func (s *TripService) UpdatePlanningPoint(ctx context.Context, tripID string, expectedRevision int, dayID, stopID string, input UpdatePlanningPointInput, source string) (store.TripRecord, UpdatePlanningPointChanges, error) {
 	changes := UpdatePlanningPointChanges{}
 	if err := validatePlanningPointUpdate(input); err != nil {
@@ -131,6 +133,9 @@ func (s *TripService) UpdatePlanningPoint(ctx context.Context, tripID string, ex
 	if !found {
 		return store.TripRecord{}, changes, fmt.Errorf("stop %s not found in day %s", stopID, dayID)
 	}
+	if targetIsChild && input.ExcludeFromRoute != nil {
+		return store.TripRecord{}, changes, errors.New("only main planning points can be excluded from a route")
+	}
 
 	if input.Title != nil {
 		value := strings.TrimSpace(*input.Title)
@@ -169,7 +174,22 @@ func (s *TripService) UpdatePlanningPoint(ctx context.Context, tripID string, ex
 			changes.WeatherCleared = true
 		}
 	}
-	changes.Changed = changes.TitleChanged || changes.AddressChanged || changes.LocationChanged
+	if input.ExcludeFromRoute != nil {
+		if *input.ExcludeFromRoute {
+			excluded, marshalErr := json.Marshal(true)
+			if marshalErr != nil {
+				return store.TripRecord{}, changes, marshalErr
+			}
+			if !rawEqual(target["exclude_from_route"], excluded) {
+				target["exclude_from_route"] = excluded
+				changes.RouteExcludedChanged = true
+			}
+		} else if _, exists := target["exclude_from_route"]; exists {
+			delete(target, "exclude_from_route")
+			changes.RouteExcludedChanged = true
+		}
+	}
+	changes.Changed = changes.TitleChanged || changes.AddressChanged || changes.LocationChanged || changes.RouteExcludedChanged
 	if !changes.Changed {
 		return record, changes, nil
 	}
@@ -207,7 +227,7 @@ func (s *TripService) UpdatePlanningPoint(ctx context.Context, tripID string, ex
 		return store.TripRecord{}, changes, err
 	}
 
-	if changes.LocationChanged && !targetIsChild {
+	if (changes.LocationChanged || changes.RouteExcludedChanged) && !targetIsChild {
 		changes.RouteInvalidated = true
 		if err := clearRawRouteLegs(days, dayIndex); err != nil {
 			return store.TripRecord{}, changes, err
@@ -229,7 +249,7 @@ func (s *TripService) UpdatePlanningPoint(ctx context.Context, tripID string, ex
 }
 
 func validatePlanningPointUpdate(input UpdatePlanningPointInput) error {
-	if input.Title == nil && input.Address == nil && !input.LocationSet {
+	if input.Title == nil && input.Address == nil && !input.LocationSet && input.ExcludeFromRoute == nil {
 		return ErrPlanningPointUpdateEmpty
 	}
 	if input.Title != nil {

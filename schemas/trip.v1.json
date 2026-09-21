@@ -119,6 +119,7 @@
         "description_markdown": { "type": "string", "maxLength": 10000 },
         "links": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/link" } },
         "weather": { "type": "object" },
+        "exclude_from_route": { "type": "boolean", "description": "Keep the main planning point visible but omit it from generated route segments." },
         "children": { "type": "array", "maxItems": 20, "items": { "$ref": "#/$defs/sub_stop" } }
       },
       "additionalProperties": false

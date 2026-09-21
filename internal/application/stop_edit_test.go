@@ -158,3 +158,51 @@ func TestUpdatePlanningPointRejectsInvalidLocationAndStaleRevision(t *testing.T)
 		t.Fatalf("stale revision error = %v", err)
 	}
 }
+
+func TestUpdatePlanningPointRouteExclusionInvalidatesAffectedRoutes(t *testing.T) {
+	service := testService(t)
+	document := []byte(`{"schema_version":1,"title":"路线排除","status":"draft","timezone":"Asia/Shanghai","date_range":{"start":"2026-04-18","end":"2026-04-19"},"days":[{"id":"day-1","date":"2026-04-18","stops":[{"id":"stop-1","sequence":1,"title":"起点","location":{"preferred":"bd09ll","coordinates":{"bd09ll":{"lat":30.1,"lng":120.1,"crs":"bd09ll"}}}},{"id":"stop-2","sequence":2,"title":"备选点","location":{"preferred":"bd09ll","coordinates":{"bd09ll":{"lat":30.2,"lng":120.2,"crs":"bd09ll"}}}}],"legs":[{"id":"leg-1","from_stop_id":"stop-1","to_stop_id":"stop-2"}]},{"id":"day-2","date":"2026-04-19","stops":[],"legs":[{"id":"leg-2","from_stop_id":"x","to_stop_id":"y"}]}]}`)
+	record, err := service.Create(context.Background(), document, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	excluded := true
+	record, changes, err := service.UpdatePlanningPoint(context.Background(), record.ID, record.Revision, "day-1", "stop-2", UpdatePlanningPointInput{ExcludeFromRoute: &excluded}, "test:exclude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changes.Changed || !changes.RouteExcludedChanged || !changes.RouteInvalidated {
+		t.Fatalf("unexpected exclusion changes: %+v", changes)
+	}
+	var root map[string]any
+	if err := json.Unmarshal(record.Document, &root); err != nil {
+		t.Fatal(err)
+	}
+	days := root["days"].([]any)
+	if _, exists := days[0].(map[string]any)["legs"]; exists {
+		t.Fatal("current day routes were not cleared after exclusion")
+	}
+	if _, exists := days[1].(map[string]any)["legs"]; exists {
+		t.Fatal("following cross-day routes were not cleared after exclusion")
+	}
+	stop := days[0].(map[string]any)["stops"].([]any)[1].(map[string]any)
+	if stop["exclude_from_route"] != true {
+		t.Fatalf("route exclusion was not persisted: %+v", stop)
+	}
+
+	included := false
+	record, changes, err = service.UpdatePlanningPoint(context.Background(), record.ID, record.Revision, "day-1", "stop-2", UpdatePlanningPointInput{ExcludeFromRoute: &included}, "test:include")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changes.RouteExcludedChanged || !changes.RouteInvalidated {
+		t.Fatalf("unexpected inclusion changes: %+v", changes)
+	}
+	if err := json.Unmarshal(record.Document, &root); err != nil {
+		t.Fatal(err)
+	}
+	stop = root["days"].([]any)[0].(map[string]any)["stops"].([]any)[1].(map[string]any)
+	if _, exists := stop["exclude_from_route"]; exists {
+		t.Fatal("default route inclusion should omit exclude_from_route from canonical JSON")
+	}
+}

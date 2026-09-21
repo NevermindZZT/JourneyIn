@@ -19,7 +19,7 @@ type Theme = 'system' | 'light' | 'dark'
 type Coord = { lat: number; lng: number }
 type LocationData = { preferred?: string; coordinates?: Record<string, Coord & { crs?: string }>; source?: string; provider_refs?: Record<string, unknown>; citycode?: string; adcode?: string; geocoded_at?: string; precision?: string; confidence?: number }
 type LinkData = { id?: string; title: string; url: string; kind?: string }
-type Stop = { id: string; sequence: number; kind?: string; title: string; address?: string; location?: LocationData; time_window?: { arrival?: string; departure?: string }; description_markdown?: string; links?: LinkData[]; weather?: Record<string, unknown>; children?: SubStop[] }
+type Stop = { id: string; sequence: number; kind?: string; title: string; address?: string; location?: LocationData; time_window?: { arrival?: string; departure?: string }; description_markdown?: string; links?: LinkData[]; weather?: Record<string, unknown>; exclude_from_route?: boolean; children?: SubStop[] }
 type SubStop = { id: string; sequence: number; kind?: string; title: string; address?: string; location?: LocationData; time_window?: { arrival?: string; departure?: string }; description_markdown?: string; links?: LinkData[]; weather?: Record<string, unknown> }
 type Leg = { id: string; from_stop_id: string; to_stop_id: string; mode?: string; snapshots?: Array<{ provider?: string; coordinate_system?: string; mode?: string; strategy?: string; source?: string; geometry?: Array<[number, number]> | Array<Coord>; distance_m?: number; duration_s?: number; fetched_at?: string }> }
 type Day = { id: string; date: string; title?: string; notes_markdown?: string; stops: Stop[]; legs?: Leg[] }
@@ -629,20 +629,24 @@ const hasCarryOverRoute = computed(() => {
   const carryOver = carryOverStop.value
   return Boolean(carryOver && visibleDays.value.some(day => (day.legs || []).some(leg => leg.from_stop_id === carryOver.id && chooseSnapshot(leg, selectedMapProvider.value, planningMode.value))))
 })
+function routeEligibleStops(stops: Stop[]) {
+  return orderedStops(stops).filter(stop => !stop.exclude_from_route)
+}
 function canPlanDay(day: Day) {
-  const stops = day.stops || []
+  const stops = routeEligibleStops(day.stops || [])
   if (stops.length >= 2) return true
   if (stops.length !== 1 || !tripDocument.value) return false
   const dayIndex = tripDocument.value.days.indexOf(day)
-  return dayIndex > 0 && orderedStops(tripDocument.value.days[dayIndex - 1].stops || []).length > 0
+  return dayIndex > 0 && routeEligibleStops(tripDocument.value.days[dayIndex - 1].stops || []).length > 0
 }
 const plannableDays = computed(() => visibleDays.value.filter(canPlanDay))
 const selectedStop = computed(() => visibleStops.value.find(stop => stop.id === selectedStopId.value) || null)
 const selectedSubStop = computed(() => selectedStop.value?.children?.find(child => child.id === selectedSubStopId.value) || null)
 const selectedTarget = computed<Stop | SubStop | null>(() => selectedSubStop.value || selectedStop.value || null)
 const unlocatedMainStops = computed(() => (tripDocument.value?.days || []).flatMap(day => day.stops || []).filter(stop => !pointFor(stop)))
+const unlocatedRouteStops = computed(() => unlocatedMainStops.value.filter(stop => !stop.exclude_from_route))
 const unlocatedPlanningPoints = computed(() => (tripDocument.value?.days || []).flatMap(day => (day.stops || []).flatMap(stop => [stop, ...(stop.children || [])])).filter(stop => !pointFor(stop)))
-const canPlanRoutes = computed(() => plannableDays.value.length > 0 && unlocatedMainStops.value.length === 0)
+const canPlanRoutes = computed(() => plannableDays.value.length > 0 && unlocatedRouteStops.value.length === 0)
 function tripDateRangeFor(document: TripDocument | null, summary: TripSummary | null = selected.value) {
   return {
     start: document?.date_range?.start || summary?.start_date || document?.days[0]?.date || '',
@@ -1950,8 +1954,8 @@ function openChildSearch(parent: Stop) {
   if (readOnlyView.value) return
   selectedStopId.value = parent.id; selectedSubStopId.value = ''; openJourneySearch(parent.id); searchMessage.value = '为“' + parent.title + '”添加子规划点' }
 
-type PlanningPointPatch = { title?: string; address?: string; location?: LocationData }
-type PlanningPointUpdatePayload = { document?: TripDocument; revision?: number; stops?: number; days?: number; updated_at?: string; changes?: { changed?: boolean; title_changed?: boolean; address_changed?: boolean; location_changed?: boolean; route_invalidated?: boolean; weather_cleared?: boolean }; error?: { message?: string } }
+type PlanningPointPatch = { title?: string; address?: string; location?: LocationData; exclude_from_route?: boolean }
+type PlanningPointUpdatePayload = { document?: TripDocument; revision?: number; stops?: number; days?: number; updated_at?: string; changes?: { changed?: boolean; title_changed?: boolean; address_changed?: boolean; location_changed?: boolean; route_excluded_changed?: boolean; route_invalidated?: boolean; weather_cleared?: boolean }; error?: { message?: string } }
 
 function pointEditorTarget() {
   return pointEditorTargetID.value ? findPlanningPoint(pointEditorTargetID.value) : selectedTarget.value
@@ -1989,6 +1993,7 @@ async function persistPlanningPointUpdate(target: Stop | SubStop, patch: Plannin
   if (patch.title !== undefined) body.title = patch.title
   if (patch.address !== undefined) body.address = patch.address
   if (patch.location !== undefined) body.location = patch.location
+  if (patch.exclude_from_route !== undefined) body.exclude_from_route = patch.exclude_from_route
   const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(day.id) + '/stops/' + encodeURIComponent(target.id), { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision }, body: JSON.stringify(body) })
   const payload = await response.json() as PlanningPointUpdatePayload
   if (!response.ok) {
@@ -2011,7 +2016,9 @@ async function persistPlanningPointUpdate(target: Stop | SubStop, patch: Plannin
   }
   applyTripPayload(payload)
   restoreSelectedPoint(target.id)
-  if (payload.changes?.location_changed) {
+  if (payload.changes?.route_excluded_changed) {
+    pointUpdateNotice.value = patch.exclude_from_route ? '该规划点已排除在路线外；受影响路线已清除，请重新生成路线。' : '该规划点已加入路线；受影响路线已清除，请重新生成路线。'
+  } else if (payload.changes?.location_changed) {
     pointUpdateNotice.value = '位置已更新；受影响的路线和天气已清除，请重新生成路线或刷新天气。'
   } else if (payload.changes?.title_changed || payload.changes?.address_changed) {
     pointUpdateNotice.value = '规划点信息已更新。'
@@ -2019,6 +2026,16 @@ async function persistPlanningPointUpdate(target: Stop | SubStop, patch: Plannin
   await nextTick()
   await renderMap()
   return payload
+}
+
+async function toggleRouteExclusion() {
+  const stop = selectedStop.value
+  if (readOnlyView.value || !stop || selectedSubStop.value) return
+  try {
+    await persistPlanningPointUpdate(stop, { exclude_from_route: !stop.exclude_from_route })
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '更新路线设置失败'
+  }
 }
 
 function beginEditPoint() {
@@ -4561,7 +4578,7 @@ function applySearchResult(candidate: PlaceCandidate) {
 async function planRoutes() {
   if (readOnlyView.value || planningLoading.value) return
   if (!selected.value || !tripDocument.value) { error.value = '请先选择一条旅行规划'; return }
-  if (unlocatedMainStops.value.length) { error.value = '还有 ' + unlocatedMainStops.value.length + ' 个主规划点待定位，请先重新搜索或使用地图选点'; return }
+  if (unlocatedRouteStops.value.length) { error.value = '还有 ' + unlocatedRouteStops.value.length + ' 个参与路线的主规划点待定位，请先重新搜索或使用地图选点'; return }
   if (!plannableDays.value.length) { error.value = '至少有两个相邻的带坐标规划点后才能生成路线'; return }
   planningLoading.value = true; error.value = ''
   try {
@@ -5661,9 +5678,9 @@ onUnmounted(() => {
                 <div v-if="journeySection === 'overview'" class="trip-overview redesign-overview"><div class="section-title-row"><div><span class="eyebrow">JOURNEY NOTE</span><h2>行程说明</h2></div><div v-if="!readOnlyView" class="section-actions"><button class="text-action" type="button" @click="beginEditTripDescription">{{ tripDescriptionEditing ? '编辑中' : '编辑' }}</button><button v-if="tripDescriptionEditing" class="text-action" type="button" @click="openTripDescriptionFullscreen">全屏</button></div></div><template v-if="tripDescriptionEditing && !readOnlyView"><MarkdownEditor v-model="tripDescriptionDraft" v-model:mode="tripDescriptionEditorMode" :preview-html="renderMarkdown(tripDescriptionDraft)" :rows="4" editor-label="MARKDOWN" preview-label="行程说明预览" editor-aria-label="行程说明 Markdown 原始文本" placeholder="补充整个行程的背景、节奏和注意事项" /><div class="editor-actions"><button class="secondary-action compact-action" type="button" @click="cancelEditTripDescription">取消</button><button class="primary-action compact-action" type="button" :disabled="tripDescriptionSaving" @click="saveTripDescription">{{ tripDescriptionSaving ? '保存中…' : '保存说明' }}</button></div></template><div v-else-if="tripDocument.description_markdown" class="markdown" v-html="renderMarkdown(tripDocument.description_markdown)"></div><p v-else class="muted">{{ shareMode ? '暂无行程总体说明。' : '暂无行程总体说明，点击“编辑”添加。' }}</p></div>
                 <div v-else class="itinerary-section"><div class="section-title-row"><div><span class="eyebrow">ITINERARY</span><h2>规划点</h2></div><div class="section-actions"><span>{{ visibleStops.length }} 个</span><button v-if="!readOnlyView" class="text-action" type="button" :class="{ selected: reorderMode }" @click="toggleReorderMode">{{ reorderMode ? '完成排序' : '调整顺序' }}</button></div></div>
                   <div v-if="!readOnlyView" class="redesign-plan-controls"><label class="select-field">路线 Provider<UiSelect v-model="planningProvider" aria-label="路线 Provider" :options="mapProviderOptions" /></label><label class="select-field">出行方式<UiSelect v-model="planningMode" aria-label="出行方式" :options="travelModeOptions" /></label><label v-if="planningMode === 'driving' && supportsDrivingStrategy" class="select-field">驾车策略<UiSelect v-model="planningStrategy" aria-label="驾车策略" :options="availableDrivingStrategyOptions" /></label><button class="primary-action compact-action plan-button" type="button" :disabled="planningLoading || !canPlanRoutes" @click="planRoutes"><IonIcon :icon="navigateOutline" /> {{ planningLoading ? '规划中…' : '生成路线' }}</button></div>
-                  <div v-if="unlocatedPlanningPoints.length" class="location-readiness-banner"><div><strong>{{ unlocatedPlanningPoints.length }} 个规划点待定位</strong><span v-if="unlocatedMainStops.length">主规划点没有可靠坐标前，路线和导航不会启用。</span><span v-else>子规划点不参与主路线，但仍建议补充坐标。</span></div><button v-if="!readOnlyView" class="text-action" type="button" @click="selectPlanningPointFromList(unlocatedMainStops[0] || unlocatedPlanningPoints[0])">去定位</button><span v-else class="location-readiness-readonly">只读</span></div><div class="redesign-route-summary"><div><span>{{ selectedDay === 'all' ? '全程路线' : 'D' + selectedDay + ' 当天路线' }}</span><strong v-if="visibleRouteSummary.segments">{{ formatDistance(visibleRouteSummary.distanceM) || '距离未知' }} · {{ formatDuration(visibleRouteSummary.durationS) || '时间未知' }}</strong><em v-else-if="visibleRouteSummary.zeroSegments">有 {{ visibleRouteSummary.zeroSegments }} 段为同一地点</em><em v-else>尚未生成路线</em></div><small v-if="visibleRouteSummary.segments">{{ visibleRouteSummary.segments }} 段 · {{ mapProviderLabel }}</small></div>
+                  <div v-if="unlocatedPlanningPoints.length" class="location-readiness-banner"><div><strong>{{ unlocatedPlanningPoints.length }} 个规划点待定位</strong><span v-if="unlocatedRouteStops.length">参与路线的主规划点没有可靠坐标前，路线和导航不会启用。</span><span v-else-if="unlocatedMainStops.length">已排除路线的规划点不影响路线生成，但仍建议补充坐标以便导航。</span><span v-else>子规划点不参与主路线，但仍建议补充坐标。</span></div><button v-if="!readOnlyView" class="text-action" type="button" @click="selectPlanningPointFromList(unlocatedRouteStops[0] || unlocatedMainStops[0] || unlocatedPlanningPoints[0])">去定位</button><span v-else class="location-readiness-readonly">只读</span></div><div class="redesign-route-summary"><div><span>{{ selectedDay === 'all' ? '全程路线' : 'D' + selectedDay + ' 当天路线' }}</span><strong v-if="visibleRouteSummary.segments">{{ formatDistance(visibleRouteSummary.distanceM) || '距离未知' }} · {{ formatDuration(visibleRouteSummary.durationS) || '时间未知' }}</strong><em v-else-if="visibleRouteSummary.zeroSegments">有 {{ visibleRouteSummary.zeroSegments }} 段为同一地点</em><em v-else>尚未生成路线</em></div><small v-if="visibleRouteSummary.segments">{{ visibleRouteSummary.segments }} 段 · {{ mapProviderLabel }}</small></div>
                   <p v-if="hasCarryOverRoute" class="route-hint">路线从前一天最后一个规划点“{{ carryOverStop?.title }}”开始。</p><p v-if="reorderMessage" class="inline-message">{{ reorderMessage }}</p><p v-if="pointUpdateNotice" class="inline-message">{{ pointUpdateNotice }}</p><p v-if="!plannableDays.length" class="muted">{{ shareMode ? '当前选择范围暂无可生成的路线。' : '添加至少两个相邻的带坐标规划点后，可以生成路线。' }}</p>
-                  <div v-if="visibleStops.length" class="redesign-stop-list"><article v-for="stop in visibleStops" :key="stop.id" class="redesign-stop-row" :class="{ selected: selectedStopId === stop.id, 'reorder-active': reorderMode, 'location-missing': !pointFor(stop) }"><button class="redesign-stop-main" type="button" @click="selectPlanningPointFromList(stop)"><span class="stop-number">{{ stop.sequence }}</span><span><strong>{{ stop.title }}</strong><small>{{ stopDate(stop) }} · {{ stop.address || '地址待补充' }}</small><em class="stop-location-badge" :class="{ missing: !pointFor(stop) }">{{ locationStatus(stop) }}</em></span><span class="row-chevron">›</span></button><div v-if="reorderMode && !readOnlyView" class="reorder-actions" @click.stop><button class="reorder-move-button" type="button" :disabled="actionLoading || !canMovePlanningPoint(stop, -1)" :aria-label="'上移规划点 ' + stop.title" @click="movePlanningPoint(stop, -1)"><IonIcon :icon="chevronUpOutline" /></button><button class="reorder-move-button" type="button" :disabled="actionLoading || !canMovePlanningPoint(stop, 1)" :aria-label="'下移规划点 ' + stop.title" @click="movePlanningPoint(stop, 1)"><IonIcon :icon="chevronDownOutline" /></button></div><button v-if="!readOnlyView" class="stop-delete-button" type="button" :aria-label="'删除规划点 ' + stop.title" @click.stop="deletePlanningPoint(stop)">×</button></article></div><p v-else class="muted compact-empty">当前日期还没有规划点。</p>
+                  <div v-if="visibleStops.length" class="redesign-stop-list"><article v-for="stop in visibleStops" :key="stop.id" class="redesign-stop-row" :class="{ selected: selectedStopId === stop.id, 'reorder-active': reorderMode, 'location-missing': !pointFor(stop), 'route-excluded': stop.exclude_from_route }"><button class="redesign-stop-main" type="button" @click="selectPlanningPointFromList(stop)"><span class="stop-number">{{ stop.sequence }}</span><span><strong>{{ stop.title }}</strong><small>{{ stopDate(stop) }} · {{ stop.address || '地址待补充' }}</small><em class="stop-location-badge" :class="{ missing: !pointFor(stop) }">{{ locationStatus(stop) }}</em><em v-if="stop.exclude_from_route" class="stop-route-excluded-badge">已排除路线</em></span><span class="row-chevron">›</span></button><div v-if="reorderMode && !readOnlyView" class="reorder-actions" @click.stop><button class="reorder-move-button" type="button" :disabled="actionLoading || !canMovePlanningPoint(stop, -1)" :aria-label="'上移规划点 ' + stop.title" @click="movePlanningPoint(stop, -1)"><IonIcon :icon="chevronUpOutline" /></button><button class="reorder-move-button" type="button" :disabled="actionLoading || !canMovePlanningPoint(stop, 1)" :aria-label="'下移规划点 ' + stop.title" @click="movePlanningPoint(stop, 1)"><IonIcon :icon="chevronDownOutline" /></button></div><button v-if="!readOnlyView" class="stop-delete-button" type="button" :aria-label="'删除规划点 ' + stop.title" @click.stop="deletePlanningPoint(stop)">×</button></article></div><p v-else class="muted compact-empty">当前日期还没有规划点。</p>
                   <button v-if="!readOnlyView" class="add-place-action" type="button" @click="openJourneySearch()"><IonIcon :icon="searchOutline" /> 搜索并添加规划点</button>
                 </div>
                 <div v-if="!readOnlyView" class="panel-data-actions"><button type="button" @click="openImportPicker">导入</button><button type="button" :disabled="actionLoading" @click="downloadTrip">导出 JSON</button><button type="button" :disabled="actionLoading" @click="openShareModal">{{ shareURL ? '分享管理' : '在线分享' }}</button><button type="button" @click="openTripPoster">生成海报</button></div><div v-else class="panel-data-actions"><button type="button" @click="openTripPoster">保存为图片</button></div>
@@ -5677,7 +5694,7 @@ onUnmounted(() => {
                 <p class="detail-kicker"><span>{{ selectedSubStop ? 'SUB-STOP ' + selectedSubStop.sequence : 'STOP ' + selectedStop.sequence }}</span><span>{{ selectedTarget?.kind || '规划点' }}</span></p>
                 <h1>{{ selectedTarget?.title }}</h1><p class="detail-address">{{ selectedTarget?.address || '地址待解析' }}</p><div class="detail-date-row"><p class="detail-date">{{ stopDate(selectedTarget || selectedStop) }}<span v-if="stopTime(selectedTarget || selectedStop)"> · {{ stopTime(selectedTarget || selectedStop) }}</span></p><button v-if="!readOnlyView && !selectedSubStop" class="text-action detail-date-edit" type="button" @click="beginEditStopDate">修改日期</button><span v-if="selectedSubStop" class="detail-date-follow-note">跟随主规划点</span></div><div v-if="stopDateEditing && !selectedSubStop && !readOnlyView" class="detail-date-editor"><label class="select-field">移动到日期<UiSelect v-model="stopDateDraftDayID" aria-label="规划点目标日期" :options="tripDayOptions" /></label><div class="editor-actions"><button class="secondary-action compact-action" type="button" @click="cancelEditStopDate">取消</button><button class="primary-action compact-action" type="button" :disabled="stopDateSaving" @click="saveStopDate">{{ stopDateSaving ? '保存中…' : '保存日期' }}</button></div></div>
                 <div class="detail-location" :class="{ 'location-missing': !pointFor(selectedTarget || selectedStop) }"><div class="detail-location-heading"><span><span class="location-status-icon" :class="{ missing: !pointFor(selectedTarget || selectedStop) }" aria-hidden="true">{{ pointFor(selectedTarget || selectedStop) ? '●' : '!' }}</span>{{ locationStatus(selectedTarget || selectedStop) }}</span><span class="location-state-label">{{ pointFor(selectedTarget || selectedStop) ? '可用于路线与导航' : '需要处理' }}</span></div><small v-if="pointFor(selectedTarget || selectedStop)">{{ pointFor(selectedTarget || selectedStop)?.crs }} · {{ pointFor(selectedTarget || selectedStop)?.lat.toFixed(6) }}, {{ pointFor(selectedTarget || selectedStop)?.lng.toFixed(6) }}</small><small v-else>暂无可靠坐标，路线和导航暂不可用。</small><small v-if="pointFor(selectedTarget || selectedStop)">来源：{{ locationSource(selectedTarget || selectedStop) }}</small><div v-if="!readOnlyView" class="detail-location-actions"><button class="text-action" type="button" @click="beginEditPoint">编辑名称/地址</button><button class="text-action" type="button" @click="openPointSearch(selectedTarget || selectedStop)">重新搜索</button><button class="text-action" type="button" :disabled="!mapReady" @click="startMapPickForPoint(selectedTarget || selectedStop)">地图选点</button></div></div>
-                <div class="detail-primary-actions"><button class="detail-navigation-button" type="button" :disabled="!pointFor(selectedTarget || selectedStop)" @click="openNavigation('amap')"><IonIcon :icon="navigateOutline" /> 高德导航</button><button class="detail-navigation-button" type="button" :disabled="!pointFor(selectedTarget || selectedStop)" @click="openNavigation('baidu')"><IonIcon :icon="navigateOutline" /> 百度导航</button></div>
+                <section v-if="!selectedSubStop" class="detail-route-participation" :class="{ excluded: selectedStop.exclude_from_route }"><div><strong>路线规划</strong><small>{{ selectedStop.exclude_from_route ? '此规划点仍会显示在地图和行程中，但生成路线时会跳过。' : '此规划点会作为路线途经点参与生成。' }}</small></div><button v-if="!readOnlyView" type="button" :aria-pressed="selectedStop.exclude_from_route ? 'true' : 'false'" @click="toggleRouteExclusion">{{ selectedStop.exclude_from_route ? '加入路线' : '排除路线' }}</button></section><div class="detail-primary-actions"><button class="detail-navigation-button" type="button" :disabled="!pointFor(selectedTarget || selectedStop)" @click="openNavigation('amap')"><IonIcon :icon="navigateOutline" /> 高德导航</button><button class="detail-navigation-button" type="button" :disabled="!pointFor(selectedTarget || selectedStop)" @click="openNavigation('baidu')"><IonIcon :icon="navigateOutline" /> 百度导航</button></div>
                 <div class="detail-weather">
                   <IonIcon :icon="sunnyOutline" />
                   <span class="weather-text-wrap">
