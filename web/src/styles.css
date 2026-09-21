@@ -1897,6 +1897,11 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
   background: rgba(56, 189, 248, 0.16);
   color: #f8fafc;
 }
+.photo-lightbox-info {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
 .photo-lightbox-title-wrap {
   display: flex;
   align-items: center;
@@ -1907,6 +1912,39 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.photo-capture-core {
+  margin: 0;
+  overflow: hidden;
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.photo-capture-details {
+  color: #94a3b8;
+  font-size: 10px;
+}
+.photo-capture-details summary {
+  width: max-content;
+  color: #7dd3fc;
+  font-weight: 800;
+  cursor: pointer;
+  user-select: none;
+}
+.photo-capture-details > div {
+  display: grid;
+  gap: 2px;
+  padding-top: 5px;
+  line-height: 1.35;
+}
+.photo-capture-details > div span {
+  overflow-wrap: anywhere;
+  opacity: 1;
+  white-space: normal;
 }
 .photo-lightbox-counter {
   font-size: 11px;
@@ -2001,6 +2039,9 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
     align-items: flex-start;
     gap: 7px;
     font-size: 11px;
+  }
+  .photo-lightbox-info {
+    width: 100%;
   }
   .photo-lightbox-footer-actions {
     width: 100%;

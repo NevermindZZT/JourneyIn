@@ -58,3 +58,31 @@ func TestLoginEndpointSetsHttpOnlySessionCookie(t *testing.T) {
 		t.Fatalf("unexpected login payload: %+v", payload)
 	}
 }
+
+func TestPhotoFileEndpointRequiresAuthenticationWhenEnabled(t *testing.T) {
+	auth := NewAuthenticator("admin", "secret", "")
+	server := NewServer(nil, nil, nil, "test", nil)
+	server.SetAuthenticator(auth)
+	protected := RequireAPIAuthWithAuthenticator(server.Handler(), auth)
+
+	anonymousRequest := httptest.NewRequest(http.MethodGet, "/api/v1/photos/photo-id/file", nil)
+	anonymousResponse := httptest.NewRecorder()
+	protected.ServeHTTP(anonymousResponse, anonymousRequest)
+	if anonymousResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous photo file status=%d, want %d", anonymousResponse.Code, http.StatusUnauthorized)
+	}
+
+	session, err := auth.Login("admin", "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticatedRequest := httptest.NewRequest(http.MethodGet, "/api/v1/photos/photo-id/file", nil)
+	authenticatedRequest.AddCookie(&http.Cookie{Name: authSessionCookie, Value: session})
+	authenticatedResponse := httptest.NewRecorder()
+	protected.ServeHTTP(authenticatedResponse, authenticatedRequest)
+	// There is deliberately no configured photo service in this unit test, so a
+	// 404 proves the request passed auth and reached the endpoint handler.
+	if authenticatedResponse.Code != http.StatusNotFound {
+		t.Fatalf("authenticated photo file status=%d, want endpoint 404", authenticatedResponse.Code)
+	}
+}

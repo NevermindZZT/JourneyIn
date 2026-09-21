@@ -9,12 +9,21 @@ import (
 	"time"
 )
 
-// PhotoMetadata 包含从照片中提取的拍摄时间和 GPS 坐标
+// PhotoMetadata 包含从照片中提取的拍摄时间、GPS 坐标与非敏感拍摄参数。
 type PhotoMetadata struct {
 	TakenAt   time.Time
 	HasGPS    bool
 	Latitude  float64 // WGS-84 原始纬度
 	Longitude float64 // WGS-84 原始经度
+
+	CameraMake     string
+	CameraModel    string
+	LensModel      string
+	ExposureTimeS  *float64
+	FNumber        *float64
+	ISO            *int
+	FocalLengthMM  *float64
+	ExposureBiasEV *float64
 }
 
 var errNoExif = errors.New("no exif metadata found")
@@ -52,7 +61,7 @@ func ExtractMetadata(r io.Reader) (*PhotoMetadata, error) {
 		if tiffData != nil {
 			parseTiffMetadata(tiffData, meta)
 			return meta, nil
-	}
+		}
 	}
 
 	return meta, errNoExif
@@ -135,6 +144,10 @@ func parseTiffMetadata(tiff []byte, meta *PhotoMetadata) {
 	// 解析 IFD0
 	parseIFD(tiff, ifd0Offset, bo, func(tag uint16, tagType uint16, count uint32, valBuf []byte) {
 		switch tag {
+		case 0x010F: // Make
+			meta.CameraMake = strings.TrimSpace(readAscii(tiff, valBuf, count))
+		case 0x0110: // Model
+			meta.CameraModel = strings.TrimSpace(readAscii(tiff, valBuf, count))
 		case 0x0132: // DateTime
 			if meta.TakenAt.IsZero() {
 				meta.TakenAt = parseExifTime(readAscii(tiff, valBuf, count))
@@ -150,6 +163,12 @@ func parseTiffMetadata(tiff []byte, meta *PhotoMetadata) {
 	if exifOffset > 0 && exifOffset < len(tiff) {
 		parseIFD(tiff, exifOffset, bo, func(tag uint16, tagType uint16, count uint32, valBuf []byte) {
 			switch tag {
+			case 0x829A: // ExposureTime
+				meta.ExposureTimeS = readRational(tiff, valBuf, bo)
+			case 0x829D: // FNumber
+				meta.FNumber = readRational(tiff, valBuf, bo)
+			case 0x8827: // PhotographicSensitivity / ISO
+				meta.ISO = readUnsignedShort(valBuf, bo)
 			case 0x9003: // DateTimeOriginal
 				t := parseExifTime(readAscii(tiff, valBuf, count))
 				if !t.IsZero() {
@@ -159,6 +178,12 @@ func parseTiffMetadata(tiff []byte, meta *PhotoMetadata) {
 				if meta.TakenAt.IsZero() {
 					meta.TakenAt = parseExifTime(readAscii(tiff, valBuf, count))
 				}
+			case 0x9204: // ExposureBiasValue
+				meta.ExposureBiasEV = readSignedRational(tiff, valBuf, bo)
+			case 0x920A: // FocalLength
+				meta.FocalLengthMM = readRational(tiff, valBuf, bo)
+			case 0xA434: // LensModel
+				meta.LensModel = strings.TrimSpace(readAscii(tiff, valBuf, count))
 			}
 		})
 	}
@@ -261,6 +286,51 @@ func readRationals(tiff []byte, valBuf []byte, count uint32, bo binary.ByteOrder
 		}
 	}
 	return res
+}
+
+func readUnsignedShort(valBuf []byte, bo binary.ByteOrder) *int {
+	if len(valBuf) < 2 {
+		return nil
+	}
+	value := int(bo.Uint16(valBuf[:2]))
+	if value <= 0 {
+		return nil
+	}
+	return &value
+}
+
+func readRational(tiff []byte, valBuf []byte, bo binary.ByteOrder) *float64 {
+	if len(valBuf) < 4 {
+		return nil
+	}
+	offset := int(bo.Uint32(valBuf[:4]))
+	if offset < 0 || offset+8 > len(tiff) {
+		return nil
+	}
+	numerator := bo.Uint32(tiff[offset : offset+4])
+	denominator := bo.Uint32(tiff[offset+4 : offset+8])
+	if denominator == 0 {
+		return nil
+	}
+	value := float64(numerator) / float64(denominator)
+	return &value
+}
+
+func readSignedRational(tiff []byte, valBuf []byte, bo binary.ByteOrder) *float64 {
+	if len(valBuf) < 4 {
+		return nil
+	}
+	offset := int(bo.Uint32(valBuf[:4]))
+	if offset < 0 || offset+8 > len(tiff) {
+		return nil
+	}
+	numerator := int32(bo.Uint32(tiff[offset : offset+4]))
+	denominator := int32(bo.Uint32(tiff[offset+4 : offset+8]))
+	if denominator == 0 {
+		return nil
+	}
+	value := float64(numerator) / float64(denominator)
+	return &value
 }
 
 func parseExifTime(s string) time.Time {

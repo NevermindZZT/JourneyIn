@@ -16,33 +16,51 @@ import (
 	"time"
 )
 
+type PhotoCaptureMetadata struct {
+	CameraMake     string   `json:"camera_make,omitempty"`
+	CameraModel    string   `json:"camera_model,omitempty"`
+	LensModel      string   `json:"lens_model,omitempty"`
+	ExposureTimeS  *float64 `json:"exposure_time_s,omitempty"`
+	FNumber        *float64 `json:"f_number,omitempty"`
+	ISO            *int     `json:"iso,omitempty"`
+	FocalLengthMM  *float64 `json:"focal_length_mm,omitempty"`
+	ExposureBiasEV *float64 `json:"exposure_bias_ev,omitempty"`
+}
+
+func (m PhotoCaptureMetadata) HasValues() bool {
+	return m.CameraMake != "" || m.CameraModel != "" || m.LensModel != "" || m.ExposureTimeS != nil || m.FNumber != nil || m.ISO != nil || m.FocalLengthMM != nil || m.ExposureBiasEV != nil
+}
+
 type PhotoRecord struct {
-	ID        string    `json:"id"`
-	FilePath  string    `json:"file_path"`
-	FileName  string    `json:"file_name"`
-	FileSize  int64     `json:"file_size"`
-	ModTime   int64     `json:"mod_time"`
-	TakenAt   time.Time `json:"taken_at"`
-	HasGPS    bool      `json:"has_gps"`
-	LatWGS84  float64   `json:"lat_wgs84,omitempty"`
-	LngWGS84  float64   `json:"lng_wgs84,omitempty"`
-	LatGCJ02  float64   `json:"lat_gcj02,omitempty"`
-	LngGCJ02  float64   `json:"lng_gcj02,omitempty"`
-	LatBD09LL float64   `json:"lat_bd09ll,omitempty"`
-	LngBD09LL float64   `json:"lng_bd09ll,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID              string               `json:"id"`
+	FilePath        string               `json:"file_path"`
+	FileName        string               `json:"file_name"`
+	FileSize        int64                `json:"file_size"`
+	ModTime         int64                `json:"mod_time"`
+	TakenAt         time.Time            `json:"taken_at"`
+	HasGPS          bool                 `json:"has_gps"`
+	LatWGS84        float64              `json:"lat_wgs84,omitempty"`
+	LngWGS84        float64              `json:"lng_wgs84,omitempty"`
+	LatGCJ02        float64              `json:"lat_gcj02,omitempty"`
+	LngGCJ02        float64              `json:"lng_gcj02,omitempty"`
+	LatBD09LL       float64              `json:"lat_bd09ll,omitempty"`
+	LngBD09LL       float64              `json:"lng_bd09ll,omitempty"`
+	Capture         PhotoCaptureMetadata `json:"capture"`
+	MetadataVersion int                  `json:"metadata_version"`
+	CreatedAt       time.Time            `json:"created_at"`
+	UpdatedAt       time.Time            `json:"updated_at"`
 }
 
 type PhotoAtlasItem struct {
-	ID           string  `json:"id"`
-	FileName     string  `json:"file_name"`
-	TakenAt      string  `json:"taken_at"`
-	Lat          float64 `json:"lat"`
-	Lng          float64 `json:"lng"`
-	ThumbURL     string  `json:"thumb_url"`
-	PreviewURL   string  `json:"preview_url"`
-	CacheVersion int64   `json:"cache_version"`
+	ID           string                `json:"id"`
+	FileName     string                `json:"file_name"`
+	TakenAt      string                `json:"taken_at"`
+	Lat          float64               `json:"lat"`
+	Lng          float64               `json:"lng"`
+	ThumbURL     string                `json:"thumb_url"`
+	PreviewURL   string                `json:"preview_url"`
+	CacheVersion int64                 `json:"cache_version"`
+	Capture      *PhotoCaptureMetadata `json:"capture,omitempty"`
 }
 
 type PhotoStatus struct {
@@ -53,6 +71,8 @@ type PhotoStatus struct {
 	Scanning    bool   `json:"scanning"`
 	LastScanAt  string `json:"last_scan_at,omitempty"`
 }
+
+const photoMetadataVersion = 2
 
 type Service struct {
 	db         *sql.DB
@@ -197,9 +217,10 @@ func (s *Service) ScanSync(ctx context.Context) error {
 }
 
 type cachedMeta struct {
-	id       string
-	fileSize int64
-	modTime  int64
+	id              string
+	fileSize        int64
+	modTime         int64
+	metadataVersion int
 }
 
 func (s *Service) scanDirectory(ctx context.Context) error {
@@ -208,13 +229,14 @@ func (s *Service) scanDirectory(ctx context.Context) error {
 	}
 
 	cached := make(map[string]cachedMeta)
-	rows, err := s.db.QueryContext(ctx, "SELECT id, file_path, file_size, mod_time FROM photo_index")
+	rows, err := s.db.QueryContext(ctx, "SELECT id, file_path, file_size, mod_time, metadata_version FROM photo_index")
 	if err == nil {
 		for rows.Next() {
 			var id, path string
 			var size, mtime int64
-			if err := rows.Scan(&id, &path, &size, &mtime); err == nil {
-				cached[path] = cachedMeta{id: id, fileSize: size, modTime: mtime}
+			var metadataVersion int
+			if err := rows.Scan(&id, &path, &size, &mtime, &metadataVersion); err == nil {
+				cached[path] = cachedMeta{id: id, fileSize: size, modTime: mtime, metadataVersion: metadataVersion}
 			}
 		}
 		rows.Close()
@@ -259,7 +281,7 @@ func (s *Service) scanDirectory(ctx context.Context) error {
 		discovered[cleanPath] = struct{}{}
 
 		if cm, ok := cached[cleanPath]; ok {
-			if cm.fileSize == info.Size() && cm.modTime == info.ModTime().Unix() {
+			if cm.fileSize == info.Size() && cm.modTime == info.ModTime().Unix() && cm.metadataVersion == photoMetadataVersion {
 				return nil
 			}
 		}
@@ -296,6 +318,7 @@ func (s *Service) indexPhotoFile(ctx context.Context, id, path, fileName string,
 	takenAt := info.ModTime()
 	var hasGPS bool
 	var latWGS, lngWGS, latGCJ, lngGCJ, latBD, lngBD float64
+	var capture PhotoCaptureMetadata
 
 	meta, err := ExtractMetadata(file)
 	if err == nil && meta != nil {
@@ -309,6 +332,16 @@ func (s *Service) indexPhotoFile(ctx context.Context, id, path, fileName string,
 			latGCJ, lngGCJ = WGS84ToGCJ02(latWGS, lngWGS)
 			latBD, lngBD = WGS84ToBD09LL(latWGS, lngWGS)
 		}
+		capture = PhotoCaptureMetadata{
+			CameraMake:     meta.CameraMake,
+			CameraModel:    meta.CameraModel,
+			LensModel:      meta.LensModel,
+			ExposureTimeS:  meta.ExposureTimeS,
+			FNumber:        meta.FNumber,
+			ISO:            meta.ISO,
+			FocalLengthMM:  meta.FocalLengthMM,
+			ExposureBiasEV: meta.ExposureBiasEV,
+		}
 	}
 
 	gpsFlag := 0
@@ -316,14 +349,15 @@ func (s *Service) indexPhotoFile(ctx context.Context, id, path, fileName string,
 		gpsFlag = 1
 	}
 
-	query := "INSERT INTO photo_index (id, file_path, file_name, file_size, mod_time, taken_at, has_gps, lat_wgs84, lng_wgs84, lat_gcj02, lng_gcj02, lat_bd09ll, lng_bd09ll, created_at, updated_at) " +
-		"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
-		"ON CONFLICT(id) DO UPDATE SET file_path=excluded.file_path, file_name=excluded.file_name, file_size=excluded.file_size, mod_time=excluded.mod_time, taken_at=excluded.taken_at, has_gps=excluded.has_gps, lat_wgs84=excluded.lat_wgs84, lng_wgs84=excluded.lng_wgs84, lat_gcj02=excluded.lat_gcj02, lng_gcj02=excluded.lng_gcj02, lat_bd09ll=excluded.lat_bd09ll, lng_bd09ll=excluded.lng_bd09ll, updated_at=excluded.updated_at"
+	query := "INSERT INTO photo_index (id, file_path, file_name, file_size, mod_time, taken_at, has_gps, lat_wgs84, lng_wgs84, lat_gcj02, lng_gcj02, lat_bd09ll, lng_bd09ll, camera_make, camera_model, lens_model, exposure_time_s, f_number, iso, focal_length_mm, exposure_bias_ev, metadata_version, created_at, updated_at) " +
+		"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+		"ON CONFLICT(id) DO UPDATE SET file_path=excluded.file_path, file_name=excluded.file_name, file_size=excluded.file_size, mod_time=excluded.mod_time, taken_at=excluded.taken_at, has_gps=excluded.has_gps, lat_wgs84=excluded.lat_wgs84, lng_wgs84=excluded.lng_wgs84, lat_gcj02=excluded.lat_gcj02, lng_gcj02=excluded.lng_gcj02, lat_bd09ll=excluded.lat_bd09ll, lng_bd09ll=excluded.lng_bd09ll, camera_make=excluded.camera_make, camera_model=excluded.camera_model, lens_model=excluded.lens_model, exposure_time_s=excluded.exposure_time_s, f_number=excluded.f_number, iso=excluded.iso, focal_length_mm=excluded.focal_length_mm, exposure_bias_ev=excluded.exposure_bias_ev, metadata_version=excluded.metadata_version, updated_at=excluded.updated_at"
 
 	_, _ = s.db.ExecContext(ctx, query,
 		id, path, fileName, info.Size(), info.ModTime().Unix(),
 		takenAt.UTC().Format(time.RFC3339), gpsFlag,
 		latWGS, lngWGS, latGCJ, lngGCJ, latBD, lngBD,
+		capture.CameraMake, capture.CameraModel, capture.LensModel, capture.ExposureTimeS, capture.FNumber, capture.ISO, capture.FocalLengthMM, capture.ExposureBiasEV, photoMetadataVersion,
 		now, now,
 	)
 }
@@ -348,7 +382,7 @@ func (s *Service) GetAtlasPhotos(ctx context.Context, crs string) ([]PhotoAtlasI
 		latCol, lngCol = "lat_bd09ll", "lng_bd09ll"
 	}
 
-	query := fmt.Sprintf("SELECT id, file_name, taken_at, mod_time, %s, %s FROM photo_index WHERE has_gps = 1 ORDER BY taken_at ASC", latCol, lngCol)
+	query := fmt.Sprintf("SELECT id, file_name, taken_at, mod_time, camera_make, camera_model, lens_model, exposure_time_s, f_number, iso, focal_length_mm, exposure_bias_ev, %s, %s FROM photo_index WHERE has_gps = 1 ORDER BY taken_at ASC", latCol, lngCol)
 	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("query atlas photos: %w", err)
@@ -358,11 +392,15 @@ func (s *Service) GetAtlasPhotos(ctx context.Context, crs string) ([]PhotoAtlasI
 	var items []PhotoAtlasItem
 	for rows.Next() {
 		var item PhotoAtlasItem
-		if err := rows.Scan(&item.ID, &item.FileName, &item.TakenAt, &item.CacheVersion, &item.Lat, &item.Lng); err != nil {
+		var capture PhotoCaptureMetadata
+		if err := rows.Scan(&item.ID, &item.FileName, &item.TakenAt, &item.CacheVersion, &capture.CameraMake, &capture.CameraModel, &capture.LensModel, &capture.ExposureTimeS, &capture.FNumber, &capture.ISO, &capture.FocalLengthMM, &capture.ExposureBiasEV, &item.Lat, &item.Lng); err != nil {
 			continue
 		}
 		item.ThumbURL = "/api/v1/photos/" + item.ID + "/thumbnail"
 		item.PreviewURL = "/api/v1/photos/" + item.ID + "/preview"
+		if capture.HasValues() {
+			item.Capture = &capture
+		}
 		items = append(items, item)
 	}
 	if items == nil {
@@ -375,11 +413,11 @@ func (s *Service) GetPhotoByID(ctx context.Context, id string) (*PhotoRecord, er
 	if s.db == nil {
 		return nil, errors.New("database not available")
 	}
-	row := s.db.QueryRowContext(ctx, "SELECT id, file_path, file_name, file_size, mod_time, taken_at, has_gps, lat_wgs84, lng_wgs84, lat_gcj02, lng_gcj02, lat_bd09ll, lng_bd09ll, created_at, updated_at FROM photo_index WHERE id = ?", id)
+	row := s.db.QueryRowContext(ctx, "SELECT id, file_path, file_name, file_size, mod_time, taken_at, has_gps, lat_wgs84, lng_wgs84, lat_gcj02, lng_gcj02, lat_bd09ll, lng_bd09ll, camera_make, camera_model, lens_model, exposure_time_s, f_number, iso, focal_length_mm, exposure_bias_ev, metadata_version, created_at, updated_at FROM photo_index WHERE id = ?", id)
 	var p PhotoRecord
 	var hasGPSInt int
 	var takenAtStr, createdAtStr, updatedAtStr string
-	err := row.Scan(&p.ID, &p.FilePath, &p.FileName, &p.FileSize, &p.ModTime, &takenAtStr, &hasGPSInt, &p.LatWGS84, &p.LngWGS84, &p.LatGCJ02, &p.LngGCJ02, &p.LatBD09LL, &p.LngBD09LL, &createdAtStr, &updatedAtStr)
+	err := row.Scan(&p.ID, &p.FilePath, &p.FileName, &p.FileSize, &p.ModTime, &takenAtStr, &hasGPSInt, &p.LatWGS84, &p.LngWGS84, &p.LatGCJ02, &p.LngGCJ02, &p.LatBD09LL, &p.LngBD09LL, &p.Capture.CameraMake, &p.Capture.CameraModel, &p.Capture.LensModel, &p.Capture.ExposureTimeS, &p.Capture.FNumber, &p.Capture.ISO, &p.Capture.FocalLengthMM, &p.Capture.ExposureBiasEV, &p.MetadataVersion, &createdAtStr, &updatedAtStr)
 	if err != nil {
 		return nil, err
 	}

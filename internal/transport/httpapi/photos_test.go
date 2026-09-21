@@ -59,6 +59,11 @@ func TestPhotosHTTPEndpoints(t *testing.T) {
 	if err := photoSvc.ScanSync(context.Background()); err != nil {
 		t.Fatalf("ScanSync failed: %v", err)
 	}
+	// The fixture JPEG has no EXIF block; seed normalized capture metadata so the
+	// HTTP contract can verify its optional payload without relying on real files.
+	if _, err := db.DB().Exec("UPDATE photo_index SET has_gps=1, lat_gcj02=30.2, lng_gcj02=120.1, camera_make='SONY', camera_model='ILCE-7M4', lens_model='FE 24-70mm F2.8 GM II', exposure_time_s=0.004, f_number=2.8, iso=100, focal_length_mm=24, exposure_bias_ev=-0.3 WHERE id = (SELECT id FROM photo_index LIMIT 1)"); err != nil {
+		t.Fatalf("seed photo capture metadata: %v", err)
+	}
 
 	webFS, _ := fs.Sub(journeyin.WebFS, "web/dist")
 	schemaFS, _ := fs.Sub(journeyin.SchemaFS, "schemas")
@@ -104,6 +109,13 @@ func TestPhotosHTTPEndpoints(t *testing.T) {
 	var atlasList []photos.PhotoAtlasItem
 	_ = json.NewDecoder(atlasResp.Body).Decode(&atlasList)
 	atlasResp.Body.Close()
+	if len(atlasList) != 1 || atlasList[0].Capture == nil {
+		t.Fatalf("expected atlas capture metadata, got %+v", atlasList)
+	}
+	capture := atlasList[0].Capture
+	if capture.CameraModel != "ILCE-7M4" || capture.ISO == nil || *capture.ISO != 100 || capture.FNumber == nil || *capture.FNumber != 2.8 {
+		t.Fatalf("unexpected atlas capture metadata: %+v", capture)
+	}
 
 	// 4. 测试缩略图与原图获取
 	// 插入一条带 gps 的临时数据以供测试缩略图和原图

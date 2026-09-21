@@ -226,6 +226,17 @@ interface PhotoStatus {
   last_scan_at?: string
 }
 
+interface PhotoCapture {
+  camera_make?: string
+  camera_model?: string
+  lens_model?: string
+  exposure_time_s?: number
+  f_number?: number
+  iso?: number
+  focal_length_mm?: number
+  exposure_bias_ev?: number
+}
+
 interface PhotoAtlasItem {
   id: string
   file_name: string
@@ -235,6 +246,7 @@ interface PhotoAtlasItem {
   thumb_url: string
   preview_url: string
   cache_version: number
+  capture?: PhotoCapture | null
 }
 
 function photoCacheVersion(photo: PhotoAtlasItem) {
@@ -253,6 +265,38 @@ function photoOriginalURL(photo: PhotoAtlasItem) {
 }
 function photoPreviewCacheKey(photo: PhotoAtlasItem) {
   return photo.id + ':' + photoCacheVersion(photo)
+}
+
+function formatPhotoNumber(value: number, maxDigits = 1) {
+  return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: maxDigits }).format(value)
+}
+function formatPhotoShutter(value?: number) {
+  if (!value || !Number.isFinite(value) || value <= 0) return ''
+  if (value >= 1) return formatPhotoNumber(value, value >= 10 ? 0 : 1) + ' s'
+  const denominator = Math.round(1 / value)
+  return denominator > 0 ? '1/' + denominator + ' s' : ''
+}
+function photoCaptureCore(capture?: PhotoCapture | null) {
+  if (!capture) return ''
+  const values = [
+    capture.focal_length_mm ? formatPhotoNumber(capture.focal_length_mm) + ' mm' : '',
+    capture.f_number ? 'f/' + formatPhotoNumber(capture.f_number) : '',
+    formatPhotoShutter(capture.exposure_time_s),
+    capture.iso ? 'ISO ' + formatPhotoNumber(capture.iso, 0) : '',
+  ].filter(Boolean)
+  return values.join(' · ')
+}
+function photoCaptureCamera(capture?: PhotoCapture | null) {
+  if (!capture) return ''
+  return [capture.camera_make, capture.camera_model].filter(Boolean).join(' ')
+}
+function photoCaptureDetailsAvailable(capture?: PhotoCapture | null) {
+  return Boolean(photoCaptureCamera(capture) || capture?.lens_model || typeof capture?.exposure_bias_ev === 'number')
+}
+function formatPhotoExposureBias(value?: number) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return ''
+  const prefix = value > 0 ? '+' : value < 0 ? '−' : ''
+  return prefix + formatPhotoNumber(Math.abs(value)) + ' EV'
 }
 
 interface PhotoCluster {
@@ -293,6 +337,7 @@ const previewPhoto = computed(() => {
       thumbnail_url: photoThumbnailURL(p),
       preview_url: photoPreviewURL(p, previewEdge),
       original_url: photoOriginalURL(p),
+      capture: p.capture || null,
     }
   }
   return null
@@ -6258,9 +6303,20 @@ onUnmounted(() => {
           </button>
 
           <div class="photo-lightbox-footer">
-            <div class="photo-lightbox-title-wrap">
-              <strong>{{ previewPhoto.file_name }}</strong>
-              <small v-if="previewPhotoList.length > 1" class="photo-lightbox-counter">{{ previewPhotoIndex + 1 }} / {{ previewPhotoList.length }}</small>
+            <div class="photo-lightbox-info">
+              <div class="photo-lightbox-title-wrap">
+                <strong>{{ previewPhoto.file_name }}</strong>
+                <small v-if="previewPhotoList.length > 1" class="photo-lightbox-counter">{{ previewPhotoIndex + 1 }} / {{ previewPhotoList.length }}</small>
+              </div>
+              <p v-if="photoCaptureCore(previewPhoto.capture)" class="photo-capture-core">{{ photoCaptureCore(previewPhoto.capture) }}</p>
+              <details v-if="photoCaptureDetailsAvailable(previewPhoto.capture)" class="photo-capture-details">
+                <summary>拍摄参数</summary>
+                <div>
+                  <span v-if="photoCaptureCamera(previewPhoto.capture)">{{ photoCaptureCamera(previewPhoto.capture) }}</span>
+                  <span v-if="previewPhoto.capture?.lens_model">{{ previewPhoto.capture.lens_model }}</span>
+                  <span v-if="formatPhotoExposureBias(previewPhoto.capture?.exposure_bias_ev)">{{ formatPhotoExposureBias(previewPhoto.capture?.exposure_bias_ev) }}</span>
+                </div>
+              </details>
             </div>
             <div class="photo-lightbox-footer-actions">
               <span>拍摄于 {{ formatPhotoTime(previewPhoto.taken_at) }}</span>

@@ -37,6 +37,15 @@ CREATE TABLE IF NOT EXISTS photo_index (
   lng_gcj02 REAL,
   lat_bd09ll REAL,
   lng_bd09ll REAL,
+  camera_make TEXT,
+  camera_model TEXT,
+  lens_model TEXT,
+  exposure_time_s REAL,
+  f_number REAL,
+  iso INTEGER,
+  focal_length_mm REAL,
+  exposure_bias_ev REAL,
+  metadata_version INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -172,6 +181,21 @@ func TestPhotoServiceLifecycle(t *testing.T) {
 	}
 	if status.TotalPhotos != 1 || status.GPSPhotos != 1 {
 		t.Fatalf("unexpected status: %+v", status)
+	}
+	photoBeforeBackfill, err := svc.GetPhotoByID(ctx, generatePhotoID(photosDir, photo1Path))
+	if err != nil || photoBeforeBackfill.MetadataVersion != photoMetadataVersion {
+		t.Fatalf("unexpected initial metadata version: %+v, err=%v", photoBeforeBackfill, err)
+	}
+	// An old index row is re-parsed even if its image bytes are unchanged.
+	if _, err := db.Exec("UPDATE photo_index SET metadata_version = 0 WHERE id = ?", photoBeforeBackfill.ID); err != nil {
+		t.Fatalf("mark photo metadata stale: %v", err)
+	}
+	if err := svc.ScanSync(ctx); err != nil {
+		t.Fatalf("backfill stale capture metadata: %v", err)
+	}
+	photoAfterBackfill, err := svc.GetPhotoByID(ctx, photoBeforeBackfill.ID)
+	if err != nil || photoAfterBackfill.MetadataVersion != photoMetadataVersion {
+		t.Fatalf("metadata backfill failed: %+v, err=%v", photoAfterBackfill, err)
 	}
 
 	// 4. 获取 Atlas 照片 (GCJ02 与 BD09LL)

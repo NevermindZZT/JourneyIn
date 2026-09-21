@@ -12,7 +12,7 @@ func TestExtractMetadataSyntheticJpeg(t *testing.T) {
 	// 构建一个合成的 JPEG + Exif 数据流 (LittleEndian)
 	var tiff bytes.Buffer
 	// TIFF Header
-	tiff.Write([]byte{'I', 'I', 0x2A, 0x00}) // II*
+	tiff.Write([]byte{'I', 'I', 0x2A, 0x00})            // II*
 	binary.Write(&tiff, binary.LittleEndian, uint32(8)) // IFD0 offset = 8
 
 	// IFD0: 2 个条目 (DateTime, GPS IFD Pointer)
@@ -122,5 +122,83 @@ func TestExtractMetadataSyntheticJpeg(t *testing.T) {
 	}
 	if math.Abs(meta.Longitude-expectedLng) > 0.0001 {
 		t.Fatalf("expected lng %f, got %f", expectedLng, meta.Longitude)
+	}
+}
+
+func TestParseTiffCaptureMetadata(t *testing.T) {
+	var tiff bytes.Buffer
+	bo := binary.LittleEndian
+	tiff.Write([]byte{'I', 'I', 0x2A, 0x00})
+	_ = binary.Write(&tiff, bo, uint32(8))
+
+	const ifd0Offset = 8
+	const ifd0Entries = 3
+	const exifOffset = ifd0Offset + 2 + ifd0Entries*12 + 4
+	const exifEntries = 6
+	const payloadOffset = exifOffset + 2 + exifEntries*12 + 4
+	makeBytes := append([]byte("SONY"), 0)
+	modelBytes := append([]byte("ILCE-7M4"), 0)
+	lensBytes := append([]byte("FE 24-70mm F2.8 GM II"), 0)
+	makeOffset := payloadOffset
+	modelOffset := makeOffset + len(makeBytes)
+	lensOffset := modelOffset + len(modelBytes)
+	exposureOffset := lensOffset + len(lensBytes)
+	fNumberOffset := exposureOffset + 8
+	focalOffset := fNumberOffset + 8
+	biasOffset := focalOffset + 8
+
+	writeEntry := func(tag, tagType uint16, count uint32, value uint32) {
+		_ = binary.Write(&tiff, bo, tag)
+		_ = binary.Write(&tiff, bo, tagType)
+		_ = binary.Write(&tiff, bo, count)
+		_ = binary.Write(&tiff, bo, value)
+	}
+
+	_ = binary.Write(&tiff, bo, uint16(ifd0Entries))
+	writeEntry(0x010F, 2, uint32(len(makeBytes)), uint32(makeOffset))
+	writeEntry(0x0110, 2, uint32(len(modelBytes)), uint32(modelOffset))
+	writeEntry(0x8769, 4, 1, uint32(exifOffset))
+	_ = binary.Write(&tiff, bo, uint32(0))
+
+	_ = binary.Write(&tiff, bo, uint16(exifEntries))
+	writeEntry(0x829A, 5, 1, uint32(exposureOffset))
+	writeEntry(0x829D, 5, 1, uint32(fNumberOffset))
+	writeEntry(0x8827, 3, 1, 100)
+	writeEntry(0x9204, 10, 1, uint32(biasOffset))
+	writeEntry(0x920A, 5, 1, uint32(focalOffset))
+	writeEntry(0xA434, 2, uint32(len(lensBytes)), uint32(lensOffset))
+	_ = binary.Write(&tiff, bo, uint32(0))
+
+	tiff.Write(makeBytes)
+	tiff.Write(modelBytes)
+	tiff.Write(lensBytes)
+	_ = binary.Write(&tiff, bo, uint32(1))
+	_ = binary.Write(&tiff, bo, uint32(250))
+	_ = binary.Write(&tiff, bo, uint32(28))
+	_ = binary.Write(&tiff, bo, uint32(10))
+	_ = binary.Write(&tiff, bo, uint32(24))
+	_ = binary.Write(&tiff, bo, uint32(1))
+	_ = binary.Write(&tiff, bo, int32(-1))
+	_ = binary.Write(&tiff, bo, int32(3))
+
+	meta := &PhotoMetadata{}
+	parseTiffMetadata(tiff.Bytes(), meta)
+	if meta.CameraMake != "SONY" || meta.CameraModel != "ILCE-7M4" || meta.LensModel != "FE 24-70mm F2.8 GM II" {
+		t.Fatalf("unexpected equipment metadata: %+v", meta)
+	}
+	if meta.ExposureTimeS == nil || math.Abs(*meta.ExposureTimeS-0.004) > 0.000001 {
+		t.Fatalf("unexpected exposure time: %+v", meta.ExposureTimeS)
+	}
+	if meta.FNumber == nil || math.Abs(*meta.FNumber-2.8) > 0.000001 {
+		t.Fatalf("unexpected f number: %+v", meta.FNumber)
+	}
+	if meta.ISO == nil || *meta.ISO != 100 {
+		t.Fatalf("unexpected ISO: %+v", meta.ISO)
+	}
+	if meta.FocalLengthMM == nil || *meta.FocalLengthMM != 24 {
+		t.Fatalf("unexpected focal length: %+v", meta.FocalLengthMM)
+	}
+	if meta.ExposureBiasEV == nil || math.Abs(*meta.ExposureBiasEV+1.0/3.0) > 0.000001 {
+		t.Fatalf("unexpected exposure bias: %+v", meta.ExposureBiasEV)
 	}
 }
