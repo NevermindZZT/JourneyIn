@@ -516,6 +516,7 @@ const mapPickParentStopTitle = computed(() => {
   return findPlanningPoint(mapPickParentStopId.value)?.title || ''
 })
 function orderedStops(stops: Stop[]) { return [...stops].sort((a, b) => a.sequence - b.sequence) }
+function orderedSubStops(stops: SubStop[]) { return [...stops].sort((a, b) => a.sequence - b.sequence) }
 const visibleStops = computed(() => visibleDays.value.flatMap(day => orderedStops(day.stops || [])))
 const carryOverStop = computed<Stop | null>(() => {
   if (!tripDocument.value || selectedDay.value === 'all' || selectedDay.value <= 1) return null
@@ -528,6 +529,15 @@ const mapStops = computed(() => {
   if (!carryOver || !visibleStops.value.length || visibleStops.value.some(stop => stop.id === carryOver.id)) return visibleStops.value
   return [carryOver, ...visibleStops.value]
 })
+// 单日地图同时展示当天每个主规划点的子规划点；全程视图保持仅展开当前主点，避免全程地图过密。
+const mapSubStops = computed(() => {
+  if (selectedDay.value === 'all') {
+    return (selectedStop.value?.children || []).map(child => ({ child, parent: selectedStop.value! }))
+  }
+  return visibleStops.value.flatMap(parent => orderedSubStops(parent.children || []).map(child => ({ child, parent })))
+})
+// 让自动避让在主点、跨日衔接点及子点之间统一计算，而不是各自独立计算后互相遮挡。
+const mapLabelPoints = computed<(Stop | SubStop)[]>(() => [...mapStops.value, ...mapSubStops.value.map(item => item.child)])
 const visibleRouteSummary = computed(() => {
   let distanceM = 0; let durationS = 0; let segments = 0; let zeroSegments = 0
   for (const day of visibleDays.value) for (const leg of day.legs || []) {
@@ -1176,7 +1186,7 @@ function visibleMapPoints(): any[] {
   for (const stop of mapStops.value) {
     pushPoint(pointForProvider(stop, provider))
   }
-  for (const child of selectedStop.value?.children || []) {
+  for (const { child } of mapSubStops.value) {
     pushPoint(pointForProvider(child, provider))
   }
   // 采样加入可见路段的关键坐标，确保路线弧度也能被纳入视野
@@ -2216,7 +2226,7 @@ async function renderBaiduMap(preserveView = false) {
     mapInstance.clearOverlays()
     currentStopMarkers = []
     const points: any[] = []
-    const visibleLabelIDs = computeVisibleLabelStopIDs(mapStops.value)
+    const visibleLabelIDs = computeVisibleLabelStopIDs(mapLabelPoints.value)
     for (const stop of mapStops.value) {
       const point = mapPointFor(stop)
       if (!point || point.crs !== 'bd09ll') continue
@@ -2246,25 +2256,23 @@ async function renderBaiduMap(preserveView = false) {
       attachMapLabel(marker, carryOver ? '前日终点 · ' + stop.title : stop.title, carryOver ? '' : badge, isTarget, shouldShow)
       mapInstance.addOverlay(marker)
     }
-    if (selectedStop.value?.children?.length) {
-      const childVisibleIDs = computeVisibleLabelStopIDs(selectedStop.value.children)
-      for (const child of selectedStop.value.children) {
-        const point = mapPointFor(child)
-        if (!point || point.crs !== 'bd09ll') continue
-        const mapPoint = new mapAPI.Point(point.lng, point.lat)
-        const marker = new mapAPI.Marker(mapPoint)
-        const isChildTarget = selectedTarget.value?.id === child.id
-        marker.__journeyinSubStopId = child.id
-        marker.__journeyinStop = child
-        marker.__journeyinTitle = child.title
-        marker.__journeyinBadge = ''
-        marker.__journeyinIsSubStop = true
-        currentStopMarkers.push(marker)
-        marker.addEventListener?.('click', () => { if (mapPickMode.value) { handleMapClick({ point: mapPoint }); return }; selectSubStop(child, selectedStop.value!) })
-        const shouldShow = childVisibleIDs.has(child.id)
-        attachMapLabel(marker, child.title, '', isChildTarget, shouldShow)
-        mapInstance.addOverlay(marker)
-      }
+    for (const { child, parent } of mapSubStops.value) {
+      const point = mapPointFor(child)
+      if (!point || point.crs !== 'bd09ll') continue
+      const mapPoint = new mapAPI.Point(point.lng, point.lat)
+      const marker = new mapAPI.Marker(mapPoint)
+      const isChildTarget = selectedTarget.value?.id === child.id
+      marker.__journeyinSubStopId = child.id
+      marker.__journeyinParentStopId = parent.id
+      marker.__journeyinStop = child
+      marker.__journeyinTitle = child.title
+      marker.__journeyinBadge = ''
+      marker.__journeyinIsSubStop = true
+      currentStopMarkers.push(marker)
+      marker.addEventListener?.('click', () => { if (mapPickMode.value) { handleMapClick({ point: mapPoint }); return }; selectSubStop(child, parent) })
+      const shouldShow = visibleLabelIDs.has(child.id)
+      attachMapLabel(marker, child.title, '', isChildTarget, shouldShow)
+      mapInstance.addOverlay(marker)
     }
     for (const day of visibleDays.value) for (const leg of day.legs || []) {
       const snapshot = chooseSnapshot(leg, 'baidu', planningMode.value)
@@ -2693,7 +2701,7 @@ async function renderAMapMap(preserveView = false) {
     clearAMapOverlays()
     currentStopMarkers = []
     const points: any[] = []
-    const visibleLabelIDs = computeVisibleLabelStopIDs(mapStops.value)
+    const visibleLabelIDs = computeVisibleLabelStopIDs(mapLabelPoints.value)
     for (const stop of mapStops.value) {
       const point = pointForProvider(stop, 'amap')
       if (!point) continue
@@ -2728,30 +2736,28 @@ async function renderAMapMap(preserveView = false) {
       const shouldShow = visibleLabelIDs.has(stop.id)
       attachAMapLabel(marker, carryOver ? '前日终点 · ' + stop.title : stop.title, carryOver ? '' : badge, isTarget, shouldShow)
     }
-    if (selectedStop.value?.children?.length) {
-      const childVisibleIDs = computeVisibleLabelStopIDs(selectedStop.value.children)
-      for (const child of selectedStop.value.children) {
-        const point = pointForProvider(child, 'amap')
-        if (!point) continue
-        const mapPoint = amapPointToArray(point)
-        const isChildTarget = selectedTarget.value?.id === child.id
-        const marker = addAMapOverlay(new mapAPI.Marker({
-          position: mapPoint,
-          title: child.title,
-          content: renderSubStopPinHTML(child.sequence, isChildTarget),
-          offset: new mapAPI.Pixel(-9, -9),
-          zIndex: isChildTarget ? 150 : 90
-        }))
-        marker.__journeyinSubStopId = child.id
-        marker.__journeyinStop = child
-        marker.__journeyinTitle = child.title
-        marker.__journeyinBadge = ''
-        marker.__journeyinIsSubStop = true
-        currentStopMarkers.push(marker)
-        marker.on?.('click', () => { if (mapPickMode.value) { handleMapClick({ point: { lng: point.lng, lat: point.lat, crs: 'gcj02' } }); return }; selectSubStop(child, selectedStop.value!) })
-        const shouldShow = childVisibleIDs.has(child.id)
-        attachAMapLabel(marker, child.title, '', isChildTarget, shouldShow)
-      }
+    for (const { child, parent } of mapSubStops.value) {
+      const point = pointForProvider(child, 'amap')
+      if (!point) continue
+      const mapPoint = amapPointToArray(point)
+      const isChildTarget = selectedTarget.value?.id === child.id
+      const marker = addAMapOverlay(new mapAPI.Marker({
+        position: mapPoint,
+        title: child.title,
+        content: renderSubStopPinHTML(child.sequence, isChildTarget),
+        offset: new mapAPI.Pixel(-9, -9),
+        zIndex: isChildTarget ? 150 : 90
+      }))
+      marker.__journeyinSubStopId = child.id
+      marker.__journeyinParentStopId = parent.id
+      marker.__journeyinStop = child
+      marker.__journeyinTitle = child.title
+      marker.__journeyinBadge = ''
+      marker.__journeyinIsSubStop = true
+      currentStopMarkers.push(marker)
+      marker.on?.('click', () => { if (mapPickMode.value) { handleMapClick({ point: { lng: point.lng, lat: point.lat, crs: 'gcj02' } }); return }; selectSubStop(child, parent) })
+      const shouldShow = visibleLabelIDs.has(child.id)
+      attachAMapLabel(marker, child.title, '', isChildTarget, shouldShow)
     }
     for (const day of visibleDays.value) for (const leg of day.legs || []) {
       const snapshot = chooseSnapshot(leg, 'amap', planningMode.value)
@@ -3845,10 +3851,7 @@ function shouldShowRouteLabel(distanceM: number | undefined, isLegSelected: bool
 
 function updateStopLabelsVisibility() {
   if (!mapInstance || !mapAPI || !currentStopMarkers.length) return
-  const visibleLabelIDs = computeVisibleLabelStopIDs(mapStops.value)
-  const childVisibleIDs = selectedStop.value?.children?.length
-    ? computeVisibleLabelStopIDs(selectedStop.value.children)
-    : new Set<string>()
+  const visibleLabelIDs = computeVisibleLabelStopIDs(mapLabelPoints.value)
 
   const isAMap = selectedMapProvider.value === 'amap'
   for (const marker of currentStopMarkers) {
@@ -3856,7 +3859,7 @@ function updateStopLabelsVisibility() {
     const stopId = isSubStop ? marker.__journeyinSubStopId : marker.__journeyinStopId
     if (!stopId) continue
     const isTarget = selectedTarget.value?.id === stopId
-    const shouldShow = isSubStop ? childVisibleIDs.has(stopId) : visibleLabelIDs.has(stopId)
+    const shouldShow = visibleLabelIDs.has(stopId)
     const title = marker.__journeyinTitle || ''
     const badge = marker.__journeyinBadge || ''
     if (isAMap) {
