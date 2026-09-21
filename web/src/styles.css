@@ -1324,6 +1324,8 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .trip-history-item-main span, .trip-history-item-main small { color: var(--muted); font-size: 10px; }
 .trip-history-item-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; }
 .trip-history-item-actions button { min-height: 38px; }
+.history-restore-action { min-height: 38px; padding: 7px 9px; border: 1px solid color-mix(in srgb, var(--md-warning) 48%, var(--line)); border-radius: 10px; color: var(--md-warning); background: color-mix(in srgb, var(--md-warning) 7%, var(--surface)); font-size: 10px; font-weight: 900; white-space: nowrap; }
+.history-restore-action:disabled { opacity: .6; }
 .danger-text-action { min-height: 34px; padding: 7px 9px; border: 1px solid color-mix(in srgb, var(--md-error) 42%, var(--line)); border-radius: 10px; color: var(--md-error); background: transparent; font-size: 10px; font-weight: 900; }
 
 @media (max-width: 720px) {

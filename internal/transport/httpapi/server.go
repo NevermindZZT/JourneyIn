@@ -104,6 +104,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/trips/{id}/history", s.listTripHistory)
 	mux.HandleFunc("POST /api/v1/trips/{id}/history", s.createTripHistory)
 	mux.HandleFunc("GET /api/v1/trips/{id}/history/{historyID}", s.getTripHistory)
+	mux.HandleFunc("POST /api/v1/trips/{id}/history/{historyID}/restore", s.restoreTripHistory)
 	mux.HandleFunc("DELETE /api/v1/trips/{id}/history/{historyID}", s.deleteTripHistory)
 	mux.HandleFunc("PATCH /api/v1/trips/{id}", s.updateTripDetails)
 	mux.HandleFunc("PUT /api/v1/trips/{id}", s.replaceTrip)

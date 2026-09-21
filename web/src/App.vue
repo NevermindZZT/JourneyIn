@@ -361,6 +361,7 @@ const tripDetailsNotice = ref('')
 const historyOpen = ref(false)
 const historyLoading = ref(false)
 const historySaving = ref(false)
+const historyRestoringID = ref('')
 const historyDeletingID = ref('')
 const historyEntries = ref<TripHistoryEntry[]>([])
 const historyLabelDraft = ref('')
@@ -1784,6 +1785,42 @@ async function exitTripHistory() {
   historyMessage.value = ''
   if (trip) await loadDetail(trip)
 }
+async function restoreTripHistory(entry: TripHistoryEntry) {
+  if (readOnlyView.value || !selected.value || historyRestoringID.value) return
+  const historyID = entry.history_id || entry.id
+  const label = entry.label || '保存于 ' + formatDateTime(entry.created_at)
+  if (!window.confirm('确认使用“' + label + '”覆盖当前行程吗？当前未保存的修改将丢失，行程工作版本会递增；该历史版本会保留，不会被删除。')) return
+  const tripID = selected.value.id
+  const revision = selected.value.revision
+  historyRestoringID.value = historyID
+  historyError.value = ''
+  historyMessage.value = ''
+  try {
+    const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(tripID) + '/history/' + encodeURIComponent(historyID) + '/restore', { method: 'POST', headers: { 'If-Match': 'revision-' + revision, 'Idempotency-Key': makeID('history-restore') } })
+    const payload = await response.json() as { document?: TripDocument; title?: string; start_date?: string; end_date?: string; revision?: number; stops?: number; days?: number; updated_at?: string; idempotency_replay?: boolean; error?: { message?: string } }
+    if (!response.ok) {
+      if (response.status === 409 && selected.value) {
+        await loadDetail(selected.value)
+        await refreshTripHistoryList(tripID)
+        throw new Error(payload.error?.message || '行程已被其他操作更新，请重新确认后再覆盖')
+      }
+      throw new Error(payload.error?.message || '覆盖当前行程失败')
+    }
+    applyTripPayload(payload)
+    selectedStopId.value = ''
+    selectedSubStopId.value = ''
+    selectedLegId.value = ''
+    await refreshTripHistoryList(tripID)
+    historyMessage.value = payload.idempotency_replay ? '已确认当前行程已由该历史版本覆盖。' : '已用“' + label + '”覆盖当前行程；历史版本已保留。'
+    await nextTick()
+    await renderMap()
+  } catch (cause) {
+    historyError.value = cause instanceof Error ? cause.message : '覆盖当前行程失败'
+  } finally {
+    historyRestoringID.value = ''
+  }
+}
+
 async function deleteTripHistory(entry: TripHistoryEntry) {
   if (!selected.value || historyDeletingID.value) return
   const historyID = entry.history_id || entry.id
@@ -5863,7 +5900,7 @@ onUnmounted(() => {
           <div v-if="historyLoading" class="trip-history-loading"><span class="loading-dot"></span><span>正在读取版本历史…</span></div>
           <div v-else-if="!historyEntries.length" class="trip-history-empty"><span class="history-empty-mark">↶</span><strong>还没有历史版本</strong><p>保存当前状态后，可以随时回来查看它。删除历史版本不会影响当前行程。</p></div>
           <div v-else class="trip-history-list">
-            <article v-for="version in historyEntries" :key="version.history_id || version.id" class="trip-history-item"><div class="trip-history-item-main"><strong>{{ version.label || '保存于 ' + formatDateTime(version.created_at) }}</strong><span>{{ formatDateRange(version.start_date, version.end_date) }} · 工作版本 {{ version.source_revision }}</span><small>{{ version.title }} · {{ formatDateTime(version.created_at) }}</small></div><div class="trip-history-item-actions"><button class="secondary-action compact-action" type="button" :disabled="historyLoading" @click="viewTripHistory(version)">查看</button><button class="danger-text-action" type="button" :disabled="historyDeletingID === (version.history_id || version.id)" @click="deleteTripHistory(version)">{{ historyDeletingID === (version.history_id || version.id) ? '删除中…' : '删除' }}</button></div></article>
+            <article v-for="version in historyEntries" :key="version.history_id || version.id" class="trip-history-item"><div class="trip-history-item-main"><strong>{{ version.label || '保存于 ' + formatDateTime(version.created_at) }}</strong><span>{{ formatDateRange(version.start_date, version.end_date) }} · 工作版本 {{ version.source_revision }}</span><small>{{ version.title }} · {{ formatDateTime(version.created_at) }}</small></div><div class="trip-history-item-actions"><button class="secondary-action compact-action" type="button" :disabled="historyLoading || Boolean(historyRestoringID)" @click="viewTripHistory(version)">查看</button><button class="history-restore-action" type="button" :disabled="Boolean(historyRestoringID) || historyDeletingID === (version.history_id || version.id)" @click="restoreTripHistory(version)">{{ historyRestoringID === (version.history_id || version.id) ? '覆盖中…' : '覆盖当前' }}</button><button class="danger-text-action" type="button" :disabled="Boolean(historyRestoringID) || historyDeletingID === (version.history_id || version.id)" @click="deleteTripHistory(version)">{{ historyDeletingID === (version.history_id || version.id) ? '删除中…' : '删除' }}</button></div></article>
           </div>
         </section>
       </div>

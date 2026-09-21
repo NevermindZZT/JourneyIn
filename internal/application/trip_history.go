@@ -20,6 +20,11 @@ type SaveTripVersionResult struct {
 	AlreadySaved bool                   `json:"already_saved"`
 }
 
+type RestoreTripVersionResult struct {
+	Record    store.TripRecord `json:"record"`
+	HistoryID string           `json:"history_id"`
+}
+
 func normalizeSavedTripVersionLabel(label string) (string, error) {
 	label = strings.TrimSpace(label)
 	if utf8.RuneCountInString(label) > savedTripVersionLabelMax {
@@ -88,6 +93,55 @@ func (s *TripService) ListTripVersions(ctx context.Context, tripID string, limit
 
 func (s *TripService) GetTripVersion(ctx context.Context, tripID, versionID string) (store.SavedTripVersion, error) {
 	return s.store.GetSavedTripVersion(ctx, tripID, versionID)
+}
+
+// RestoreTripVersionIdempotent replaces the current working Trip with one of
+// its immutable, user-saved history snapshots. The target Trip ID is retained
+// and the normal optimistic revision check protects newer edits.
+func (s *TripService) RestoreTripVersionIdempotent(ctx context.Context, tripID, versionID string, expectedRevision int, idempotencyKey string) (store.TripRecord, bool, error) {
+	idempotencyKey = strings.TrimSpace(idempotencyKey)
+	if idempotencyKey == "" {
+		return store.TripRecord{}, false, ErrIdempotencyKeyRequired
+	}
+	requestData, err := json.Marshal(struct {
+		TripID           string
+		VersionID        string
+		ExpectedRevision int
+	}{TripID: tripID, VersionID: versionID, ExpectedRevision: expectedRevision})
+	if err != nil {
+		return store.TripRecord{}, false, err
+	}
+	requestHash := domain.ContentHash(requestData)
+	scope := "trip:" + tripID + ":history-restore"
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if replay, ok, err := s.store.Idempotency(ctx, scope, idempotencyKey, requestHash); err != nil {
+		return store.TripRecord{}, false, err
+	} else if ok {
+		var payload RestoreTripVersionResult
+		if err := json.Unmarshal(replay, &payload); err != nil {
+			return store.TripRecord{}, false, err
+		}
+		return payload.Record, true, nil
+	}
+
+	version, err := s.GetTripVersion(ctx, tripID, versionID)
+	if err != nil {
+		return store.TripRecord{}, false, err
+	}
+	record, err := s.Replace(ctx, tripID, expectedRevision, version.Document, "history:restore")
+	if err != nil {
+		return store.TripRecord{}, false, err
+	}
+	payload, err := json.Marshal(RestoreTripVersionResult{Record: record, HistoryID: version.ID})
+	if err != nil {
+		return store.TripRecord{}, false, err
+	}
+	if err := s.store.SaveIdempotency(ctx, scope, idempotencyKey, requestHash, payload); err != nil {
+		return store.TripRecord{}, false, err
+	}
+	return record, false, nil
 }
 
 func (s *TripService) DeleteTripVersion(ctx context.Context, tripID, versionID string) error {

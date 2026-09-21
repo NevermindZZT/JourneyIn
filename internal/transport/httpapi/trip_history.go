@@ -69,6 +69,28 @@ func (s *Server) getTripHistory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, tripHistoryResponse(version, true))
 }
 
+func (s *Server) restoreTripHistory(w http.ResponseWriter, r *http.Request) {
+	expected, err := parseRevision(r.Header.Get("If-Match"))
+	if err != nil {
+		writeError(w, http.StatusPreconditionRequired, "if_match_required", "If-Match must be revision-N", nil)
+		return
+	}
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if idempotencyKey == "" {
+		writeError(w, http.StatusBadRequest, "idempotency_key_required", "Idempotency-Key is required", nil)
+		return
+	}
+	record, replayed, err := s.trips.RestoreTripVersionIdempotent(r.Context(), r.PathValue("id"), r.PathValue("historyID"), expected, idempotencyKey)
+	if err != nil {
+		writeTripHistoryError(w, err)
+		return
+	}
+	response := tripResponse(record)
+	response["restored_from_history_id"] = r.PathValue("historyID")
+	response["idempotency_replay"] = replayed
+	writeJSON(w, http.StatusOK, response)
+}
+
 func (s *Server) deleteTripHistory(w http.ResponseWriter, r *http.Request) {
 	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	if idempotencyKey == "" {
