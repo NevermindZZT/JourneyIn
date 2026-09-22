@@ -41,6 +41,7 @@ type Server struct {
 	auth               *Authenticator
 	photosService      *photos.Service
 	weatherService     *weather.Service
+	mcpToken           string
 }
 
 func NewServer(trips *application.TripService, web, schema fs.FS, version string, logger *slog.Logger) *Server {
@@ -81,6 +82,7 @@ func (s *Server) SetSettingsStore(settingsStore *store.Store) { s.settingsStore 
 func (s *Server) SetAuthenticator(auth *Authenticator)        { s.auth = auth }
 func (s *Server) SetPhotoService(service *photos.Service)     { s.photosService = service }
 func (s *Server) SetWeatherService(service *weather.Service)  { s.weatherService = service }
+func (s *Server) SetMCPToken(token string)                    { s.mcpToken = strings.TrimSpace(token) }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -197,7 +199,7 @@ func (s *Server) capabilities(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"version": s.version, "schema_versions": []int{1}, "default_map_provider": defaultProvider, "map_providers": providers, "features": map[string]any{"planning_point_edit": true, "coordinate_repair": true}, "mcp": map[string]any{"http_endpoint": "/mcp", "transports": []string{"streamable-http", "stdio"}}})
+	writeJSON(w, http.StatusOK, map[string]any{"version": s.version, "schema_versions": []int{1}, "default_map_provider": defaultProvider, "map_providers": providers, "features": map[string]any{"planning_point_edit": true, "coordinate_repair": true}, "mcp": map[string]any{"http_endpoint": "/mcp", "transports": []string{"streamable-http", "stdio"}, "token_configured": s.mcpToken != ""}})
 }
 
 func (s *Server) schemaTrip(w http.ResponseWriter, r *http.Request) {

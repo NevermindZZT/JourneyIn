@@ -5,7 +5,7 @@ import {
 } from '@ionic/vue'
 import BMapLoader from '@baidumap/jsapi-loader'
 import AMapLoader from '@amap/amap-jsapi-loader'
-import { addOutline, chevronBackOutline, chevronDownOutline, chevronForwardOutline, chevronUpOutline, closeOutline, cloudOfflineOutline, createOutline, footstepsOutline, imageOutline, linkOutline, logInOutline, mapOutline, menuOutline, navigateOutline, partlySunnyOutline, refreshOutline, searchOutline, settingsOutline, sunnyOutline } from 'ionicons/icons'
+import { addOutline, chevronBackOutline, chevronDownOutline, chevronForwardOutline, chevronUpOutline, closeOutline, cloudOfflineOutline, copyOutline, createOutline, eyeOffOutline, eyeOutline, footstepsOutline, imageOutline, linkOutline, logInOutline, mapOutline, menuOutline, navigateOutline, partlySunnyOutline, refreshOutline, searchOutline, settingsOutline, sunnyOutline } from 'ionicons/icons'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 import PrototypePreview from './PrototypePreview.vue'
@@ -29,8 +29,8 @@ type SharedBootstrap = { trip: TripDocument & { id?: string; status?: string }; 
 type TripSummary = { id: string; title: string; status: string; start_date: string; end_date: string; timezone: string; revision: number; days?: number; stops?: number; show_in_atlas?: boolean; updated_at?: string }
 type TripHistoryEntry = { id: string; history_id?: string; trip_id: string; source_revision: number; title: string; start_date: string; end_date: string; label?: string; content_hash: string; created_at: string; read_only?: boolean }
 type TripSortMode = 'updated' | 'date'
-type Capabilities = { version?: string; default_map_provider?: 'baidu' | 'amap'; map_providers?: { baidu?: { browser_key_configured?: boolean; browser_key?: string }; amap?: { browser_key_configured?: boolean; browser_key?: string; security_proxy_path?: string; security_js_code_configured?: boolean } }; features?: { planning_point_edit?: boolean; coordinate_repair?: boolean }; mcp?: { http_endpoint?: string } }
-type KeySettings = { map?: { default_provider?: 'baidu' | 'amap'; baidu?: { browser_key_configured?: boolean; server_key_configured?: boolean }; amap?: { js_key_configured?: boolean; server_key_configured?: boolean; security_js_code_configured?: boolean } }; poi?: { provider_priority?: 'amap' | 'baidu'; local_directory_count?: number }; photos?: { root_dir?: string; configured?: boolean }; weather?: { default_provider?: 'auto' | 'openmeteo' | 'qweather' | 'caiyun' | 'amap' | 'baidu'; openmeteo?: { available?: boolean }; qweather?: { key_configured?: boolean; host?: string }; caiyun?: { token_configured?: boolean } } }
+type Capabilities = { version?: string; default_map_provider?: 'baidu' | 'amap'; map_providers?: { baidu?: { browser_key_configured?: boolean; browser_key?: string }; amap?: { browser_key_configured?: boolean; browser_key?: string; security_proxy_path?: string; security_js_code_configured?: boolean } }; features?: { planning_point_edit?: boolean; coordinate_repair?: boolean }; mcp?: { http_endpoint?: string; transports?: string[]; token_configured?: boolean } }
+type KeySettings = { map?: { default_provider?: 'baidu' | 'amap'; baidu?: { browser_key_configured?: boolean; server_key_configured?: boolean }; amap?: { js_key_configured?: boolean; server_key_configured?: boolean; security_js_code_configured?: boolean } }; poi?: { provider_priority?: 'amap' | 'baidu'; local_directory_count?: number }; photos?: { root_dir?: string; configured?: boolean }; weather?: { default_provider?: 'auto' | 'openmeteo' | 'qweather' | 'caiyun' | 'amap' | 'baidu'; openmeteo?: { available?: boolean }; qweather?: { key_configured?: boolean; host?: string }; caiyun?: { token_configured?: boolean } }; mcp?: { http_endpoint?: string; token_configured?: boolean; token?: string } }
 type PlaceCandidate = { id?: string; name: string; address?: string; location: Coord & { crs?: string }; provider?: string; citycode?: string; adcode?: string; typecode?: string }
 type TravelMode = 'driving' | 'walking' | 'cycling' | 'transit'
 
@@ -457,6 +457,17 @@ const qweatherHostInput = ref('')
 const caiyunTokenInput = ref('')
 const localDirectoryCount = ref(0)
 const settingsSaving = ref(false)
+const mcpTokenVisible = ref(false)
+const mcpEndpointCopied = ref(false)
+const mcpTokenCopied = ref(false)
+const mcpEndpointPath = computed(() => settingsData.value?.mcp?.http_endpoint || capabilities.value?.mcp?.http_endpoint || '/mcp')
+const mcpFullEndpoint = computed(() => {
+  const endpoint = mcpEndpointPath.value
+  const origin = serverURL.value ? serverURL.value.replace(/\/+$/, '') : window.location.origin
+  return origin + endpoint
+})
+const mcpTokenValue = computed(() => settingsData.value?.mcp?.token || '')
+const mcpTokenConfigured = computed(() => Boolean(settingsData.value?.mcp?.token_configured ?? (capabilities.value?.mcp?.token_configured || mcpTokenValue.value)))
 const panelOpen = ref(localStorage.getItem('journeyin.panelOpen') !== 'false')
 const panelCollapsed = ref(localStorage.getItem('journeyin.panelCollapsed') === 'true')
 const mobileMapToolsOpen = ref(false)
@@ -4833,6 +4844,30 @@ async function copyShareURL() {
   error.value = ''
   try { await copyText(shareURL.value); shareCopyMessage.value = '分享链接已复制' } catch { error.value = '当前浏览器禁止自动复制，请长按或手动复制分享链接' }
 }
+async function copyMCPEndpoint() {
+  if (!mcpFullEndpoint.value) return
+  settingsMessage.value = ''
+  try {
+    await copyText(mcpFullEndpoint.value)
+    mcpEndpointCopied.value = true
+    settingsMessage.value = 'MCP 服务端点已复制到剪贴板'
+    window.setTimeout(() => { mcpEndpointCopied.value = false }, 2000)
+  } catch {
+    settingsMessage.value = '复制失败，请手动选择端点地址进行复制'
+  }
+}
+async function copyMCPToken() {
+  if (!mcpTokenValue.value) return
+  settingsMessage.value = ''
+  try {
+    await copyText(mcpTokenValue.value)
+    mcpTokenCopied.value = true
+    settingsMessage.value = 'MCP 访问令牌已复制到剪贴板'
+    window.setTimeout(() => { mcpTokenCopied.value = false }, 2000)
+  } catch {
+    settingsMessage.value = '复制失败，请手动选择令牌进行复制'
+  }
+}
 function dismissShareNotice() {
   shareNoticeVisible.value = false
 }
@@ -6161,8 +6196,104 @@ onUnmounted(() => {
               </section>
 
               <section v-else class="settings-page-section">
-                <div class="settings-section-heading"><span class="eyebrow">MODEL CONTEXT PROTOCOL</span><h3>MCP 连接</h3><p>为 AI Agent 提供 Trip 校验、预览和确认保存能力。</p></div>
-                <div class="settings-card settings-mcp-card"><div class="settings-mcp-icon">◇</div><div><strong>MCP Endpoint</strong><code>{{ capabilities?.mcp?.http_endpoint || '/mcp' }}</code><p>Docker 远程部署时通过 JOURNEYIN_MCP_TOKEN 保护 HTTP MCP；本地 localhost 调试可以不设置。</p></div></div>
+                <div class="settings-section-heading"><span class="eyebrow">MODEL CONTEXT PROTOCOL</span><h3>MCP 连接</h3><p>为 AI Agent (Cursor / Claude / DSH 等) 提供行程校验、规划点增补与确认保存能力。</p></div>
+
+                <div class="settings-card">
+                  <div class="settings-card-heading">
+                    <div>
+                      <strong>MCP 服务端点 (Endpoint)</strong>
+                      <small>Streamable HTTP 端点完整地址</small>
+                    </div>
+                    <span class="provider-status">已就绪</span>
+                  </div>
+                  <div class="settings-copy-input-row">
+                    <input
+                      type="text"
+                      :value="mcpFullEndpoint"
+                      readonly
+                      class="settings-code-input"
+                      aria-label="MCP 端点完整地址"
+                    />
+                    <button
+                      type="button"
+                      class="secondary-action compact-action settings-copy-btn"
+                      :class="{ copied: mcpEndpointCopied }"
+                      @click="copyMCPEndpoint"
+                    >
+                      <IonIcon :icon="copyOutline" />
+                      <span>{{ mcpEndpointCopied ? "已复制" : "复制端点" }}</span>
+                    </button>
+                  </div>
+                  <p class="settings-help">
+                    AI Agent 客户端连接时填入此 URL。相对路径：<code>{{ mcpEndpointPath }}</code>。
+                  </p>
+                </div>
+
+                <div class="settings-card">
+                  <div class="settings-card-heading">
+                    <div>
+                      <strong>MCP 访问令牌 (Token)</strong>
+                      <small>用于 Bearer 身份认证，保护 /mcp 接口安全</small>
+                    </div>
+                    <span class="provider-status" :class="{ 'status-warning': !mcpTokenConfigured }">
+                      {{ mcpTokenConfigured ? "已配置" : "未配置" }}
+                    </span>
+                  </div>
+
+                  <div v-if="mcpTokenConfigured" class="settings-copy-input-row">
+                    <div class="settings-password-wrap">
+                      <input
+                        :type="mcpTokenVisible ? 'text' : 'password'"
+                        :value="mcpTokenValue"
+                        readonly
+                        class="settings-code-input settings-password-input"
+                        aria-label="MCP 访问令牌"
+                      />
+                      <button
+                        type="button"
+                        class="settings-password-toggle"
+                        :title="mcpTokenVisible ? '隐藏密文' : '查看明文'"
+                        :aria-label="mcpTokenVisible ? '隐藏密文' : '查看明文'"
+                        @click="mcpTokenVisible = !mcpTokenVisible"
+                      >
+                        <IonIcon :icon="mcpTokenVisible ? eyeOffOutline : eyeOutline" />
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      class="secondary-action compact-action settings-copy-btn"
+                      :class="{ copied: mcpTokenCopied }"
+                      :disabled="!mcpTokenValue"
+                      @click="copyMCPToken"
+                    >
+                      <IonIcon :icon="copyOutline" />
+                      <span>{{ mcpTokenCopied ? "已复制" : "复制 Token" }}</span>
+                    </button>
+                  </div>
+
+                  <div v-else class="settings-mcp-empty">
+                    <p>当前未配置 <code>JOURNEYIN_MCP_TOKEN</code>。本地 localhost 调试可免令牌连接；如需在远程环境限制 Agent 访问，请在启动参数或容器环境变量中指定 <code>JOURNEYIN_MCP_TOKEN</code>。</p>
+                  </div>
+
+                  <p class="settings-help">
+                    {{ mcpTokenConfigured
+                      ? "在 MCP 客户端配置中加入请求头 Authorization: Bearer <token>。Token 默认以密文保护显示，点击眼睛图标可临时切换查看明文。"
+                      : "本地调试时 MCP 客户端可直接连接 Endpoint 无需 Authorization 请求头。" }}
+                  </p>
+                </div>
+
+                <div class="settings-card settings-mcp-guide">
+                  <div class="settings-card-heading">
+                    <div>
+                      <strong>Agent 快速配置说明</strong>
+                      <small>支持 Cursor / Claude Desktop / DSH / Cherry Studio 等客户端</small>
+                    </div>
+                  </div>
+                  <p class="settings-help" style="margin-top: 0;">
+                    传输方式：<strong>Streamable HTTP</strong>（填入上方端点与 Token）或本地 <strong>stdio</strong> (<code>journeyin mcp stdio</code>)。
+                    Agent 可调用 <code>journeyin.validate_trip</code>、<code>journeyin.preview_save_trip</code>、<code>journeyin.commit_save_trip</code>、<code>journeyin.plan_trip</code> 等全套工具。
+                  </p>
+                </div>
               </section>
             </div>
           </div>

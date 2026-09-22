@@ -185,6 +185,11 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 				"token_configured": caiyunTokenConfigured,
 			},
 		},
+		"mcp": map[string]any{
+			"http_endpoint":    "/mcp",
+			"token_configured": s.mcpToken != "",
+			"token":            s.mcpToken,
+		},
 	})
 }
 

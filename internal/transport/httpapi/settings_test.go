@@ -1,11 +1,19 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
+	"io/fs"
 	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+
+	journeyin "journeyin"
+	"journeyin/internal/application"
+	"journeyin/internal/store"
 )
 
 func TestDefaultMapProviderSettingControlsCapabilitiesAndPlanning(t *testing.T) {
@@ -281,5 +289,88 @@ func TestWeatherSettingsUpdateAndRead(t *testing.T) {
 	resp3.Body.Close()
 	if s3.Weather.Caiyun.TokenConfigured {
 		t.Fatalf("expected caiyun token to be cleared")
+	}
+}
+func TestMCPSettingsEndpointAndToken(t *testing.T) {
+	server := testPlanningServer(t)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/v1/settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var s struct {
+		MCP struct {
+			HTTPEndpoint    string `json:"http_endpoint"`
+			TokenConfigured bool   `json:"token_configured"`
+			Token           string `json:"token"`
+		} `json:"mcp"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
+		t.Fatal(err)
+	}
+	if s.MCP.HTTPEndpoint != "/mcp" {
+		t.Fatalf("expected http_endpoint /mcp, got %s", s.MCP.HTTPEndpoint)
+	}
+	if s.MCP.TokenConfigured {
+		t.Fatalf("expected initial token_configured false")
+	}
+	if s.MCP.Token != "" {
+		t.Fatalf("expected initial token empty, got %s", s.MCP.Token)
+	}
+}
+func TestMCPSettingsWithToken(t *testing.T) {
+	migrations, err := fs.Sub(journeyin.MigrationFS, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "journeyin.db"), migrations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	webFS, _ := fs.Sub(journeyin.WebFS, "web/dist")
+	schemaFS, _ := fs.Sub(journeyin.SchemaFS, "schemas")
+	api := NewServer(application.NewTripService(db), webFS, schemaFS, "test", nil)
+	api.SetSettingsStore(db)
+	api.SetMCPToken("mcp-secret-key-123")
+	server := httptest.NewServer(api.Handler())
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/api/v1/settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var s struct {
+		MCP struct {
+			HTTPEndpoint    string `json:"http_endpoint"`
+			TokenConfigured bool   `json:"token_configured"`
+			Token           string `json:"token"`
+		} `json:"mcp"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
+		t.Fatal(err)
+	}
+	if !s.MCP.TokenConfigured || s.MCP.Token != "mcp-secret-key-123" {
+		t.Fatalf("unexpected mcp settings: %+v", s.MCP)
+	}
+
+	capResp, err := http.Get(server.URL + "/api/v1/capabilities")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer capResp.Body.Close()
+	var cap struct {
+		MCP struct {
+			TokenConfigured bool `json:"token_configured"`
+		} `json:"mcp"`
+	}
+	if err := json.NewDecoder(capResp.Body).Decode(&cap); err != nil {
+		t.Fatal(err)
+	}
+	if !cap.MCP.TokenConfigured {
+		t.Fatalf("expected capabilities token_configured true")
 	}
 }

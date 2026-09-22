@@ -163,11 +163,12 @@ func main() {
 	app.SetWeatherService(weatherService)
 	api.SetWeatherService(weatherService)
 
-	mcpToken := strings.TrimSpace(os.Getenv("JOURNEYIN_MCP_TOKEN"))
+	mcpToken := strings.TrimSpace(settingValue(ctx, database, "mcp.token", os.Getenv("JOURNEYIN_MCP_TOKEN")))
 	if !isLoopback(listen) && mcpToken == "" {
 		logger.Error("remote listen address requires JOURNEYIN_MCP_TOKEN")
 		os.Exit(2)
 	}
+	api.SetMCPToken(mcpToken)
 	mcpServer := mcptransport.NewServer(app, version, schemaFS)
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", mcptransport.RequireBearer(mcpServer.HTTPHandler(), mcpToken))
