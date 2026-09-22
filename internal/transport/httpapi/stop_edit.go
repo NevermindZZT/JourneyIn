@@ -88,7 +88,7 @@ func (s *Server) updatePlanningPoint(w http.ResponseWriter, r *http.Request) {
 		writePlanningPointError(w, err)
 		return
 	}
-	response := tripResponse(record)
+	response := tripMutationResponse(w, r, record, r.PathValue("dayID"))
 	response["changes"] = changes
 	writeJSON(w, http.StatusOK, response)
 }

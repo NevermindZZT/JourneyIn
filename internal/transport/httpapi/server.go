@@ -138,7 +138,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/v1/settings/weather", s.updateWeatherSettings)
 	mux.HandleFunc("/_AMapService/", s.amapServiceProxy)
 	mux.Handle("/", s.staticHandler())
-	return requestLogger(mux, s.logger)
+	return requestLogger(compressAPIJSON(mux), s.logger)
 }
 
 type loginRequest struct {
@@ -401,6 +401,79 @@ func tripResponse(r store.TripRecord) map[string]any {
 		result["document"] = document
 	}
 	return result
+}
+
+// tripMutationDelta contains only the day stop trees affected by a planning
+// point mutation. Route geometry is intentionally omitted: when a returned
+// day has no legs, clients clear their locally cached legs; otherwise they
+// retain their existing route snapshot.
+type tripMutationDelta struct {
+	Days []tripMutationDayDelta `json:"days"`
+}
+
+type tripMutationDayDelta struct {
+	ID          string        `json:"id"`
+	Stops       []domain.Stop `json:"stops"`
+	LegsCleared bool          `json:"legs_cleared,omitempty"`
+}
+
+// tripMutationResponse preserves the complete response for existing clients.
+// New clients can opt in with Prefer: return=delta and avoid downloading the
+// entire Trip document after a small point mutation.
+func tripMutationResponse(w http.ResponseWriter, r *http.Request, record store.TripRecord, changedDayIDs ...string) map[string]any {
+	if !wantsTripMutationDelta(r) {
+		return tripResponse(record)
+	}
+	delta, ok := mutationDeltaForDays(record.Document, changedDayIDs...)
+	if !ok {
+		return tripResponse(record)
+	}
+	w.Header().Set("Preference-Applied", "return=delta")
+	response := tripSummary(record)
+	response["delta"] = delta
+	return response
+}
+
+func wantsTripMutationDelta(r *http.Request) bool {
+	for _, preference := range strings.Split(r.Header.Get("Prefer"), ",") {
+		if strings.EqualFold(strings.TrimSpace(preference), "return=delta") {
+			return true
+		}
+	}
+	return false
+}
+
+func mutationDeltaForDays(document []byte, changedDayIDs ...string) (tripMutationDelta, bool) {
+	var trip domain.Trip
+	if err := json.Unmarshal(document, &trip); err != nil {
+		return tripMutationDelta{}, false
+	}
+	indexes := make(map[string]int, len(trip.Days))
+	for index, day := range trip.Days {
+		indexes[day.ID] = index
+	}
+	selected := make(map[int]bool)
+	for _, dayID := range changedDayIDs {
+		index, ok := indexes[dayID]
+		if !ok {
+			return tripMutationDelta{}, false
+		}
+		selected[index] = true
+		if index+1 < len(trip.Days) {
+			selected[index+1] = true
+		}
+	}
+	if len(selected) == 0 {
+		return tripMutationDelta{}, false
+	}
+	delta := tripMutationDelta{Days: make([]tripMutationDayDelta, 0, len(selected))}
+	for index, day := range trip.Days {
+		if !selected[index] {
+			continue
+		}
+		delta.Days = append(delta.Days, tripMutationDayDelta{ID: day.ID, Stops: day.Stops, LegsCleared: len(day.Legs) == 0})
+	}
+	return delta, true
 }
 func parseRevision(value string) (int, error) {
 	value = strings.Trim(value, "\"")

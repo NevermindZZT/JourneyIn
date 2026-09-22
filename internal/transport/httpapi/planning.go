@@ -56,7 +56,7 @@ func (s *Server) addStop(w http.ResponseWriter, r *http.Request) {
 		writePlanningError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, tripResponse(record))
+	writeJSON(w, http.StatusOK, tripMutationResponse(w, r, record, r.PathValue("dayID")))
 }
 
 func (s *Server) addSubStop(w http.ResponseWriter, r *http.Request) {
@@ -76,7 +76,7 @@ func (s *Server) addSubStop(w http.ResponseWriter, r *http.Request) {
 		writePlanningError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, tripResponse(record))
+	writeJSON(w, http.StatusOK, tripMutationResponse(w, r, record, r.PathValue("dayID")))
 }
 
 type moveStopBody struct {
@@ -108,7 +108,11 @@ func (s *Server) moveStop(w http.ResponseWriter, r *http.Request) {
 		writePlanningError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, tripResponse(record))
+	changedDays := []string{r.PathValue("dayID")}
+	if targetDayID := strings.TrimSpace(body.TargetDayID); targetDayID != "" {
+		changedDays = append(changedDays, targetDayID)
+	}
+	writeJSON(w, http.StatusOK, tripMutationResponse(w, r, record, changedDays...))
 }
 
 func (s *Server) deleteStop(w http.ResponseWriter, r *http.Request) {
@@ -122,7 +126,7 @@ func (s *Server) deleteStop(w http.ResponseWriter, r *http.Request) {
 		writePlanningError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, tripResponse(record))
+	writeJSON(w, http.StatusOK, tripMutationResponse(w, r, record, r.PathValue("dayID")))
 }
 
 type weatherRefreshBody struct {

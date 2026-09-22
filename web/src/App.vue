@@ -23,6 +23,7 @@ type Stop = { id: string; sequence: number; kind?: string; title: string; addres
 type SubStop = { id: string; sequence: number; kind?: string; title: string; address?: string; location?: LocationData; time_window?: { arrival?: string; departure?: string }; description_markdown?: string; links?: LinkData[]; weather?: Record<string, unknown> }
 type Leg = { id: string; from_stop_id: string; to_stop_id: string; mode?: string; snapshots?: Array<{ provider?: string; coordinate_system?: string; mode?: string; strategy?: string; source?: string; geometry?: Array<[number, number]> | Array<Coord>; distance_m?: number; duration_s?: number; fetched_at?: string }> }
 type Day = { id: string; date: string; title?: string; notes_markdown?: string; stops: Stop[]; legs?: Leg[] }
+type TripMutationDelta = { days: Array<{ id: string; stops: Stop[]; legs_cleared?: boolean }> }
 type TripDocument = { title: string; show_in_atlas?: boolean; date_range?: { start: string; end: string }; timezone: string; description_markdown?: string; links?: LinkData[]; map?: { preferred_provider?: 'baidu' | 'amap'; enabled_providers?: Array<'baidu' | 'amap'>; default_mode?: TravelMode }; days: Day[] }
 type SharedBootstrap = { trip: TripDocument & { id?: string; status?: string }; browser_key?: string; amap_browser_key?: string; amap_security_proxy_path?: string; amap_security_js_code_configured?: boolean; default_map_provider?: 'baidu' | 'amap'; revision?: number }
 type TripSummary = { id: string; title: string; status: string; start_date: string; end_date: string; timezone: string; revision: number; days?: number; stops?: number; show_in_atlas?: boolean; updated_at?: string }
@@ -720,7 +721,7 @@ async function saveStopDate() {
   stopDateSaving.value = true
   error.value = ''
   try {
-    const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(sourceDay.id) + '/stops/' + encodeURIComponent(stopID) + '/move', { method: 'POST', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision }, body: JSON.stringify({ target_day_id: targetDay.id }) })
+    const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(sourceDay.id) + '/stops/' + encodeURIComponent(stopID) + '/move', { method: 'POST', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision, 'Prefer': 'return=delta' }, body: JSON.stringify({ target_day_id: targetDay.id }) })
     const payload = await response.json() as { document?: TripDocument; revision?: number; stops?: number; days?: number; error?: { message?: string } }
     if (!response.ok) throw new Error(payload.error?.message || '修改规划点日期失败')
     applyTripPayload(payload)
@@ -2031,7 +2032,7 @@ async function persistPlanningPointUpdate(target: Stop | SubStop, patch: Plannin
   if (patch.address !== undefined) body.address = patch.address
   if (patch.location !== undefined) body.location = patch.location
   if (patch.exclude_from_route !== undefined) body.exclude_from_route = patch.exclude_from_route
-  const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(day.id) + '/stops/' + encodeURIComponent(target.id), { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision }, body: JSON.stringify(body) })
+  const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(day.id) + '/stops/' + encodeURIComponent(target.id), { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision, 'Prefer': 'return=delta' }, body: JSON.stringify(body) })
   const payload = await response.json() as PlanningPointUpdatePayload
   if (!response.ok) {
     if (response.status === 409 && selected.value) {
@@ -4421,7 +4422,7 @@ async function saveMapPick() {
       const endpoint = '/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(mapPickDayID.value) + '/stops/' + encodeURIComponent(parentID) + '/children'
       const response = await apiFetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision },
+        headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision, 'Prefer': 'return=delta' },
         body: JSON.stringify({ stop: { title: addedTitle, address: mapPickAddress.value.trim(), location: locationForMapPoint(point, provider) } })
       })
       const payload = await response.json() as { document?: TripDocument; revision?: number; stops?: number; days?: number; error?: { message?: string } }
@@ -4438,7 +4439,7 @@ async function saveMapPick() {
 
     const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(mapPickDayID.value) + '/stops', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision },
+      headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision, 'Prefer': 'return=delta' },
       body: JSON.stringify({ stop: { title: addedTitle, address: mapPickAddress.value.trim(), location: locationForMapPoint(point, provider) } })
     })
     const payload = await response.json() as { document?: TripDocument; revision?: number; stops?: number; days?: number; error?: { message?: string } }
@@ -4521,11 +4522,22 @@ function attachRouteLabel(snapshot: { geometry?: Array<[number, number]> | Array
   })
   label.setPosition?.(new mapAPI.Point(middle.lng, middle.lat)); mapInstance.addOverlay(label)
 }
-function applyTripPayload(payload: { document?: TripDocument; title?: string; start_date?: string; end_date?: string; revision?: number; stops?: number; days?: number; updated_at?: string }) {
+function applyTripPayload(payload: { document?: TripDocument; delta?: TripMutationDelta; title?: string; start_date?: string; end_date?: string; revision?: number; stops?: number; days?: number; updated_at?: string }) {
   const previousStopID = selectedStopId.value
   const previousSubStopID = selectedSubStopId.value
   const previousSelected = selected.value
-  if (payload.document) tripDocument.value = payload.document
+  if (payload.document) {
+    tripDocument.value = payload.document
+  } else if (payload.delta && tripDocument.value) {
+    const changes = new Map(payload.delta.days.map(day => [day.id, day]))
+    tripDocument.value = {
+      ...tripDocument.value,
+      days: tripDocument.value.days.map(day => {
+        const change = changes.get(day.id)
+        return change ? { ...day, stops: change.stops, legs: change.legs_cleared ? [] : day.legs } : day
+      }),
+    }
+  }
   if (selected.value) {
     const range = tripDateRangeFor(payload.document || tripDocument.value, previousSelected)
     const nextTitle = payload.title || payload.document?.title || selected.value.title
@@ -4572,7 +4584,7 @@ async function addPlaceToTrip(candidate: PlaceCandidate) {
   const parentID = searchParentStopId.value
   const endpoint = parentID ? '/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(day.id) + '/stops/' + encodeURIComponent(parentID) + '/children' : '/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(day.id) + '/stops'
   try {
-    const response = await apiFetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision }, body: JSON.stringify({ stop: { title: candidate.name, address: candidate.address, location: savedLocationFor(candidate) } }) })
+    const response = await apiFetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision, 'Prefer': 'return=delta' }, body: JSON.stringify({ stop: { title: candidate.name, address: candidate.address, location: savedLocationFor(candidate) } }) })
     const payload = await response.json() as { document?: TripDocument; revision?: number; stops?: number; days?: number; error?: { message?: string } }
     if (!response.ok) throw new Error(payload.error?.message || '添加规划点失败')
     applyTripPayload(payload)
@@ -5019,7 +5031,7 @@ async function movePlanningPointToDay(stop: Stop, target: PlanningPointMoveTarge
   const revision = selected.value.revision
   actionLoading.value = true; error.value = ''; reorderMessage.value = ''
   try {
-    const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(sourceDay.id) + '/stops/' + encodeURIComponent(stop.id) + '/move', { method: 'POST', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + revision }, body: JSON.stringify({ target_day_id: target.day.id, target_sequence: target.sequence }) })
+    const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(sourceDay.id) + '/stops/' + encodeURIComponent(stop.id) + '/move', { method: 'POST', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + revision, 'Prefer': 'return=delta' }, body: JSON.stringify({ target_day_id: target.day.id, target_sequence: target.sequence }) })
     const payload = await response.json() as { document?: TripDocument; revision?: number; stops?: number; days?: number; updated_at?: string; error?: { message?: string } }
     if (!response.ok) {
       if (response.status === 409 && selected.value) { await loadDetail(selected.value); throw new Error('行程已被其他操作更新，请重新选择后再排序') }
@@ -5038,7 +5050,7 @@ async function reorderPlanningPointTo(stop: Stop | SubStop, targetSequence: numb
   const child = isChildStop(stop); const stopID = stop.id; const revision = selected.value.revision
   actionLoading.value = true; error.value = ''; reorderMessage.value = ''
   try {
-    const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(day.id) + '/stops/' + encodeURIComponent(stopID) + '/move', { method: 'POST', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + revision }, body: JSON.stringify({ target_sequence: targetSequence }) })
+    const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(day.id) + '/stops/' + encodeURIComponent(stopID) + '/move', { method: 'POST', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + revision, 'Prefer': 'return=delta' }, body: JSON.stringify({ target_sequence: targetSequence }) })
     const payload = await response.json() as { document?: TripDocument; revision?: number; stops?: number; days?: number; error?: { message?: string } }
     if (!response.ok) {
       if (response.status === 409 && selected.value) { await loadDetail(selected.value); throw new Error('行程已被其他操作更新，请重新选择后再排序') }
@@ -5064,7 +5076,7 @@ async function deletePlanningPoint(stop: Stop | SubStop) {
   try {
     const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/days/' + encodeURIComponent(day.id) + '/stops/' + encodeURIComponent(stop.id), {
       method: 'DELETE',
-      headers: { 'If-Match': 'revision-' + selected.value.revision }
+      headers: { 'If-Match': 'revision-' + selected.value.revision, 'Prefer': 'return=delta' }
     })
     const payload = await response.json() as { document?: TripDocument; revision?: number; stops?: number; days?: number; error?: { message?: string } }
     if (!response.ok) throw new Error(payload.error?.message || '删除规划点失败')
