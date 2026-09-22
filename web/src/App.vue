@@ -538,6 +538,8 @@ let loadedMapKey = ''
 let loadedAMapKey = ''
 let mapRenderVersion = 0
 let mapFocusVersion = 0
+let queuedMapRender: Promise<void> | null = null
+let queuedMapRenderPreserveView = false
 
 const baiduKey = computed(() => capabilities.value?.map_providers?.baidu?.browser_key || '')
 const amapKey = computed(() => capabilities.value?.map_providers?.amap?.browser_key || '')
@@ -731,7 +733,6 @@ async function saveStopDate() {
     cancelEditStopDate()
     reorderMessage.value = '规划点已移动到 D' + (targetDayIndex + 1)
     syncNavigationURL('replace')
-    await renderMap()
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '修改规划点日期失败' } finally { stopDateSaving.value = false }
 }
 const themeLabel = computed(() => theme.value === 'system' ? '跟随系统' : theme.value === 'dark' ? '深色' : '浅色')
@@ -2061,8 +2062,6 @@ async function persistPlanningPointUpdate(target: Stop | SubStop, patch: Plannin
   } else if (payload.changes?.title_changed || payload.changes?.address_changed) {
     pointUpdateNotice.value = '规划点信息已更新。'
   }
-  await nextTick()
-  await renderMap()
   return payload
 }
 
@@ -2914,7 +2913,27 @@ async function renderAMapMap(preserveView = false) {
     mapError.value = safeMapError(cause, '高德地图初始化失败')
   }
 }
-async function renderMap(options?: { preserveView?: boolean }) {
+// Coalesce map work requested by reactive updates and explicit UI actions into
+// one animation frame. A non-preserving request wins so explicit navigation can
+// still refit the view, while small document mutations retain the current view.
+function renderMap(options?: { preserveView?: boolean }): Promise<void> {
+  const preserveView = options?.preserveView ?? false
+  if (queuedMapRender) {
+    queuedMapRenderPreserveView = queuedMapRenderPreserveView && preserveView
+    return queuedMapRender
+  }
+  queuedMapRenderPreserveView = preserveView
+  queuedMapRender = new Promise(resolve => {
+    window.requestAnimationFrame(() => {
+      const pending = queuedMapRenderPreserveView
+      queuedMapRender = null
+      void renderMapNow({ preserveView: pending }).then(resolve, resolve)
+    })
+  })
+  return queuedMapRender
+}
+
+async function renderMapNow(options?: { preserveView?: boolean }) {
   if (!mapContainer.value) return
   const preserveView = options?.preserveView ?? false
   if (tripView.value === 'atlas') return renderAtlasMap(preserveView)
@@ -5041,7 +5060,6 @@ async function movePlanningPointToDay(stop: Stop, target: PlanningPointMoveTarge
     if (selectedDay.value !== 'all') selectedDay.value = targetDayIndex + 1
     reorderMessage.value = '规划点已移动到 D' + (targetDayIndex + 1) + '，路线已清除，请点击“生成路线”重新规划'
     syncNavigationURL('replace')
-    await renderMap()
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '调整规划点日期失败' } finally { actionLoading.value = false }
 }
 async function reorderPlanningPointTo(stop: Stop | SubStop, targetSequence: number) {
@@ -5058,7 +5076,6 @@ async function reorderPlanningPointTo(stop: Stop | SubStop, targetSequence: numb
     }
     applyTripPayload(payload)
     reorderMessage.value = child ? '子规划点顺序已更新' : '规划点顺序已更新，路线已清除，请点击“生成路线”重新规划'
-    await renderMap()
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '调整规划点顺序失败' } finally { actionLoading.value = false }
 }
 async function deletePlanningPoint(stop: Stop | SubStop) {
@@ -5101,7 +5118,6 @@ async function deletePlanningPoint(stop: Stop | SubStop) {
     if (isMobileViewport() && (wasSelectedStop || wasSelectedSubStop)) {
       setSheetBreakpoint('half', 'replace')
     }
-    void renderMap()
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '删除规划点失败'
   } finally {
@@ -5334,7 +5350,8 @@ async function logout() { authTokenInput.value = ''; localStorage.removeItem('jo
 function applyTheme() { const actual = theme.value === 'system' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : theme.value; document.documentElement.dataset.theme = actual; localStorage.setItem('journeyin.theme', theme.value) }
 function setTheme(value: Theme) { theme.value = value; applyTheme() }
 function systemThemeChanged() { if (theme.value === 'system') applyTheme() }
-watch([selectedDay, tripDocument], () => { renderMap() }, { deep: true })
+watch(selectedDay, () => { void renderMap() })
+watch(tripDocument, () => { void renderMap({ preserveView: true }) }, { deep: true })
 onMounted(() => {
   if (prototypeMode) return
   ensureNavigationHistory()

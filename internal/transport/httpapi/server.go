@@ -377,13 +377,12 @@ func (s *Server) staticHandler() http.Handler {
 	})
 }
 func tripSummary(r store.TripRecord) map[string]any {
-	var document struct {
-		ShowInAtlas *bool `json:"show_in_atlas"`
-		Days        []struct {
-			Stops []any `json:"stops"`
-		} `json:"days"`
-	}
+	var document domain.Trip
 	_ = json.Unmarshal(r.Document, &document)
+	return tripSummaryForDocument(r, document)
+}
+
+func tripSummaryForDocument(r store.TripRecord, document domain.Trip) map[string]any {
 	stops := 0
 	for _, day := range document.Days {
 		stops += len(day.Stops)
@@ -424,12 +423,12 @@ func tripMutationResponse(w http.ResponseWriter, r *http.Request, record store.T
 	if !wantsTripMutationDelta(r) {
 		return tripResponse(record)
 	}
-	delta, ok := mutationDeltaForDays(record.Document, changedDayIDs...)
+	delta, document, ok := mutationDeltaForDays(record.Document, changedDayIDs...)
 	if !ok {
 		return tripResponse(record)
 	}
 	w.Header().Set("Preference-Applied", "return=delta")
-	response := tripSummary(record)
+	response := tripSummaryForDocument(record, document)
 	response["delta"] = delta
 	return response
 }
@@ -443,10 +442,10 @@ func wantsTripMutationDelta(r *http.Request) bool {
 	return false
 }
 
-func mutationDeltaForDays(document []byte, changedDayIDs ...string) (tripMutationDelta, bool) {
+func mutationDeltaForDays(document []byte, changedDayIDs ...string) (tripMutationDelta, domain.Trip, bool) {
 	var trip domain.Trip
 	if err := json.Unmarshal(document, &trip); err != nil {
-		return tripMutationDelta{}, false
+		return tripMutationDelta{}, domain.Trip{}, false
 	}
 	indexes := make(map[string]int, len(trip.Days))
 	for index, day := range trip.Days {
@@ -456,7 +455,7 @@ func mutationDeltaForDays(document []byte, changedDayIDs ...string) (tripMutatio
 	for _, dayID := range changedDayIDs {
 		index, ok := indexes[dayID]
 		if !ok {
-			return tripMutationDelta{}, false
+			return tripMutationDelta{}, domain.Trip{}, false
 		}
 		selected[index] = true
 		if index+1 < len(trip.Days) {
@@ -464,7 +463,7 @@ func mutationDeltaForDays(document []byte, changedDayIDs ...string) (tripMutatio
 		}
 	}
 	if len(selected) == 0 {
-		return tripMutationDelta{}, false
+		return tripMutationDelta{}, domain.Trip{}, false
 	}
 	delta := tripMutationDelta{Days: make([]tripMutationDayDelta, 0, len(selected))}
 	for index, day := range trip.Days {
@@ -473,7 +472,7 @@ func mutationDeltaForDays(document []byte, changedDayIDs ...string) (tripMutatio
 		}
 		delta.Days = append(delta.Days, tripMutationDayDelta{ID: day.ID, Stops: day.Stops, LegsCleared: len(day.Legs) == 0})
 	}
-	return delta, true
+	return delta, trip, true
 }
 func parseRevision(value string) (int, error) {
 	value = strings.Trim(value, "\"")
