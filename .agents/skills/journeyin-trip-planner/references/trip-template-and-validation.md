@@ -161,7 +161,7 @@ Gate A 通过后，启动 JourneyIn MCP 标准保存流程。
 }
 ```
 
-*(更新既有行程时传 operation: "replace" 或受限 "merge"，并带上 expected_revision)*。
+*(更新既有行程时传 operation: "replace" 或受限 "merge"，并带上 expected_revision。若只增补主/子规划点的名称、地址、类别、HH:MM 时间窗口、详细 Markdown 或来源链接，merge_patch_version >= 2 时优先使用 stable day_id/stop_id（子点另带 parent_stop_id）的最小 patch；不得在 merge 中改坐标、天气、路线、日期或顺序。)*
 
 MCP 工具将返回：
 - `preview_id`：短期有效的预览 ID；

@@ -46,11 +46,23 @@ type MergeDayPatch struct {
 	Stops         []MergeStopPatch `json:"stops,omitempty"`
 }
 
-// MergeStopPatch addresses a Stop within its Day by stable ID.
+// MergeStopPatch addresses a main Stop or, with ParentStopID, a nested SubStop by stable ID.
 type MergeStopPatch struct {
-	StopID              string          `json:"stop_id"`
-	DescriptionMarkdown *string         `json:"description_markdown,omitempty"`
-	Links               *MergeLinkPatch `json:"links,omitempty"`
+	StopID              string                `json:"stop_id"`
+	ParentStopID        string                `json:"parent_stop_id,omitempty"`
+	Title               *string               `json:"title,omitempty"`
+	Address             *string               `json:"address,omitempty"`
+	Kind                *string               `json:"kind,omitempty"`
+	TimeWindow          *MergeTimeWindowPatch `json:"time_window,omitempty"`
+	DescriptionMarkdown *string               `json:"description_markdown,omitempty"`
+	Links               *MergeLinkPatch       `json:"links,omitempty"`
+}
+
+// MergeTimeWindowPatch can update only the human-entered arrival/departure
+// fields. It deliberately cannot replace the full raw time_window object.
+type MergeTimeWindowPatch struct {
+	Arrival   *string `json:"arrival,omitempty"`
+	Departure *string `json:"departure,omitempty"`
 }
 
 // MergeLinkPatch uses explicit add/remove operations so omitting links never
@@ -108,12 +120,33 @@ func (p *MergeStopPatch) UnmarshalJSON(data []byte) error {
 	var decoded plain
 	if err := decodeStrictMergeObject(data, map[string]struct{}{
 		"stop_id":              {},
+		"parent_stop_id":       {},
+		"title":                {},
+		"address":              {},
+		"kind":                 {},
+		"time_window":          {},
 		"description_markdown": {},
 		"links":                {},
 	}, &decoded, "stop patch"); err != nil {
 		return err
 	}
 	*p = MergeStopPatch(decoded)
+	return nil
+}
+
+func (p *MergeTimeWindowPatch) UnmarshalJSON(data []byte) error {
+	type plain MergeTimeWindowPatch
+	var decoded plain
+	if err := decodeStrictMergeObject(data, map[string]struct{}{
+		"arrival":   {},
+		"departure": {},
+	}, &decoded, "time_window patch"); err != nil {
+		return err
+	}
+	if decoded.Arrival == nil && decoded.Departure == nil {
+		return errors.New("time_window patch must contain arrival or departure")
+	}
+	*p = MergeTimeWindowPatch(decoded)
 	return nil
 }
 
@@ -301,25 +334,17 @@ func validateMergePatch(patch MergePatch) error {
 		}
 		seenStops := make(map[string]struct{}, len(day.Stops))
 		for stopIndex, stop := range day.Stops {
-			if err := validateMergeID(fmt.Sprintf("patch.days[%d].stops[%d].stop_id", dayIndex, stopIndex), stop.StopID); err != nil {
+			path := fmt.Sprintf("patch.days[%d].stops[%d]", dayIndex, stopIndex)
+			if err := validateMergeID(path+".stop_id", stop.StopID); err != nil {
 				return err
 			}
-			if _, exists := seenStops[stop.StopID]; exists {
-				return fmt.Errorf("patch.days[%d].stops contains duplicate stop_id %q", dayIndex, stop.StopID)
+			patchKey := stop.ParentStopID + "\x00" + stop.StopID
+			if _, exists := seenStops[patchKey]; exists {
+				return fmt.Errorf("patch.days[%d].stops contains duplicate planning point target %q", dayIndex, patchKey)
 			}
-			seenStops[stop.StopID] = struct{}{}
-			if stop.DescriptionMarkdown == nil && stop.Links == nil {
-				return fmt.Errorf("patch.days[%d].stops[%d] must contain description_markdown or links", dayIndex, stopIndex)
-			}
-			if stop.DescriptionMarkdown != nil {
-				if err := validateMergeMarkdown(fmt.Sprintf("patch.days[%d].stops[%d].description_markdown", dayIndex, stopIndex), *stop.DescriptionMarkdown, maxMergeStopMarkdown); err != nil {
-					return err
-				}
-			}
-			if stop.Links != nil {
-				if err := validateMergeLinks(fmt.Sprintf("patch.days[%d].stops[%d].links", dayIndex, stopIndex), stop.Links); err != nil {
-					return err
-				}
+			seenStops[patchKey] = struct{}{}
+			if err := validateMergeStopPatch(path, stop); err != nil {
+				return err
 			}
 		}
 	}
@@ -389,6 +414,67 @@ func validateMergeID(path, id string) error {
 func validateMergeMarkdown(path, value string, max int) error {
 	if utf8.RuneCountInString(value) > max {
 		return fmt.Errorf("%s exceeds the %d character limit", path, max)
+	}
+	return nil
+}
+
+func validateMergeStopPatch(path string, patch MergeStopPatch) error {
+	if patch.ParentStopID != "" {
+		if err := validateMergeID(path+".parent_stop_id", patch.ParentStopID); err != nil {
+			return err
+		}
+	}
+	if patch.Title == nil && patch.Address == nil && patch.Kind == nil && patch.TimeWindow == nil && patch.DescriptionMarkdown == nil && patch.Links == nil {
+		return fmt.Errorf("%s must contain at least one supported field", path)
+	}
+	if patch.Title != nil {
+		value := strings.TrimSpace(*patch.Title)
+		if value == "" {
+			return fmt.Errorf("%s.title is required", path)
+		}
+		if utf8.RuneCountInString(value) > maxPlanningPointTitleRunes {
+			return fmt.Errorf("%s.title must be at most %d characters", path, maxPlanningPointTitleRunes)
+		}
+	}
+	if patch.Address != nil && utf8.RuneCountInString(strings.TrimSpace(*patch.Address)) > maxPlanningPointAddressRunes {
+		return fmt.Errorf("%s.address must be at most %d characters", path, maxPlanningPointAddressRunes)
+	}
+	if patch.Kind != nil && utf8.RuneCountInString(strings.TrimSpace(*patch.Kind)) > 64 {
+		return fmt.Errorf("%s.kind must be at most 64 characters", path)
+	}
+	if patch.TimeWindow != nil {
+		if err := validateMergeTimeWindow(path+".time_window", *patch.TimeWindow); err != nil {
+			return err
+		}
+	}
+	if patch.DescriptionMarkdown != nil {
+		if err := validateMergeMarkdown(path+".description_markdown", *patch.DescriptionMarkdown, maxMergeStopMarkdown); err != nil {
+			return err
+		}
+	}
+	if patch.Links != nil {
+		if err := validateMergeLinks(path+".links", patch.Links); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateMergeTimeWindow(path string, patch MergeTimeWindowPatch) error {
+	if patch.Arrival == nil && patch.Departure == nil {
+		return fmt.Errorf("%s must contain arrival or departure", path)
+	}
+	for key, value := range map[string]*string{"arrival": patch.Arrival, "departure": patch.Departure} {
+		if value == nil || strings.TrimSpace(*value) == "" {
+			continue
+		}
+		normalized := strings.TrimSpace(*value)
+		if len(normalized) != 5 || normalized[2] != ':' {
+			return fmt.Errorf("%s.%s must use HH:MM", path, key)
+		}
+		if _, err := time.Parse("15:04", normalized); err != nil {
+			return fmt.Errorf("%s.%s must use HH:MM", path, key)
+		}
 	}
 	return nil
 }
@@ -487,42 +573,83 @@ func applyRestrictedMergePatch(document []byte, patch MergePatch) ([]byte, []Pre
 
 				changedStops := false
 				for _, stopPatch := range dayPatch.Stops {
-					stopIndex, ok := stopIndices[stopPatch.StopID]
-					if !ok {
-						return nil, nil, fmt.Errorf("stop %q was not found in day %q", stopPatch.StopID, dayPatch.DayID)
+					pointPath := mergePointPath(dayPatch.DayID, stopPatch)
+					if stopPatch.ParentStopID == "" {
+						stopIndex, ok := stopIndices[stopPatch.StopID]
+						if !ok {
+							return nil, nil, fmt.Errorf("stop %q was not found in day %q", stopPatch.StopID, dayPatch.DayID)
+						}
+						stopObject, err := decodeRawObject(stops[stopIndex], "stop "+stopPatch.StopID)
+						if err != nil {
+							return nil, nil, err
+						}
+						pointChanges, changed, err := applyMergeStopFields(stopObject, stopPatch, pointPath)
+						if err != nil {
+							return nil, nil, err
+						}
+						if changed {
+							stops[stopIndex], err = json.Marshal(stopObject)
+							if err != nil {
+								return nil, nil, err
+							}
+							changes = append(changes, pointChanges...)
+							changedStops = true
+						}
+						continue
 					}
-					stopObject, err := decodeRawObject(stops[stopIndex], "stop "+stopPatch.StopID)
+
+					parentIndex, ok := stopIndices[stopPatch.ParentStopID]
+					if !ok {
+						return nil, nil, fmt.Errorf("parent stop %q was not found in day %q", stopPatch.ParentStopID, dayPatch.DayID)
+					}
+					parentObject, err := decodeRawObject(stops[parentIndex], "parent stop "+stopPatch.ParentStopID)
 					if err != nil {
 						return nil, nil, err
 					}
-					changedStop := false
-					if stopPatch.DescriptionMarkdown != nil {
-						path := fmt.Sprintf("days[%s].stops[%s].description_markdown", dayPatch.DayID, stopPatch.StopID)
-						change, changed, err := setMergeMarkdown(stopObject, "description_markdown", path, *stopPatch.DescriptionMarkdown, maxMergeStopMarkdown)
+					rawChildren, ok := parentObject["children"]
+					if !ok {
+						return nil, nil, fmt.Errorf("parent stop %q has no children", stopPatch.ParentStopID)
+					}
+					children, err := decodeRawArray(rawChildren, "parent stop "+stopPatch.ParentStopID+".children")
+					if err != nil {
+						return nil, nil, err
+					}
+					childIndex := -1
+					for index, rawChild := range children {
+						childID, err := rawObjectID(rawChild, fmt.Sprintf("parent stop %s.children[%d]", stopPatch.ParentStopID, index))
 						if err != nil {
 							return nil, nil, err
 						}
-						if changed {
-							changes = append(changes, change)
-							changedStop = true
+						if childID == stopPatch.StopID {
+							childIndex = index
+							break
 						}
 					}
-					if stopPatch.Links != nil {
-						path := fmt.Sprintf("days[%s].stops[%s].links", dayPatch.DayID, stopPatch.StopID)
-						change, changed, err := applyMergeLinks(stopObject, "links", stopPatch.Links, path, maxMergeStopLinks)
-						if err != nil {
-							return nil, nil, err
-						}
-						if changed {
-							changes = append(changes, change)
-							changedStop = true
-						}
+					if childIndex < 0 {
+						return nil, nil, fmt.Errorf("child stop %q was not found under parent %q", stopPatch.StopID, stopPatch.ParentStopID)
 					}
-					if changedStop {
-						stops[stopIndex], err = json.Marshal(stopObject)
+					childObject, err := decodeRawObject(children[childIndex], "child stop "+stopPatch.StopID)
+					if err != nil {
+						return nil, nil, err
+					}
+					pointChanges, changed, err := applyMergeStopFields(childObject, stopPatch, pointPath)
+					if err != nil {
+						return nil, nil, err
+					}
+					if changed {
+						children[childIndex], err = json.Marshal(childObject)
 						if err != nil {
 							return nil, nil, err
 						}
+						parentObject["children"], err = json.Marshal(children)
+						if err != nil {
+							return nil, nil, err
+						}
+						stops[parentIndex], err = json.Marshal(parentObject)
+						if err != nil {
+							return nil, nil, err
+						}
+						changes = append(changes, pointChanges...)
 						changedStops = true
 					}
 				}
@@ -557,6 +684,140 @@ func applyRestrictedMergePatch(document []byte, patch MergePatch) ([]byte, []Pre
 		return nil, nil, err
 	}
 	return merged, changes, nil
+}
+
+func mergePointPath(dayID string, patch MergeStopPatch) string {
+	if patch.ParentStopID == "" {
+		return fmt.Sprintf("days[%s].stops[%s]", dayID, patch.StopID)
+	}
+	return fmt.Sprintf("days[%s].stops[%s].children[%s]", dayID, patch.ParentStopID, patch.StopID)
+}
+
+func applyMergeStopFields(object map[string]json.RawMessage, patch MergeStopPatch, path string) ([]PreviewChange, bool, error) {
+	changes := make([]PreviewChange, 0, 6)
+	applyText := func(key string, value *string, max int, required bool) error {
+		if value == nil {
+			return nil
+		}
+		change, changed, err := setMergeText(object, key, path+"."+key, *value, max, required)
+		if err != nil {
+			return err
+		}
+		if changed {
+			changes = append(changes, change)
+		}
+		return nil
+	}
+	if err := applyText("title", patch.Title, maxPlanningPointTitleRunes, true); err != nil {
+		return nil, false, err
+	}
+	if err := applyText("address", patch.Address, maxPlanningPointAddressRunes, false); err != nil {
+		return nil, false, err
+	}
+	if err := applyText("kind", patch.Kind, 64, false); err != nil {
+		return nil, false, err
+	}
+	if patch.TimeWindow != nil {
+		change, changed, err := applyMergeTimeWindow(object, path+".time_window", *patch.TimeWindow)
+		if err != nil {
+			return nil, false, err
+		}
+		if changed {
+			changes = append(changes, change)
+		}
+	}
+	if patch.DescriptionMarkdown != nil {
+		change, changed, err := setMergeMarkdown(object, "description_markdown", path+".description_markdown", *patch.DescriptionMarkdown, maxMergeStopMarkdown)
+		if err != nil {
+			return nil, false, err
+		}
+		if changed {
+			changes = append(changes, change)
+		}
+	}
+	if patch.Links != nil {
+		change, changed, err := applyMergeLinks(object, "links", patch.Links, path+".links", maxMergeStopLinks)
+		if err != nil {
+			return nil, false, err
+		}
+		if changed {
+			changes = append(changes, change)
+		}
+	}
+	return changes, len(changes) > 0, nil
+}
+
+func setMergeText(object map[string]json.RawMessage, key, path, value string, max int, required bool) (PreviewChange, bool, error) {
+	value = strings.TrimSpace(value)
+	if required && value == "" {
+		return PreviewChange{}, false, fmt.Errorf("%s is required", path)
+	}
+	if utf8.RuneCountInString(value) > max {
+		return PreviewChange{}, false, fmt.Errorf("%s exceeds the %d character limit", path, max)
+	}
+	before, err := rawStringField(object, key, path)
+	if err != nil {
+		return PreviewChange{}, false, err
+	}
+	if before == value {
+		return PreviewChange{}, false, nil
+	}
+	if value == "" {
+		delete(object, key)
+	} else {
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return PreviewChange{}, false, err
+		}
+		object[key] = encoded
+	}
+	return PreviewChange{Path: path, Before: before, After: value}, true, nil
+}
+
+func applyMergeTimeWindow(object map[string]json.RawMessage, path string, patch MergeTimeWindowPatch) (PreviewChange, bool, error) {
+	if err := validateMergeTimeWindow(path, patch); err != nil {
+		return PreviewChange{}, false, err
+	}
+	window := make(map[string]json.RawMessage)
+	before := ""
+	if raw, ok := object["time_window"]; ok {
+		before = string(raw)
+		decoded, err := decodeRawObject(raw, path)
+		if err != nil {
+			return PreviewChange{}, false, err
+		}
+		window = decoded
+	}
+	for key, value := range map[string]*string{"arrival": patch.Arrival, "departure": patch.Departure} {
+		if value == nil {
+			continue
+		}
+		normalized := strings.TrimSpace(*value)
+		if normalized == "" {
+			delete(window, key)
+			continue
+		}
+		encoded, err := json.Marshal(normalized)
+		if err != nil {
+			return PreviewChange{}, false, err
+		}
+		window[key] = encoded
+	}
+	after := ""
+	if len(window) == 0 {
+		delete(object, "time_window")
+	} else {
+		encoded, err := json.Marshal(window)
+		if err != nil {
+			return PreviewChange{}, false, err
+		}
+		after = string(encoded)
+		object["time_window"] = encoded
+	}
+	if before == after {
+		return PreviewChange{}, false, nil
+	}
+	return PreviewChange{Path: path, Before: before, After: after}, true, nil
 }
 
 func setMergeMarkdown(object map[string]json.RawMessage, key, path, value string, max int) (PreviewChange, bool, error) {
@@ -750,6 +1011,12 @@ func mergePreservedSections(before, after []byte) (map[string]bool, error) {
 	}, nil
 }
 
+func deleteMergeEditablePointFields(object map[string]json.RawMessage) {
+	for _, key := range []string{"title", "address", "kind", "time_window", "description_markdown", "links"} {
+		delete(object, key)
+	}
+}
+
 func protectedMergeProjection(data []byte) ([]byte, error) {
 	root, err := decodeRawObject(data, "trip document")
 	if err != nil {
@@ -778,8 +1045,28 @@ func protectedMergeProjection(data []byte) ([]byte, error) {
 					if err != nil {
 						return nil, err
 					}
-					delete(stopObject, "description_markdown")
-					delete(stopObject, "links")
+					deleteMergeEditablePointFields(stopObject)
+					if rawChildren, ok := stopObject["children"]; ok {
+						children, err := decodeRawArray(rawChildren, fmt.Sprintf("trip.days[%d].stops[%d].children", dayIndex, stopIndex))
+						if err != nil {
+							return nil, err
+						}
+						for childIndex, rawChild := range children {
+							childObject, err := decodeRawObject(rawChild, fmt.Sprintf("trip.days[%d].stops[%d].children[%d]", dayIndex, stopIndex, childIndex))
+							if err != nil {
+								return nil, err
+							}
+							deleteMergeEditablePointFields(childObject)
+							children[childIndex], err = json.Marshal(childObject)
+							if err != nil {
+								return nil, err
+							}
+						}
+						stopObject["children"], err = json.Marshal(children)
+						if err != nil {
+							return nil, err
+						}
+					}
 					stops[stopIndex], err = json.Marshal(stopObject)
 					if err != nil {
 						return nil, err

@@ -151,6 +151,17 @@ description: 完成从需求确认、环境预检、真实资料检索、高德�
 - 提交成功后调用 `journeyin.plan_trip`（默认 `provider: "amap"`）生成真实路线快照；
 - 验证数据已持久化并向用户汇报。
 
+### 已有行程的局部增补模式
+
+当用户要求为已有行程或既有主/子规划点补充详细介绍、来源、名称、地址、类别或时间窗口时，不要默认重建整趟行程：
+
+1. 先调用 `journeyin.get_trip`，取得 target_trip_id、当前 revision，以及稳定 day_id、stop_id；子规划点还必须确认 parent_stop_id。不得按名称、数组下标或日期猜测目标。
+2. 对开放时间、门票、预约、地址、推荐理由等外部事实先完成真实来源核验；把详细说明和来源完整展示给用户，获得 Gate A 确认。
+3. 若 capabilities 中 `preview_merge=true` 且 `merge_patch_version >= 2`，使用 `preview_save_trip(operation=merge)` 只提交允许字段：title、address、kind、time_window.arrival/departure（HH:MM）、description_markdown、links；子规划点带 parent_stop_id。
+4. 读取 preview 的 diff、warnings 和 preserved；明确告诉用户位置、天气、路线、顺序和日期未被改动。获得 Gate B 确认后才 commit。
+5. location、provider_refs、天气、exclude_from_route、日期、顺序、路线和新增/删除规划点不能放进此 merge。需要这些改动时，先说明影响并走完整 replace 预览；绝不猜测坐标或伪造天气/路线。
+6. revision 冲突、预览过期或用户改变内容后，重新读取、重新生成 patch 和预览；不得复用旧确认令牌。
+
 ---
 
 ## 异常处理与恢复速查
