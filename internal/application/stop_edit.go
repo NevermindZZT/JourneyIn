@@ -21,6 +21,7 @@ const (
 type UpdatePlanningPointInput struct {
 	Title            *string
 	Address          *string
+	Kind             *string
 	Location         json.RawMessage
 	LocationSet      bool
 	ExcludeFromRoute *bool
@@ -30,13 +31,14 @@ type UpdatePlanningPointChanges struct {
 	Changed              bool `json:"changed"`
 	TitleChanged         bool `json:"title_changed"`
 	AddressChanged       bool `json:"address_changed"`
+	KindChanged          bool `json:"kind_changed"`
 	LocationChanged      bool `json:"location_changed"`
 	RouteExcludedChanged bool `json:"route_excluded_changed"`
 	RouteInvalidated     bool `json:"route_invalidated"`
 	WeatherCleared       bool `json:"weather_cleared"`
 }
 
-var ErrPlanningPointUpdateEmpty = errors.New("planning point update must include title, address, or location")
+var ErrPlanningPointUpdateEmpty = errors.New("planning point update must include title, address, kind, location, or route inclusion")
 
 // UpdatePlanningPoint updates a main Stop or a nested SubStop by stable ID.
 // It edits the stored raw JSON tree so untouched fields and provider-specific
@@ -148,6 +150,27 @@ func (s *TripService) UpdatePlanningPoint(ctx context.Context, tripID string, ex
 			changes.TitleChanged = true
 		}
 	}
+	if input.Kind != nil {
+		value := strings.TrimSpace(*input.Kind)
+		if utf8.RuneCountInString(value) > 64 {
+			return store.TripRecord{}, changes, errors.New("planning point kind must be at most 64 characters")
+		}
+		if value == "" {
+			if _, ok := target["kind"]; ok {
+				delete(target, "kind")
+				changes.KindChanged = true
+			}
+		} else {
+			encoded, marshalErr := json.Marshal(value)
+			if marshalErr != nil {
+				return store.TripRecord{}, changes, marshalErr
+			}
+			if !rawEqual(target["kind"], encoded) {
+				target["kind"] = encoded
+				changes.KindChanged = true
+			}
+		}
+	}
 	if input.Address != nil {
 		value := strings.TrimSpace(*input.Address)
 		if value == "" {
@@ -189,7 +212,7 @@ func (s *TripService) UpdatePlanningPoint(ctx context.Context, tripID string, ex
 			changes.RouteExcludedChanged = true
 		}
 	}
-	changes.Changed = changes.TitleChanged || changes.AddressChanged || changes.LocationChanged || changes.RouteExcludedChanged
+	changes.Changed = changes.TitleChanged || changes.AddressChanged || changes.KindChanged || changes.LocationChanged || changes.RouteExcludedChanged
 	if !changes.Changed {
 		return record, changes, nil
 	}
@@ -249,7 +272,7 @@ func (s *TripService) UpdatePlanningPoint(ctx context.Context, tripID string, ex
 }
 
 func validatePlanningPointUpdate(input UpdatePlanningPointInput) error {
-	if input.Title == nil && input.Address == nil && !input.LocationSet && input.ExcludeFromRoute == nil {
+	if input.Title == nil && input.Address == nil && input.Kind == nil && !input.LocationSet && input.ExcludeFromRoute == nil {
 		return ErrPlanningPointUpdateEmpty
 	}
 	if input.Title != nil {

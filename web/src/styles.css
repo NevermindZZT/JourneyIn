@@ -13,6 +13,13 @@
   --md-success: #2f7d68;
   --md-map: #dbe8e2;
   --accent: #e56a4d;
+  --map-kind-poi: #d9485f;
+  --map-kind-lodging: #7252a5;
+  --map-kind-waypoint: #64748b;
+  --map-kind-restaurant: #d97706;
+  --map-kind-transport: #1677b8;
+  --map-kind-shopping: #16877b;
+  --map-kind-other: #68737d;
   --p: var(--md-primary);
   --ink: var(--md-on-surface);
   --muted: var(--md-on-surface-variant);
@@ -880,6 +887,7 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 @media (hover: hover) and (pointer: fine) { .detail-back-button:hover, .detail-more-button:hover, .detail-sheet-toggle:hover { border-color: var(--p); background: color-mix(in srgb, var(--p) 8%, transparent); } }
 .detail-kicker { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 19px 0 0; color: var(--p); font-size: 10px; font-weight: 900; letter-spacing: .1em; text-transform: uppercase; }
 .detail-kicker span:last-child { padding: 5px 7px; border-radius: 999px; letter-spacing: 0; color: var(--muted); background: var(--surface); font-size: 10px; text-transform: none; }
+.detail-kicker .planning-point-kind-badge { border: 1px solid color-mix(in srgb, var(--kind-color) 38%, var(--line)); color: var(--kind-color); background: color-mix(in srgb, var(--kind-color) 10%, var(--surface)); }
 .redesign-detail-scroll > h1 { margin: 7px 0 0; color: var(--ink); font-size: 30px; letter-spacing: -.06em; }
 .detail-address { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .detail-date-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-top: 7px; }
@@ -1371,6 +1379,12 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .stop-location-badge { display: inline-flex; width: max-content; min-height: 17px; align-items: center; margin-top: 4px; padding: 2px 6px; border: 1px solid color-mix(in srgb, var(--md-success) 34%, var(--line)); border-radius: 999px; color: var(--md-success); background: color-mix(in srgb, var(--md-success) 8%, var(--surface)); font-size: 9px; font-style: normal; font-weight: 900; }
 .stop-location-badge.missing { border-color: color-mix(in srgb, var(--md-warning) 42%, var(--line)); color: var(--md-warning); background: color-mix(in srgb, var(--md-warning) 10%, var(--surface)); }
 .redesign-stop-row.route-excluded { border-style: dashed; border-color: color-mix(in srgb, var(--md-warning) 36%, var(--line)); background: color-mix(in srgb, var(--md-warning) 5%, var(--surface)); }
+.planning-point-badge-row { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 4px; }
+.planning-point-badge-row > em { margin-top: 0; margin-left: 0; }
+.planning-point-kind-badge { display: inline-flex; width: max-content; min-height: 18px; align-items: center; margin-top: 4px; padding: 2px 7px; border: 1px solid color-mix(in srgb, var(--kind-color) 38%, var(--line)); border-radius: 999px; color: var(--kind-color); background: color-mix(in srgb, var(--kind-color) 10%, var(--surface)); font-size: 9px; font-style: normal; font-weight: 900; }
+.map-category-legend { display: flex; flex-wrap: wrap; gap: 6px 9px; margin: 8px 0 10px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--surface) 88%, var(--md-surface-container-low)); }
+.map-category-legend span { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 9px; font-weight: 800; white-space: nowrap; }
+.map-category-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50% 50% 50% 2px; background: var(--kind-color); transform: rotate(-45deg); }
 .stop-route-excluded-badge { display: inline-flex; width: max-content; min-height: 17px; align-items: center; margin-top: 4px; margin-left: 4px; padding: 2px 6px; border: 1px solid color-mix(in srgb, var(--md-warning) 44%, var(--line)); border-radius: 999px; color: var(--md-warning); background: color-mix(in srgb, var(--md-warning) 9%, var(--surface)); font-size: 9px; font-style: normal; font-weight: 900; }
 .detail-location { gap: 6px; }
 .detail-location.location-missing { border: 1px solid color-mix(in srgb, var(--md-warning) 38%, var(--line)); color: var(--md-warning); background: color-mix(in srgb, var(--md-warning) 9%, var(--surface)); }

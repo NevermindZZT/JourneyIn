@@ -111,7 +111,7 @@
       "properties": {
         "id": { "type": "string", "maxLength": 128 },
         "sequence": { "type": "integer", "minimum": 1 },
-        "kind": { "type": "string", "maxLength": 64 },
+        "kind": { "type": "string", "maxLength": 64, "description": "Planning point category; standard UI values: poi, lodging, waypoint, restaurant, transport, shopping, other." },
         "title": { "type": "string", "minLength": 1, "maxLength": 200 },
         "address": { "type": "string", "maxLength": 500 },
         "location": { "$ref": "#/$defs/location" },
@@ -130,7 +130,7 @@
       "properties": {
         "id": { "type": "string", "maxLength": 128 },
         "sequence": { "type": "integer", "minimum": 1 },
-        "kind": { "type": "string", "maxLength": 64 },
+        "kind": { "type": "string", "maxLength": 64, "description": "Planning point category; standard UI values: poi, lodging, waypoint, restaurant, transport, shopping, other." },
         "title": { "type": "string", "minLength": 1, "maxLength": 200 },
         "address": { "type": "string", "maxLength": 500 },
         "location": { "$ref": "#/$defs/location" },
