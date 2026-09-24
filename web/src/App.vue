@@ -2190,6 +2190,7 @@ async function savePointDetails() {
     const patch: PlanningPointPatch = { title, address }
     if (kindChanged) patch.kind = kind
     await persistPlanningPointUpdate(target, patch)
+    pointEditorSaving.value = false
     cancelEditPoint()
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '保存规划点信息失败'
