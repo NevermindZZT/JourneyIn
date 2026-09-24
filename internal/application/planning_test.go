@@ -15,9 +15,10 @@ import (
 )
 
 type fakePlanningProvider struct {
-	searchCalls atomic.Int32
-	routeCalls  atomic.Int32
-	emptySearch bool
+	searchCalls        atomic.Int32
+	routeCalls         atomic.Int32
+	emptySearch        bool
+	weatherUnavailable bool
 }
 
 func (p *fakePlanningProvider) ID() journeymaps.ProviderID { return journeymaps.ProviderID("fake") }
@@ -39,7 +40,10 @@ func (p *fakePlanningProvider) Route(context.Context, journeymaps.RouteRequest) 
 	now := time.Now().UTC()
 	return journeymaps.RouteSnapshot{Provider: p.ID(), CoordinateSystem: journeymaps.CRSBD09LL, Mode: journeymaps.ModeWalking, Geometry: []journeymaps.GeoPoint{{Lat: 30.2, Lng: 120.1, CRS: journeymaps.CRSBD09LL}, {Lat: 30.21, Lng: 120.11, CRS: journeymaps.CRSBD09LL}}, DistanceM: 1000, DurationS: 600, FetchedAt: now, ExpiresAt: now.Add(time.Hour)}, nil
 }
-func (p *fakePlanningProvider) Weather(context.Context, journeymaps.WeatherRequest) (journeymaps.WeatherSnapshot, error) {
+func (p *fakePlanningProvider) Weather(_ context.Context, request journeymaps.WeatherRequest) (journeymaps.WeatherSnapshot, error) {
+	if p.weatherUnavailable {
+		return journeymaps.WeatherSnapshot{Provider: p.ID(), LocalDate: request.LocalDate, Available: false}, nil
+	}
 	temperature := 18.5
 	now := time.Now().UTC()
 	return journeymaps.WeatherSnapshot{Provider: p.ID(), LocalDate: "2026-04-18", Condition: "晴", TemperatureC: &temperature, FetchedAt: now, ExpiresAt: now.Add(6 * time.Hour), Available: true}, nil
@@ -161,6 +165,106 @@ func TestAddSubStopAndRefreshWeatherPersistSnapshots(t *testing.T) {
 	}
 	if len(trip.Days[0].Stops[0].Weather) == 0 {
 		t.Fatal("weather snapshot not persisted")
+	}
+}
+
+func TestRefreshWeatherPersistsLaterMainAndChildStops(t *testing.T) {
+	service := testService(t)
+	fake := &fakePlanningProvider{}
+	service.SetMapService(NewMapService(service.store, journeymaps.NewRegistry(fake), 2, 0))
+	tripJSON := []byte(`{"schema_version":1,"title":"多规划点天气测试","status":"draft","timezone":"Asia/Shanghai","date_range":{"start":"2026-04-18","end":"2026-04-18"},"days":[{"id":"day-1","date":"2026-04-18","stops":[]}] }`)
+	record, err := service.Create(context.Background(), tripJSON, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	location := json.RawMessage(`{"preferred":"bd09ll","coordinates":{"bd09ll":{"lat":30.2,"lng":120.1,"crs":"bd09ll"}}}`)
+	for _, id := range []string{"stop-a", "stop-b", "stop-c"} {
+		record, err = service.AddStop(context.Background(), record.ID, record.Revision, "day-1", AddStopInput{ID: id, Title: id, Location: location}, "test")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	record, err = service.AddSubStop(context.Background(), record.ID, record.Revision, "day-1", "stop-b", AddStopInput{ID: "child-b", Title: "子规划点", Location: location}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, targetID := range []string{"stop-a", "stop-b", "stop-c", "child-b"} {
+		record, err = service.RefreshWeather(context.Background(), record.ID, record.Revision, "day-1", targetID, WeatherInput{Provider: "fake"}, "test")
+		if err != nil {
+			t.Fatalf("refresh %s: %v", targetID, err)
+		}
+		var trip domain.Trip
+		if err := json.Unmarshal(record.Document, &trip); err != nil {
+			t.Fatal(err)
+		}
+		updated := false
+		for _, stop := range trip.Days[0].Stops {
+			if stop.ID == targetID && len(stop.Weather) > 0 {
+				updated = true
+			}
+			for _, child := range stop.Children {
+				if child.ID == targetID && len(child.Weather) > 0 {
+					updated = true
+				}
+			}
+		}
+		if !updated {
+			t.Fatalf("weather snapshot for target %s was not persisted", targetID)
+		}
+	}
+
+	var final domain.Trip
+	if err := json.Unmarshal(record.Document, &final); err != nil {
+		t.Fatal(err)
+	}
+	for _, stop := range final.Days[0].Stops {
+		if len(stop.Weather) == 0 {
+			t.Fatalf("expected weather for main stop %s", stop.ID)
+		}
+		for _, child := range stop.Children {
+			if len(child.Weather) == 0 {
+				t.Fatalf("expected weather for child stop %s", child.ID)
+			}
+		}
+	}
+}
+
+func TestRefreshWeatherUnavailableDoesNotAdvanceRevisionOrPersistSnapshot(t *testing.T) {
+	service := testService(t)
+	fake := &fakePlanningProvider{weatherUnavailable: true}
+	service.SetMapService(NewMapService(service.store, journeymaps.NewRegistry(fake), 2, 0))
+	tripJSON := []byte(`{"schema_version":1,"title":"天气不可用测试","status":"draft","timezone":"Asia/Shanghai","date_range":{"start":"2026-04-18","end":"2026-04-18"},"days":[{"id":"day-1","date":"2026-04-18","stops":[]}]}`)
+	record, err := service.Create(context.Background(), tripJSON, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	location := json.RawMessage(`{"preferred":"bd09ll","coordinates":{"bd09ll":{"lat":30.2,"lng":120.1,"crs":"bd09ll"}}}`)
+	record, err = service.AddStop(context.Background(), record.ID, record.Revision, "day-1", AddStopInput{ID: "stop-1", Title: "地点", Location: location}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeRevision := record.Revision
+	updated, err := service.RefreshWeather(context.Background(), record.ID, record.Revision, "day-1", "stop-1", WeatherInput{Provider: "fake"}, "test")
+	if err == nil {
+		t.Fatal("expected unavailable forecast error")
+	}
+	if updated.Revision != 0 {
+		t.Fatalf("failed refresh unexpectedly returned revision %d", updated.Revision)
+	}
+	current, err := service.Get(context.Background(), record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Revision != beforeRevision {
+		t.Fatalf("failed refresh advanced revision from %d to %d", beforeRevision, current.Revision)
+	}
+	var trip domain.Trip
+	if err := json.Unmarshal(current.Document, &trip); err != nil {
+		t.Fatal(err)
+	}
+	if len(trip.Days[0].Stops[0].Weather) != 0 {
+		t.Fatalf("unavailable snapshot was persisted: %s", trip.Days[0].Stops[0].Weather)
 	}
 }
 

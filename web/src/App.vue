@@ -4920,6 +4920,10 @@ async function openNavigation(provider: 'baidu' | 'amap') {
 function weatherDetails(stop: Stop | SubStop) {
   const weather = stop.weather || {}
   if (!weather || Object.keys(weather).length === 0) return null
+  if (weather.available === false) {
+    const provider = weather.provider === 'qweather' ? '和风天气' : weather.provider === 'caiyun' ? '彩云天气' : weather.provider === 'amap' ? '高德天气' : weather.provider === 'baidu' ? '百度天气' : weather.provider === 'openmeteo' ? 'Open-Meteo' : ''
+    return { condition: '暂无可用预报', rangeText: '', liveText: '', metricsText: '', provider, unavailable: true }
+  }
   const condition = String(weather.condition || weather.text_day || weather.text || '')
   const tempMin = weather.temp_min_c ?? weather.low
   const tempMax = weather.temp_max_c ?? weather.high
@@ -4969,6 +4973,7 @@ function weatherDetails(stop: Stop | SubStop) {
     liveText,
     metricsText: metrics.join(' · '),
     provider: weather.provider === 'openmeteo' ? 'Open-Meteo' : weather.provider === 'qweather' ? '和风天气' : weather.provider === 'caiyun' ? '彩云天气' : weather.provider === 'amap' ? '高德天气' : weather.provider === 'baidu' ? '百度天气' : '',
+    unavailable: false,
   }
 }
 function weatherText(stop: Stop | SubStop) {
@@ -4980,7 +4985,7 @@ function weatherText(stop: Stop | SubStop) {
   if (details.rangeText) parts.push(details.rangeText)
   return parts.join(' · ')
 }
-function weatherUpdatedAt(stop: Stop | SubStop) { const value = stop.weather?.fetched_at; return value ? formatDateTime(String(value)) : '' }
+function weatherUpdatedAt(stop: Stop | SubStop) { if (stop.weather?.available === false) return ''; const value = stop.weather?.fetched_at; return value ? formatDateTime(String(value)) : '' }
 async function refreshWeather() {
   if (readOnlyView.value || !selected.value || !tripDocument.value || !selectedTarget.value) { error.value = '请先选择一个有坐标的规划点'; return }
   const day = dayForStop(selectedTarget.value); const parent = selectedStop.value; if (!day || !parent) { error.value = '无法确定天气对应日期'; return }

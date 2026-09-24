@@ -359,3 +359,22 @@ func TestMoveStopToDayHTTPWorkflow(t *testing.T) {
 		t.Fatalf("target sequence=%d", payload.Document.Days[1].Stops[1].Sequence)
 	}
 }
+
+func TestWritePlanningErrorReportsUnavailableWeatherAsServiceFailure(t *testing.T) {
+	response := httptest.NewRecorder()
+	writePlanningError(response, application.ErrWeatherUnavailable)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d, want %d", response.Code, http.StatusServiceUnavailable)
+	}
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Error.Code != "weather_unavailable" {
+		t.Fatalf("error code=%q, want weather_unavailable", payload.Error.Code)
+	}
+}

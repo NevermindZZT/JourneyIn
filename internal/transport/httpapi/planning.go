@@ -189,6 +189,10 @@ func parseOptionalTime(raw string) (*time.Time, error) {
 	return &value, nil
 }
 func writePlanningError(w http.ResponseWriter, err error) {
+	if errors.Is(err, application.ErrWeatherUnavailable) {
+		writeError(w, http.StatusServiceUnavailable, "weather_unavailable", err.Error(), nil)
+		return
+	}
 	if errors.Is(err, store.ErrRevisionConflict) {
 		writeError(w, http.StatusConflict, "revision_conflict", err.Error(), nil)
 		return

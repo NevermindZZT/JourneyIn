@@ -60,6 +60,7 @@ type savedLocationData struct {
 }
 
 var ErrPlanningLocationRequired = errors.New("all planned stops must have a saved location")
+var ErrWeatherUnavailable = errors.New("weather forecast unavailable")
 
 func (s *TripService) AddStop(ctx context.Context, tripID string, expectedRevision int, dayID string, input AddStopInput, source string) (store.TripRecord, error) {
 	if strings.TrimSpace(input.Title) == "" {
@@ -879,6 +880,9 @@ func (s *TripService) RefreshWeather(ctx context.Context, tripID string, expecte
 		if err != nil {
 			return store.TripRecord{}, err
 		}
+		if !snapshot.Available {
+			return store.TripRecord{}, fmt.Errorf("%w for %s (provider %s)", ErrWeatherUnavailable, localDate, snapshot.Provider)
+		}
 		weatherRaw, err = json.Marshal(snapshot)
 		if err != nil {
 			return store.TripRecord{}, err
@@ -888,11 +892,15 @@ func (s *TripService) RefreshWeather(ctx context.Context, tripID string, expecte
 		if err != nil {
 			return store.TripRecord{}, err
 		}
+		if !snapshot.Available {
+			return store.TripRecord{}, fmt.Errorf("%w for %s (provider %s)", ErrWeatherUnavailable, localDate, snapshot.Provider)
+		}
 		weatherRaw, err = json.Marshal(snapshot)
 		if err != nil {
 			return store.TripRecord{}, err
 		}
 	}
+	updatedTarget := false
 	for dayIndex := range trip.Days {
 		if trip.Days[dayIndex].ID != dayID {
 			continue
@@ -901,21 +909,24 @@ func (s *TripService) RefreshWeather(ctx context.Context, tripID string, expecte
 			stop := &trip.Days[dayIndex].Stops[stopIndex]
 			if stop.ID == stopID {
 				stop.Weather = weatherRaw
-				found = true
+				updatedTarget = true
 				break
 			}
 			for childIndex := range stop.Children {
 				if stop.Children[childIndex].ID == stopID {
 					stop.Children[childIndex].Weather = weatherRaw
-					found = true
+					updatedTarget = true
 					break
 				}
 			}
-			if found {
+			if updatedTarget {
 				break
 			}
 		}
 		break
+	}
+	if !updatedTarget {
+		return store.TripRecord{}, fmt.Errorf("stop %s was not updated in day %s", stopID, dayID)
 	}
 	normalized, err := json.Marshal(trip)
 	if err != nil {
