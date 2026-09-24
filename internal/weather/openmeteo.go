@@ -97,7 +97,7 @@ func (p *OpenMeteoProvider) Weather(ctx context.Context, request WeatherRequest)
 	if err != nil {
 		return WeatherSnapshot{Provider: p.ID(), LocalDate: request.LocalDate, Available: false}, err
 	}
-	req.Header.Set("User-Agent", "JourneyIn-Weather/0.5.9")
+	req.Header.Set("User-Agent", "JourneyIn-Weather/0.5.10")
 
 	resp, err := p.client.Do(req)
 	if err != nil {
