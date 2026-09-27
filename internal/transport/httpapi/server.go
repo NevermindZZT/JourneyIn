@@ -115,6 +115,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/trips/{id}/days/{dayID}/stops/{stopID}/move", s.moveStop)
 	mux.HandleFunc("DELETE /api/v1/trips/{id}/days/{dayID}/stops/{stopID}", s.deleteStop)
 	mux.HandleFunc("POST /api/v1/trips/{id}/days/{dayID}/stops/{stopID}/children", s.addSubStop)
+	mux.HandleFunc("POST /api/v1/trips/{id}/weather/refresh", s.refreshTripWeatherBatch)
 	mux.HandleFunc("POST /api/v1/trips/{id}/days/{dayID}/stops/{stopID}/weather", s.refreshWeather)
 	mux.HandleFunc("POST /api/v1/trips/{id}/plan", s.planTrip)
 	mux.HandleFunc("POST /api/v1/trips/{id}/routes/refresh", s.planTrip)

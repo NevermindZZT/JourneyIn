@@ -187,6 +187,8 @@ const selectedSubStopId = ref('')
 const selectedLegId = ref('')
 const searchParentStopId = ref('')
 const weatherLoading = ref(false)
+const weatherBatchLoading = ref(false)
+const weatherBatchMessage = ref('')
 const descriptionEditing = ref(false)
 const descriptionDraft = ref('')
 const arrivalTimeDraft = ref('')
@@ -1715,6 +1717,7 @@ async function loadDetail(trip: TripSummary) {
   pointEditorTargetID.value = ''
   pointEditorDayID.value = ''
   pointUpdateNotice.value = ''
+  weatherBatchMessage.value = ''
   cancelMapPick()
   selectedStopId.value = ''
   detailLoading.value = true
@@ -5061,7 +5064,42 @@ function weatherText(stop: Stop | SubStop) {
   return parts.join(' · ')
 }
 function weatherUpdatedAt(stop: Stop | SubStop) { if (stop.weather?.available === false) return ''; const value = stop.weather?.fetched_at; return value ? formatDateTime(String(value)) : '' }
+async function refreshTripWeather() {
+  if (readOnlyView.value || !selected.value || !tripDocument.value || weatherBatchLoading.value || weatherLoading.value) return
+  const tripID = selected.value.id
+  weatherBatchLoading.value = true
+  weatherBatchMessage.value = '准备刷新整趟行程天气…'
+  error.value = ''
+  let offset = 0, updated = 0, skipped = 0, failed = 0, total = 0
+  const failures: string[] = []
+  try {
+    do {
+      if (selected.value?.id !== tripID || readOnlyView.value) throw new Error('行程已切换，天气刷新已停止')
+      const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(tripID) + '/weather/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + selected.value.revision, 'Prefer': 'return=delta' }, body: JSON.stringify({ provider: defaultWeatherProvider.value || 'auto', offset }) })
+      const payload = await response.json() as { document?: TripDocument; delta?: TripMutationDelta; revision?: number; stops?: number; days?: number; progress?: { total: number; next_offset: number; updated: number; skipped: number; failed: number; items: Array<{ title: string; date: string; status: string; reason?: string }> }; error?: { message?: string } }
+      if (!response.ok) {
+        if (response.status === 409 && selected.value?.id === tripID) { await loadDetail(selected.value); throw new Error('行程已被其他操作更新，已停止刷新；请检查已完成的天气并重新启动') }
+        throw new Error(payload.error?.message || '刷新行程天气失败')
+      }
+      if (selected.value?.id !== tripID) throw new Error('行程已切换，天气刷新已停止')
+      if (!payload.progress || (!payload.document && !payload.delta) || typeof payload.revision !== 'number') throw new Error('天气批次响应不完整，请重新加载行程')
+      applyTripPayload(payload)
+      updated += payload.progress.updated; skipped += payload.progress.skipped; failed += payload.progress.failed
+      for (const item of payload.progress.items) if (item.status !== 'updated' && failures.length < 5) failures.push(item.date + ' ' + item.title + '：' + (item.reason || '不可用'))
+      total = payload.progress.total
+      if (payload.progress.next_offset <= offset && offset < total) throw new Error('天气刷新未前进，请稍后重试')
+      offset = payload.progress.next_offset
+      weatherBatchMessage.value = '行程天气 ' + offset + '/' + total + ' · 成功 ' + updated + ' · 跳过 ' + skipped + ' · 失败 ' + failed
+    } while (offset < total)
+    weatherBatchMessage.value = '行程天气刷新完成：成功 ' + updated + '，跳过 ' + skipped + '，失败 ' + failed + (failures.length ? '；' + failures.join('；') : '')
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '刷新行程天气失败'
+    weatherBatchMessage.value = '已处理 ' + offset + '/' + total + '，成功 ' + updated + '，跳过 ' + skipped + '，失败 ' + failed + '；未完成的规划点可重新刷新'
+  } finally { weatherBatchLoading.value = false }
+}
+
 async function refreshWeather() {
+  if (weatherBatchLoading.value) return
   if (readOnlyView.value || !selected.value || !tripDocument.value || !selectedTarget.value) { error.value = '请先选择一个有坐标的规划点'; return }
   const day = dayForStop(selectedTarget.value); const parent = selectedStop.value; if (!day || !parent) { error.value = '无法确定天气对应日期'; return }
   weatherLoading.value = true; error.value = ''
@@ -5857,10 +5895,10 @@ onUnmounted(() => {
               <div v-else class="panel-scroll itinerary-scroll">
                 <div class="peek-summary"><div><span class="eyebrow">{{ selectedDay === 'all' ? 'FULL JOURNEY' : 'DAY ' + selectedDay }}</span><strong>{{ visibleStops.length }} 个规划点</strong></div><span>{{ formatDistance(visibleRouteSummary.distanceM) || '距离待生成' }} · {{ formatDuration(visibleRouteSummary.durationS) || '时间待生成' }}</span></div>
                 <div v-if="journeySection === 'overview'" class="trip-overview redesign-overview"><div class="section-title-row"><div><span class="eyebrow">JOURNEY NOTE</span><h2>行程说明</h2></div><div v-if="!readOnlyView" class="section-actions"><button class="text-action" type="button" @click="beginEditTripDescription">{{ tripDescriptionEditing ? '编辑中' : '编辑' }}</button><button v-if="tripDescriptionEditing" class="text-action" type="button" @click="openTripDescriptionFullscreen">全屏</button></div></div><template v-if="tripDescriptionEditing && !readOnlyView"><MarkdownEditor v-model="tripDescriptionDraft" v-model:mode="tripDescriptionEditorMode" :preview-html="renderMarkdown(tripDescriptionDraft)" :rows="4" editor-label="MARKDOWN" preview-label="行程说明预览" editor-aria-label="行程说明 Markdown 原始文本" placeholder="补充整个行程的背景、节奏和注意事项" /><div class="editor-actions"><button class="secondary-action compact-action" type="button" @click="cancelEditTripDescription">取消</button><button class="primary-action compact-action" type="button" :disabled="tripDescriptionSaving" @click="saveTripDescription">{{ tripDescriptionSaving ? '保存中…' : '保存说明' }}</button></div></template><div v-else-if="tripDocument.description_markdown" class="markdown" v-html="renderMarkdown(tripDocument.description_markdown)"></div><p v-else class="muted">{{ shareMode ? '暂无行程总体说明。' : '暂无行程总体说明，点击“编辑”添加。' }}</p></div>
-                <div v-else class="itinerary-section"><div class="section-title-row"><div><span class="eyebrow">ITINERARY</span><h2>规划点</h2></div><div class="section-actions"><span>{{ visibleStops.length }} 个</span><button v-if="!readOnlyView" class="text-action" type="button" :class="{ selected: reorderMode }" @click="toggleReorderMode">{{ reorderMode ? '完成排序' : '调整顺序' }}</button></div></div>
+                <div v-else class="itinerary-section"><div class="section-title-row"><div><span class="eyebrow">ITINERARY</span><h2>规划点</h2></div><div class="section-actions"><span>{{ visibleStops.length }} 个</span><button v-if="!readOnlyView" class="text-action weather-batch-action" type="button" :disabled="weatherBatchLoading || weatherLoading || !tripDocument" @click="refreshTripWeather">{{ weatherBatchLoading ? "刷新天气中…" : "一键刷新天气" }}</button><button v-if="!readOnlyView" class="text-action" type="button" :class="{ selected: reorderMode }" @click="toggleReorderMode">{{ reorderMode ? '完成排序' : '调整顺序' }}</button></div></div>
                   <div v-if="!readOnlyView" class="redesign-plan-controls"><label class="select-field">路线 Provider<UiSelect v-model="planningProvider" aria-label="路线 Provider" :options="mapProviderOptions" /></label><label class="select-field">出行方式<UiSelect v-model="planningMode" aria-label="出行方式" :options="travelModeOptions" /></label><label v-if="planningMode === 'driving' && supportsDrivingStrategy" class="select-field">驾车策略<UiSelect v-model="planningStrategy" aria-label="驾车策略" :options="availableDrivingStrategyOptions" /></label><button class="primary-action compact-action plan-button" type="button" :disabled="planningLoading || !canPlanRoutes" @click="planRoutes"><IonIcon :icon="navigateOutline" /> {{ planningLoading ? '规划中…' : '生成路线' }}</button></div>
                   <div v-if="unlocatedPlanningPoints.length" class="location-readiness-banner"><div><strong>{{ unlocatedPlanningPoints.length }} 个规划点待定位</strong><span v-if="unlocatedRouteStops.length">参与路线的主规划点没有可靠坐标前，路线和导航不会启用。</span><span v-else-if="unlocatedMainStops.length">已排除路线的规划点不影响路线生成，但仍建议补充坐标以便导航。</span><span v-else>子规划点不参与主路线，但仍建议补充坐标。</span></div><button v-if="!readOnlyView" class="text-action" type="button" @click="selectPlanningPointFromList(unlocatedRouteStops[0] || unlocatedMainStops[0] || unlocatedPlanningPoints[0])">去定位</button><span v-else class="location-readiness-readonly">只读</span></div><div class="redesign-route-summary"><div><span>{{ selectedDay === 'all' ? '全程路线' : 'D' + selectedDay + ' 当天路线' }}</span><strong v-if="visibleRouteSummary.segments">{{ formatDistance(visibleRouteSummary.distanceM) || '距离未知' }} · {{ formatDuration(visibleRouteSummary.durationS) || '时间未知' }}</strong><em v-else-if="visibleRouteSummary.zeroSegments">有 {{ visibleRouteSummary.zeroSegments }} 段为同一地点</em><em v-else>尚未生成路线</em></div><small v-if="visibleRouteSummary.segments">{{ visibleRouteSummary.segments }} 段 · {{ mapProviderLabel }}</small></div>
-                  <p v-if="hasCarryOverRoute" class="route-hint">路线从前一天最后一个规划点“{{ carryOverStop?.title }}”开始。</p><p v-if="reorderMessage" class="inline-message">{{ reorderMessage }}</p><p v-if="pointUpdateNotice" class="inline-message">{{ pointUpdateNotice }}</p><p v-if="!plannableDays.length" class="muted">{{ shareMode ? '当前选择范围暂无可生成的路线。' : '添加至少两个相邻的带坐标规划点后，可以生成路线。' }}</p>
+                  <p v-if="weatherBatchMessage" class="inline-message" role="status" aria-live="polite">{{ weatherBatchMessage }}</p><p v-if="hasCarryOverRoute" class="route-hint">路线从前一天最后一个规划点“{{ carryOverStop?.title }}”开始。</p><p v-if="reorderMessage" class="inline-message">{{ reorderMessage }}</p><p v-if="pointUpdateNotice" class="inline-message">{{ pointUpdateNotice }}</p><p v-if="!plannableDays.length" class="muted">{{ shareMode ? '当前选择范围暂无可生成的路线。' : '添加至少两个相邻的带坐标规划点后，可以生成路线。' }}</p>
                   <div v-if="visibleStops.length" class="redesign-stop-list"><article v-for="stop in visibleStops" :key="stop.id" class="redesign-stop-row" :class="{ selected: selectedStopId === stop.id, 'reorder-active': reorderMode, 'location-missing': !pointFor(stop), 'route-excluded': stop.exclude_from_route }"><button class="redesign-stop-main" type="button" @click="selectPlanningPointFromList(stop)"><span class="stop-number">{{ stop.sequence }}</span><span><strong>{{ stop.title }}</strong><small>{{ stopDate(stop) }} · {{ stop.address || '地址待补充' }}</small><span class="planning-point-badge-row"><em class="planning-point-kind-badge" :style="{ '--kind-color': planningPointCategoryColor(stop.kind) }">{{ planningPointCategoryLabel(stop.kind) }}</em><em class="stop-location-badge" :class="{ missing: !pointFor(stop) }">{{ locationStatus(stop) }}</em><em v-if="stop.exclude_from_route" class="stop-route-excluded-badge">已排除路线</em></span></span><span class="row-chevron">›</span></button><div v-if="reorderMode && !readOnlyView" class="reorder-actions" @click.stop><button class="reorder-move-button" type="button" :disabled="actionLoading || !canMovePlanningPoint(stop, -1)" :aria-label="'上移规划点 ' + stop.title" @click="movePlanningPoint(stop, -1)"><IonIcon :icon="chevronUpOutline" /></button><button class="reorder-move-button" type="button" :disabled="actionLoading || !canMovePlanningPoint(stop, 1)" :aria-label="'下移规划点 ' + stop.title" @click="movePlanningPoint(stop, 1)"><IonIcon :icon="chevronDownOutline" /></button></div><button v-if="!readOnlyView" class="stop-delete-button" type="button" :aria-label="'删除规划点 ' + stop.title" @click.stop="deletePlanningPoint(stop)">×</button></article></div><p v-else class="muted compact-empty">当前日期还没有规划点。</p>
                   <button v-if="!readOnlyView" class="add-place-action" type="button" @click="openJourneySearch()"><IonIcon :icon="searchOutline" /> 搜索并添加规划点</button>
                 </div>
@@ -5890,7 +5928,7 @@ onUnmounted(() => {
                       <span v-if="weatherDetails(selectedTarget || selectedStop)?.provider">{{ weatherDetails(selectedTarget || selectedStop)?.provider }} · </span>更新于 {{ weatherUpdatedAt(selectedTarget || selectedStop) }}
                     </small>
                   </span>
-                  <button v-if="!readOnlyView" type="button" :disabled="weatherLoading || !pointFor(selectedTarget || selectedStop)" @click="refreshWeather">{{ weatherLoading ? '查询中…' : '刷新' }}</button>
+                  <button v-if="!readOnlyView" type="button" :disabled="weatherLoading || weatherBatchLoading || !pointFor(selectedTarget || selectedStop)" @click="refreshWeather">{{ weatherLoading ? '查询中…' : '刷新' }}</button>
                 </div>
                 <section v-if="!selectedSubStop" class="detail-section"><div class="section-title-row"><h2>子规划点 <span>{{ selectedStop.children?.length || 0 }}</span></h2><button v-if="!readOnlyView" class="text-action" type="button" @click="openChildSearch(selectedStop)">添加</button></div><p v-if="selectedStop.children?.length" class="detail-section-help">点击子点进入下一层，返回箭头会回到主规划点。</p><div v-if="selectedStop.children?.length" class="detail-child-list"><button v-for="child in selectedStop.children" :key="child.id" type="button" class="detail-child-row" @click="selectSubStop(child, selectedStop)"><span class="child-number">{{ child.sequence }}</span><span><strong>{{ child.title }}</strong><small>{{ stopDate(child) }} · {{ child.address || '地址待补充' }}</small><span class="planning-point-badge-row"><em class="planning-point-kind-badge" :style="{ '--kind-color': planningPointCategoryColor(child.kind) }">{{ planningPointCategoryLabel(child.kind) }}</em><em class="stop-location-badge" :class="{ missing: !pointFor(child) }">{{ locationStatus(child) }}</em></span></span><span>›</span></button></div><button v-if="!readOnlyView" class="add-place-action" type="button" @click="openChildSearch(selectedStop)"><IonIcon :icon="searchOutline" /> 添加子规划点</button></section>
                 <button v-else class="detail-parent-button" type="button" @click="navigateBackFromSubStop">‹ 返回主规划点：{{ selectedStop.title }}</button>

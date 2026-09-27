@@ -780,6 +780,12 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .redesign-overview .markdown, .redesign-overview > p { margin-top: 10px; font-size: 12px; line-height: 1.65; }
 .itinerary-section { margin-top: 4px; }
 .section-actions { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; font-weight: 700; }
+.itinerary-section .section-title-row { flex-wrap: wrap; }
+.itinerary-section .section-actions { flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.itinerary-section .section-actions .text-action { display: inline-flex; min-width: 44px; min-height: 44px; align-items: center; justify-content: center; padding: 6px 4px; border-radius: 8px; background: transparent; white-space: nowrap; }
+@media (hover: hover) and (pointer: fine) { .itinerary-section .section-actions .text-action:hover { background: color-mix(in srgb, var(--p) 10%, transparent); } }
+.itinerary-section .section-actions .text-action.selected { background: color-mix(in srgb, var(--p) 16%, var(--surface)); }
+.itinerary-section .section-actions .text-action:disabled { opacity: .55; cursor: not-allowed; }
 .redesign-plan-controls { display: flex; align-items: flex-end; gap: 7px; margin-top: 12px; flex-wrap: wrap; }
 .redesign-plan-controls label { display: grid; min-width: 0; flex: 1 1 calc(50% - 4px); gap: 5px; color: var(--muted); font-size: 10px; font-weight: 800; }
 .redesign-plan-controls select { width: 100%; min-height: 38px; padding: 7px 8px; border: 1px solid var(--line); border-radius: 10px; outline: none; color: var(--ink); background: var(--surface); font-size: 11px; }

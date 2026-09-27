@@ -134,6 +134,37 @@ type weatherRefreshBody struct {
 	LocalDate string                 `json:"local_date,omitempty"`
 }
 
+type tripWeatherRefreshBody struct {
+	Provider journeymaps.ProviderID `json:"provider,omitempty"`
+	Offset   int                    `json:"offset"`
+}
+
+func (s *Server) refreshTripWeatherBatch(w http.ResponseWriter, r *http.Request) {
+	expected, err := parseRevision(r.Header.Get("If-Match"))
+	if err != nil {
+		writeError(w, http.StatusPreconditionRequired, "if_match_required", "If-Match must be revision-N", nil)
+		return
+	}
+	var body tripWeatherRefreshBody
+	if err := decodeBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
+		return
+	}
+	record, progress, err := s.trips.RefreshTripWeatherBatch(r.Context(), r.PathValue("id"), expected, body.Offset, application.WeatherInput{Provider: body.Provider}, "rest:trip_weather_refresh")
+	if err != nil {
+		writePlanningError(w, err)
+		return
+	}
+	changedDays := make([]string, 0, progress.Updated)
+	for _, item := range progress.Items {
+		if item.Status == "updated" {
+			changedDays = append(changedDays, item.DayID)
+		}
+	}
+	response := tripMutationResponse(w, r, record, changedDays...)
+	response["progress"] = progress
+	writeJSON(w, http.StatusOK, response)
+}
 func (s *Server) refreshWeather(w http.ResponseWriter, r *http.Request) {
 	expected, err := parseRevision(r.Header.Get("If-Match"))
 	if err != nil {
