@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { clusterPosterPoints, layoutPosterLabels, selectPosterRoutes } from './src/routeTopologyLayout.ts'
+import { clusterPosterPoints, findDayRouteCarryOver, layoutPosterLabels, selectPosterRoutes } from './src/routeTopologyLayout.ts'
 
 test('dense nodes aggregate without moving route geometry or original coordinates', () => {
   const nodes = clusterPosterPoints([
@@ -29,6 +29,14 @@ test('simple labels have priority and never overlap or escape poster canvas', ()
     }
   }
   assert.ok(layoutPosterLabels(nodes, 512, 340, 'detailed').length >= labels.length)
+})
+
+test('day topology uses the previous day stop only when saved legs cross the day boundary', () => {
+  const yesterday = { stops: [{ id: 'prior-end', title: '前日终点' }] }
+  const today = { stops: [{ id: 'today-start', title: '当日起点' }, { id: 'today-end', title: '当日终点' }], legs: [{ from_stop_id: 'prior-end', to_stop_id: 'today-end' }] }
+  assert.equal(findDayRouteCarryOver([yesterday, today], 1)?.id, 'prior-end')
+  assert.equal(findDayRouteCarryOver([yesterday, { ...today, legs: [{ from_stop_id: 'today-start', to_stop_id: 'today-end' }] }], 1), null)
+  assert.equal(findDayRouteCarryOver([yesterday, today], 0), null)
 })
 
 test('route rendering uses real matching provider and CRS snapshots only', () => {

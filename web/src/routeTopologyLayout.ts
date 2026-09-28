@@ -64,6 +64,17 @@ export function layoutPosterLabels(nodes: PosterNode[], width: number, height: n
   return labels
 }
 
+export function findDayRouteCarryOver<TStop extends { id: string }>(days: Array<{ stops: TStop[]; legs?: Array<{ from_stop_id: string; to_stop_id: string }> }>, dayIndex: number): TStop | null {
+  if (dayIndex <= 0) return null
+  const day = days[dayIndex]
+  const stops = day?.stops || []
+  if (!stops.length) return null
+  const currentIDs = new Set(stops.map(stop => stop.id))
+  const boundary = (day.legs || []).find(leg => currentIDs.has(leg.to_stop_id) && !currentIDs.has(leg.from_stop_id))
+  if (!boundary) return null
+  return days.slice(0, dayIndex).flatMap(previous => previous.stops || []).find(stop => stop.id === boundary.from_stop_id) || null
+}
+
 type RouteGeometry = Array<[number, number] | { lng: number; lat: number; crs?: string }>
 export type PosterRouteLeg = { snapshots?: Array<{ provider?: string; coordinate_system?: string; mode?: string; geometry?: RouteGeometry }> }
 export function selectPosterRoutes(legs: PosterRouteLeg[], preferredProvider = '', preferredMode = ''): { provider: string; crs: string; paths: Array<Array<[number, number]>> } {

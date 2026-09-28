@@ -4,7 +4,7 @@ import { clusterPosterPoints, layoutPosterLabels, selectPosterRoutes, type Poste
 
 type Coord = { lat: number; lng: number; crs?: string }
 type LocationData = { coordinates?: Record<string, Coord> }
-type Stop = { id: string; sequence: number; title: string; dayBoundary?: boolean; location?: LocationData }
+type Stop = { id: string; sequence: number; title: string; dayBoundary?: boolean; isCarryOverStart?: boolean; posterDisplayIndex?: number; location?: LocationData }
 type Leg = PosterRouteLeg & { id: string }
 
 const props = withDefaults(defineProps<{
@@ -53,9 +53,10 @@ const projectedData = computed(() => {
     Math.round((48 + (innerW - spanLng * scale) / 2 + (lng - minLng) * cosLat * scale) * 10) / 10,
     Math.round((44 + (innerH - spanLat * scale) / 2 + (maxLat - lat) * scale) * 10) / 10,
   ]
+  const hasValidCarryOverStart = validStops.some(({ stop }) => stop.isCarryOverStart)
   const points: PosterPoint[] = validStops.map(({ stop, index, coord }, visibleIndex) => {
     const [x, y] = project(coord)
-    return { id: stop.id, title: stop.title, displayIndex: index + 1, x, y, isFirst: visibleIndex === 0, isLast: visibleIndex === validStops.length - 1 && validStops.length > 1, dayBoundary: stop.dayBoundary }
+    return { id: stop.id, title: stop.title, displayIndex: stop.posterDisplayIndex ?? index + 1, x, y, isFirst: Boolean(stop.isCarryOverStart) || (!hasValidCarryOverStart && visibleIndex === 0), isLast: visibleIndex === validStops.length - 1 && validStops.length > 1, dayBoundary: stop.dayBoundary }
   })
   const paths = routeCoords.map(coords => coords.map(project))
   const routePixels = paths.flatMap(path => path.filter((_, i) => i % Math.max(1, Math.ceil(path.length / 120)) === 0))

@@ -3,12 +3,13 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { domToPng } from 'modern-screenshot'
 import QrcodeVue from 'qrcode.vue'
 import RouteTopologyMap from './RouteTopologyMap.vue'
+import { findDayRouteCarryOver } from './routeTopologyLayout'
 import BrandLogo from './BrandLogo.vue'
 
 type Coord = { lat: number; lng: number; crs?: string }
 type LocationData = { preferred?: string; coordinates?: Record<string, Coord & { crs?: string }> }
 type LinkData = { id?: string; title: string; url: string }
-type Stop = { id: string; sequence: number; title: string; dayBoundary?: boolean; address?: string; location?: LocationData; time_window?: { arrival?: string; departure?: string }; description_markdown?: string; links?: LinkData[]; weather?: Record<string, unknown> }
+type Stop = { id: string; sequence: number; title: string; dayBoundary?: boolean; isCarryOverStart?: boolean; posterDisplayIndex?: number; address?: string; location?: LocationData; time_window?: { arrival?: string; departure?: string }; description_markdown?: string; links?: LinkData[]; weather?: Record<string, unknown> }
 type Leg = { id: string; from_stop_id: string; to_stop_id: string; mode?: string; snapshots?: Array<{ provider?: string; coordinate_system?: string; mode?: string; geometry?: Array<[number, number]> | Array<Coord>; distance_m?: number; duration_s?: number }> }
 type Day = { id: string; date: string; title?: string; notes_markdown?: string; stops: Stop[]; legs?: Leg[] }
 type TripDoc = { title: string; date_range?: { start: string; end: string }; timezone: string; description_markdown?: string; map?: { preferred_provider?: string; default_mode?: string }; days: Day[] }
@@ -83,11 +84,16 @@ const currentDisplayDays = computed(() => {
 })
 
 const currentDisplayStops = computed(() => {
-  if (posterLayout.value === 'long') {
-    return allStops.value
-  }
-  return currentDisplayDays.value[0]?.stops || []
+  if (posterLayout.value === 'long') return allStops.value
+  const day = allDays.value[activeDayIndex.value]
+  const stops = day?.stops || []
+  const dailyStops = stops.map((stop, index) => ({ ...stop, dayBoundary: index === 0, posterDisplayIndex: stop.sequence || index + 1 }))
+  if (activeDayIndex.value <= 0 || !stops.length) return dailyStops
+  const previousStop = findDayRouteCarryOver(allDays.value, activeDayIndex.value)
+  if (!previousStop || !day) return dailyStops
+  return [{ ...previousStop, id: 'poster-boundary-' + day.id + '-' + previousStop.id, sequence: 0, posterDisplayIndex: 0, dayBoundary: true, isCarryOverStart: true }, ...dailyStops]
 })
+const currentDisplayPointCount = computed(() => posterLayout.value === 'day' ? allDays.value[activeDayIndex.value]?.stops.length || 0 : currentDisplayStops.value.length)
 
 const currentDisplayLegs = computed(() => {
   if (posterLayout.value === 'long') {
@@ -383,7 +389,7 @@ function formatWeatherBadge(stop: Stop): string {
                 {{ formatDisplayDate(trip?.date_range?.start) }} - {{ formatDisplayDate(trip?.date_range?.end) }}
               </span>
               <span class="meta-badge">{{ allDays.length }} 天行程</span>
-              <span class="meta-badge">{{ currentDisplayStops.length }} 个规划点</span>
+              <span class="meta-badge">{{ currentDisplayPointCount }} 个规划点</span>
               <span v-if="totalDistanceKm > 0" class="meta-badge">总里程 ~{{ totalDistanceKm }}km</span>
             </div>
             <p v-if="trip?.description_markdown && posterLayout === 'long'" class="poster-summary-quote">
