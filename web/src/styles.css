@@ -20,6 +20,8 @@
   --map-kind-transport: #1677b8;
   --map-kind-shopping: #16877b;
   --map-kind-other: #68737d;
+  --map-weather-badge-text: #d4f4e8;
+  --map-weather-badge-bg: #345d58;
   --p: var(--md-primary);
   --ink: var(--md-on-surface);
   --muted: var(--md-on-surface-variant);
@@ -65,6 +67,8 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .amap-marker-label { padding: 0 !important; border: 0 !important; background: transparent !important; }
 .journey-map-marker-label { display: inline-flex; align-items: center; user-select: none; pointer-events: auto; transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease; }
 .journey-map-marker-label.is-target { transform: scale(1.05); z-index: 999 !important; }
+.journey-map-weather-badge { display: inline-flex; max-width: 150px; min-height: 23px; align-items: center; gap: 5px; padding: 3px 7px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--map-weather-badge-text) 35%, transparent); border-radius: 8px; color: var(--map-weather-badge-text); background: var(--map-weather-badge-bg); box-shadow: 0 3px 10px #0005; font-size: 10px; font-weight: 700; line-height: 15px; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+.journey-map-weather-icon { display: inline-block; flex: 0 0 auto; color: var(--map-weather-badge-text); font-size: 14px; line-height: 1; }
 
 /* ==================== 足迹漫游 (Atlas) 样式 ==================== */
 .trip-atlas-tag {

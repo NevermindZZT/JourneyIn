@@ -14,6 +14,7 @@ import MarkdownEditor from './MarkdownEditor.vue'
 import TripPosterModal from './TripPosterModal.vue'
 import BrandLogo from './BrandLogo.vue'
 import MapLoadingState from './MapLoadingState.vue'
+import { formatDayWeatherBadge, iconForWeatherLabel, visibleWeatherLabelIDs } from './weatherMapLabel'
 
 type Theme = 'system' | 'light' | 'dark'
 type Coord = { lat: number; lng: number }
@@ -582,6 +583,7 @@ let mapScriptPromise: Promise<void> | null = null
 let amapScriptPromise: Promise<void> | null = null
 let mapOverlays: any[] = []
 let currentStopMarkers: any[] = []
+let weatherLabelOverlays: any[] = []
 let atlasStopMarkers: any[] = []
 let atlasTripLabels: any[] = []
 let amapSatelliteLayer: any = null
@@ -2411,7 +2413,7 @@ async function renderBaiduMap(preserveView = false) {
       mapInstance.addEventListener?.('click', handleMapClick)
       mapInstance.addEventListener?.('spotclick', handleBaiduSpotClick)
       mapInstance.addEventListener?.('zoomend', handleMapZoomChange)
-      mapInstance.addEventListener?.('moveend', updateMapScale)
+      mapInstance.addEventListener?.('moveend', handleMapZoomChange)
       mapInstance.addEventListener?.('tilesloaded', () => { mapReady.value = true; mapError.value = ''; mapWarning.value = ''; updateMapScale(); alignBaiduAttributionElements() })
       if (mapReadyTimer !== null) window.clearTimeout(mapReadyTimer)
       mapReadyTimer = window.setTimeout(() => {
@@ -2419,6 +2421,7 @@ async function renderBaiduMap(preserveView = false) {
       }, 8000)
     }
     mapInstance.clearOverlays()
+    weatherLabelOverlays = []
     currentStopMarkers = []
     const points: any[] = []
     const visibleLabelIDs = computeVisibleLabelStopIDs(mapLabelPoints.value)
@@ -2471,6 +2474,7 @@ async function renderBaiduMap(preserveView = false) {
       attachMapLabel(marker, child.title, '', isChildTarget, shouldShow)
       mapInstance.addOverlay(marker)
     }
+    updateWeatherLabelsVisibility(visibleLabelIDs)
     for (const day of visibleDays.value) for (const leg of day.legs || []) {
       const snapshot = chooseSnapshot(leg, 'baidu', planningMode.value)
       if (!snapshot || !snapshot.geometry) continue
@@ -2503,6 +2507,7 @@ function resetMapSDK() {
   mapAPI = null
   mapOverlays = []
   currentStopMarkers = []
+  weatherLabelOverlays = []
   atlasStopMarkers = []
   atlasTripLabels = []
   atlasPhotoMarkers = []
@@ -2564,7 +2569,7 @@ async function loadAMap() {
 function safeMapError(cause: unknown, fallback: string) { const message = cause instanceof Error ? cause.message : String(cause || ''); return (message || fallback).replace(/([?&](?:ak|key|jscode)=)[^&\s'\"]+/gi, '$1<redacted>') }
 function amapPointToArray(point: Coord) { return [point.lng, point.lat] }
 function addAMapOverlay(overlay: any) { mapInstance?.add?.(overlay); mapOverlays.push(overlay); return overlay }
-function clearAMapOverlays() { mapInstance?.clearMap?.(); mapOverlays = []; currentStopMarkers = []; atlasStopMarkers = []; atlasTripLabels = [] }
+function clearAMapOverlays() { mapInstance?.clearMap?.(); mapOverlays = []; currentStopMarkers = []; weatherLabelOverlays = []; atlasStopMarkers = []; atlasTripLabels = [] }
 function renderStopPinHTML(sequence: number | string, isTarget: boolean, isCarryOver: boolean, kind?: string): string {
   const bg = planningPointCategoryColor(kind)
   const text = isCarryOver ? '‹' : String(sequence)
@@ -2593,6 +2598,52 @@ function renderSubStopPinHTML(sequence: number | string, isTarget: boolean, kind
     '</div>'
 }
 
+function dayMapWeatherLabel(stop: Stop | SubStop, carryOver = false): string {
+  if (selectedDay.value === 'all' || carryOver || !tripDocument.value) return ''
+  const day = tripDocument.value.days[selectedDay.value - 1]
+  if (!day || dayForStop(stop)?.id !== day.id) return ''
+  return formatDayWeatherBadge(stop.weather, day.date)
+}
+function weatherOverlayHTML(text: string): string {
+  return '<span class="journey-map-weather-badge"><span class="journey-map-weather-icon" aria-hidden="true">' + iconForWeatherLabel(text) + '</span>' + escapeHTML(text) + '</span>'
+}
+function updateWeatherLabelsVisibility(nameIDs = computeVisibleLabelStopIDs(mapLabelPoints.value)) {
+  for (const overlay of weatherLabelOverlays) {
+    try {
+      if (selectedMapProvider.value === 'amap') mapInstance?.remove?.(overlay)
+      else mapInstance?.removeOverlay?.(overlay)
+    } catch { /* overlay may have been cleared by a map redraw */ }
+  }
+  weatherLabelOverlays = []
+  if (!mapInstance || !mapAPI || selectedDay.value === 'all' || mapLabelMode.value === 'none') return
+  const candidates = currentStopMarkers.map(marker => {
+    const stop = marker.__journeyinStop as Stop | SubStop
+    const id = marker.__journeyinIsSubStop ? marker.__journeyinSubStopId : marker.__journeyinStopId
+    const point = pointForProvider(stop, selectedMapProvider.value)
+    const pixel = point ? getMapPointScreenPixel(point) : null
+    const weatherText = dayMapWeatherLabel(stop, Boolean(marker.__journeyinCarryOver))
+    return { id: String(id || ''), x: pixel?.x ?? null, y: pixel?.y ?? null, hasWeather: Boolean(weatherText), nameVisible: nameIDs.has(id), labelWidth: Math.min(150, 30 + [...weatherText].length * 9) }
+  })
+  const visible = visibleWeatherLabelIDs(candidates, mapLabelMode.value, mapVisibleRect())
+  for (const marker of currentStopMarkers) {
+    const id = marker.__journeyinIsSubStop ? marker.__journeyinSubStopId : marker.__journeyinStopId
+    if (!visible.has(id)) continue
+    const text = dayMapWeatherLabel(marker.__journeyinStop, Boolean(marker.__journeyinCarryOver))
+    const position = marker.getPosition?.()
+    if (!position || !text) continue
+    if (selectedMapProvider.value === 'amap') {
+      const overlay = new mapAPI.Marker({ position, content: weatherOverlayHTML(text), offset: new mapAPI.Pixel(14, 18), zIndex: 70, clickable: false })
+      mapInstance.add?.(overlay)
+      weatherLabelOverlays.push(overlay)
+    } else if (typeof mapAPI.Label === 'function' && typeof mapAPI.Size === 'function') {
+      const overlay = new mapAPI.Label(weatherOverlayHTML(text), { offset: new mapAPI.Size(16, 12) })
+      overlay.setPosition?.(position)
+      overlay.setStyle?.({ border: '0', padding: '0', backgroundColor: 'transparent', boxShadow: 'none', pointerEvents: 'none', zIndex: 5 })
+      mapInstance.addOverlay?.(overlay)
+      weatherLabelOverlays.push(overlay)
+    }
+  }
+}
 function attachAMapLabel(marker: any, title: string, dayBadge = '', isTarget = false, shouldShow = true) {
   if (typeof marker.setLabel !== 'function') return
   if (!shouldShow) {
@@ -2899,7 +2950,7 @@ async function renderAMapMap(preserveView = false) {
       })
       mapInstance.on?.('hotspotclick', handleAMapHotspotClick)
       mapInstance.on?.('zoomend', handleMapZoomChange)
-      mapInstance.on?.('moveend', updateMapScale)
+      mapInstance.on?.('moveend', handleMapZoomChange)
       mapInstance.on?.('complete', () => { mapReady.value = true; mapError.value = ''; mapWarning.value = ''; updateMapScale() })
       mapInstance.on?.('error', (err: any) => {
         console.error('AMap runtime error:', err)
@@ -2971,6 +3022,7 @@ async function renderAMapMap(preserveView = false) {
       const shouldShow = visibleLabelIDs.has(child.id)
       attachAMapLabel(marker, child.title, '', isChildTarget, shouldShow)
     }
+    updateWeatherLabelsVisibility(visibleLabelIDs)
     for (const day of visibleDays.value) for (const leg of day.legs || []) {
       const snapshot = chooseSnapshot(leg, 'amap', planningMode.value)
       if (!snapshot?.geometry?.length) continue
@@ -4149,6 +4201,7 @@ function updateStopLabelsVisibility() {
       attachMapLabel(marker, title, badge, isTarget, shouldShow)
     }
   }
+  updateWeatherLabelsVisibility(visibleLabelIDs)
 }
 
 const SCALE_STEPS = [
@@ -4244,6 +4297,7 @@ function handleMapZoomChange() {
   if (mapZoomDebounceTimer !== null) window.clearTimeout(mapZoomDebounceTimer)
   mapZoomDebounceTimer = window.setTimeout(() => {
     if (isMobileViewport()) updateStopLabelsVisibility()
+    else updateWeatherLabelsVisibility()
   }, 120)
 }
 
