@@ -5,13 +5,13 @@ import QrcodeVue from 'qrcode.vue'
 import RouteTopologyMap from './RouteTopologyMap.vue'
 import BrandLogo from './BrandLogo.vue'
 
-type Coord = { lat: number; lng: number }
+type Coord = { lat: number; lng: number; crs?: string }
 type LocationData = { preferred?: string; coordinates?: Record<string, Coord & { crs?: string }> }
 type LinkData = { id?: string; title: string; url: string }
-type Stop = { id: string; sequence: number; title: string; address?: string; location?: LocationData; time_window?: { arrival?: string; departure?: string }; description_markdown?: string; links?: LinkData[]; weather?: Record<string, unknown> }
-type Leg = { id: string; from_stop_id: string; to_stop_id: string; mode?: string; snapshots?: Array<{ geometry?: Array<[number, number]> | Array<Coord>; distance_m?: number; duration_s?: number }> }
+type Stop = { id: string; sequence: number; title: string; dayBoundary?: boolean; address?: string; location?: LocationData; time_window?: { arrival?: string; departure?: string }; description_markdown?: string; links?: LinkData[]; weather?: Record<string, unknown> }
+type Leg = { id: string; from_stop_id: string; to_stop_id: string; mode?: string; snapshots?: Array<{ provider?: string; coordinate_system?: string; mode?: string; geometry?: Array<[number, number]> | Array<Coord>; distance_m?: number; duration_s?: number }> }
 type Day = { id: string; date: string; title?: string; notes_markdown?: string; stops: Stop[]; legs?: Leg[] }
-type TripDoc = { title: string; date_range?: { start: string; end: string }; timezone: string; description_markdown?: string; days: Day[] }
+type TripDoc = { title: string; date_range?: { start: string; end: string }; timezone: string; description_markdown?: string; map?: { preferred_provider?: string; default_mode?: string }; days: Day[] }
 
 const props = withDefaults(defineProps<{
   isOpen: boolean
@@ -31,6 +31,7 @@ const emit = defineEmits<{
 const posterCardRef = ref<HTMLElement | null>(null)
 const posterTheme = ref<'light' | 'dark'>('light')
 const posterLayout = ref<'long' | 'day'>('long')
+const topologyLabelDensity = ref<'simple' | 'detailed'>('simple')
 type DescLinesMode = '2' | '4' | 'all'
 const descLinesMode = ref<DescLinesMode>('4')
 const activeDayIndex = ref<number>(0)
@@ -47,6 +48,7 @@ watch(() => props.isOpen, (open) => {
     generatedImage.value = ''
     toastMessage.value = ''
     activeDayIndex.value = 0
+    topologyLabelDensity.value = 'simple'
   }
 })
 
@@ -58,8 +60,8 @@ const allDays = computed(() => props.trip?.days || [])
 
 const allStops = computed(() => {
   const result: Stop[] = []
-  allDays.value.forEach(d => {
-    if (d.stops) result.push(...d.stops)
+  allDays.value.forEach((d, dayIndex) => {
+    if (d.stops) result.push(...d.stops.map((stop, index) => ({ ...stop, dayBoundary: dayIndex > 0 && index === 0 })))
   })
   return result
 })
@@ -325,6 +327,14 @@ function formatWeatherBadge(stop: Stop): string {
           </div>
         </div>
 
+        <div class="control-group poster-label-density">
+          <span class="control-label">地名标注</span>
+          <div class="segmented-pill" role="group" aria-label="拓扑图地名密度">
+            <button type="button" :class="{ active: topologyLabelDensity === 'simple' }" :aria-pressed="topologyLabelDensity === 'simple'" @click="topologyLabelDensity = 'simple'">简洁</button>
+            <button type="button" :class="{ active: topologyLabelDensity === 'detailed' }" :aria-pressed="topologyLabelDensity === 'detailed'" @click="topologyLabelDensity = 'detailed'">较详细</button>
+          </div>
+        </div>
+
         <div class="control-group">
           <span class="control-label">地点说明</span>
           <div class="segmented-pill">
@@ -390,9 +400,13 @@ function formatWeatherBadge(stop: Stop): string {
               :stops="currentDisplayStops"
               :legs="currentDisplayLegs"
               :theme="posterTheme"
+              :label-density="topologyLabelDensity"
+              :route-provider="trip?.map?.preferred_provider || ''"
+              :route-mode="trip?.map?.default_mode || ''"
               :width="512"
-              :height="260"
+              :height="posterLayout === 'long' && currentDisplayStops.length > 20 ? 340 : 260"
             />
+            <p v-if="currentDisplayStops.length > 1" class="poster-route-endpoints">起点 {{ currentDisplayStops[0]?.title }} · 终点 {{ currentDisplayStops[currentDisplayStops.length - 1]?.title }} <span>其余地点详见下方每日时间轴</span></p>
           </div>
 
           <!-- 每日详细时间轴 -->
@@ -749,6 +763,11 @@ function formatWeatherBadge(stop: Stop): string {
 .poster-map-section {
   margin-bottom: 24px;
 }
+.poster-route-endpoints { margin: 8px 2px 0; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.poster-card.light .poster-route-endpoints { color: #334155; }
+.poster-card.light .poster-route-endpoints span { color: #64748b; }
+.poster-card.dark .poster-route-endpoints { color: #e2e8f0; }
+.poster-card.dark .poster-route-endpoints span { color: #94a3b8; }
 
 .section-title-tag {
   font-size: 0.75rem;

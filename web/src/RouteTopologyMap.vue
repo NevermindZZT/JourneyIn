@@ -1,149 +1,68 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { clusterPosterPoints, layoutPosterLabels, selectPosterRoutes, type PosterPoint, type PosterRouteLeg } from './routeTopologyLayout'
 
-type Coord = { lat: number; lng: number }
-type LocationData = { preferred?: string; coordinates?: Record<string, Coord & { crs?: string }> }
-type Stop = { id: string; sequence: number; title: string; location?: LocationData }
-type Leg = { id: string; from_stop_id: string; to_stop_id: string; snapshots?: Array<{ geometry?: Array<[number, number]> | Array<Coord> }> }
+type Coord = { lat: number; lng: number; crs?: string }
+type LocationData = { coordinates?: Record<string, Coord> }
+type Stop = { id: string; sequence: number; title: string; dayBoundary?: boolean; location?: LocationData }
+type Leg = PosterRouteLeg & { id: string }
 
 const props = withDefaults(defineProps<{
   stops: Stop[]
   legs?: Leg[]
   theme?: 'light' | 'dark'
+  labelDensity?: 'simple' | 'detailed'
+  routeProvider?: string
+  routeMode?: string
   width?: number
   height?: number
 }>(), {
-  theme: 'light',
-  width: 560,
-  height: 300,
-  legs: () => [],
+  theme: 'light', labelDensity: 'simple', routeProvider: '', routeMode: '', width: 560, height: 300, legs: () => [],
 })
 
-function getStopCoord(stop: Stop): [number, number] | null {
-  const coords = stop.location?.coordinates
-  if (!coords) return null
-  const preferred = stop.location?.preferred
-  const c = (preferred && coords[preferred]) || coords.gcj02 || coords.bd09ll || coords.wgs84 || Object.values(coords)[0]
-  if (c && typeof c.lng === 'number' && typeof c.lat === 'number' && !Number.isNaN(c.lng) && !Number.isNaN(c.lat)) {
-    return [c.lng, c.lat]
-  }
-  return null
+const coordinateSystems = ['gcj02', 'bd09ll', 'wgs84'] as const
+function getStopCoord(stop: Stop, crs: string): [number, number] | null {
+  const point = stop.location?.coordinates?.[crs]
+  if (!point || point.crs && point.crs !== crs || !Number.isFinite(point.lng) || !Number.isFinite(point.lat) || Math.abs(point.lng) > 180 || Math.abs(point.lat) > 90) return null
+  return [point.lng, point.lat]
 }
 
 const projectedData = computed(() => {
-  const validStops: Array<{ stop: Stop; lng: number; lat: number; index: number }> = []
-  props.stops.forEach((stop, idx) => {
-    const pt = getStopCoord(stop)
-    if (pt) {
-      validStops.push({ stop, lng: pt[0], lat: pt[1], index: idx })
-    }
+  const route = selectPosterRoutes(props.legs, props.routeProvider, props.routeMode)
+  const stopCRS = coordinateSystems.reduce<string>((best, candidate) =>
+    props.stops.filter(stop => getStopCoord(stop, candidate)).length > props.stops.filter(stop => getStopCoord(stop, best)).length ? candidate : best, coordinateSystems[0])
+  const routeStopCount = route.crs ? props.stops.filter(stop => getStopCoord(stop, route.crs)).length : 0
+  const stopCount = props.stops.filter(stop => getStopCoord(stop, stopCRS)).length
+  const crs = route.crs && routeStopCount >= stopCount ? route.crs : stopCRS
+  const routeCoords = route.crs === crs ? route.paths : []
+  const validStops = props.stops.flatMap((stop, index) => {
+    const coord = getStopCoord(stop, crs)
+    return coord ? [{ stop, index, coord }] : []
   })
-
-  if (validStops.length === 0) {
-    return null
-  }
-
-  // 收集所有用于计算边界的点（包括 leg geometry）
-  const allPts: Array<[number, number]> = validStops.map(s => [s.lng, s.lat])
-
-  // 提取 leg geometry 中的坐标
-  const legPathsCoords: Array<Array<[number, number]>> = []
-  const stopMap = new Map(validStops.map(s => [s.stop.id, s]))
-
-  if (props.legs && props.legs.length > 0) {
-    props.legs.forEach(leg => {
-      const snap = leg.snapshots?.[0]
-      if (snap?.geometry && Array.isArray(snap.geometry) && snap.geometry.length > 1) {
-        const pts: Array<[number, number]> = []
-        snap.geometry.forEach(item => {
-          if (Array.isArray(item) && typeof item[0] === 'number' && typeof item[1] === 'number') {
-            pts.push([item[0], item[1]])
-            allPts.push([item[0], item[1]])
-          } else if (item && typeof (item as Coord).lng === 'number' && typeof (item as Coord).lat === 'number') {
-            pts.push([(item as Coord).lng, (item as Coord).lat])
-            allPts.push([(item as Coord).lng, (item as Coord).lat])
-          }
-        })
-        if (pts.length > 1) {
-          legPathsCoords.push(pts)
-        }
-      }
-    })
-  }
-
+  if (!validStops.length) return null
+  const allCoords: Array<[number, number]> = [...validStops.map(item => item.coord), ...routeCoords.flat()]
   let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity
-  for (const [lng, lat] of allPts) {
-    if (lng < minLng) minLng = lng
-    if (lng > maxLng) maxLng = lng
-    if (lat < minLat) minLat = lat
-    if (lat > maxLat) maxLat = lat
-  }
-
-  // 保护：如果只有一个点或所有点重合
-  if (minLng === maxLng) { minLng -= 0.02; maxLng += 0.02 }
-  if (minLat === maxLat) { minLat -= 0.015; maxLat += 0.015 }
-
-  const midLat = (minLat + maxLat) / 2
-  const cosLat = Math.cos((midLat * Math.PI) / 180)
-
-  // 投影边界与画布 padding
-  const paddingX = 48
-  const paddingY = 44
-  const innerW = props.width - paddingX * 2
-  const innerH = props.height - paddingY * 2
-
-  const spanLng = (maxLng - minLng) * cosLat
-  const spanLat = maxLat - minLat
-
-  // 保持宽高比
-  const scale = Math.min(innerW / (spanLng || 0.001), innerH / (spanLat || 0.001))
-
-  const project = (lng: number, lat: number): [number, number] => {
-    const x = paddingX + (innerW - spanLng * scale) / 2 + (lng - minLng) * cosLat * scale
-    const y = paddingY + (innerH - spanLat * scale) / 2 + (maxLat - lat) * scale
-    return [Math.round(x * 10) / 10, Math.round(y * 10) / 10]
-  }
-
-  // 投影点
-  const projectedStops = validStops.map(s => {
-    const [x, y] = project(s.lng, s.lat)
-    return {
-      id: s.stop.id,
-      title: s.stop.title,
-      sequence: s.stop.sequence || (s.index + 1),
-      displayIndex: s.index + 1,
-      x,
-      y,
-      isFirst: s.index === 0,
-      isLast: s.index === validStops.length - 1 && validStops.length > 1,
-    }
+  for (const [lng, lat] of allCoords) { minLng = Math.min(minLng, lng); maxLng = Math.max(maxLng, lng); minLat = Math.min(minLat, lat); maxLat = Math.max(maxLat, lat) }
+  if (minLng === maxLng) { minLng -= .02; maxLng += .02 }
+  if (minLat === maxLat) { minLat -= .015; maxLat += .015 }
+  const cosLat = Math.max(.01, Math.cos((minLat + maxLat) * Math.PI / 360))
+  const innerW = Math.max(1, props.width - 96), innerH = Math.max(1, props.height - 96)
+  const spanLng = (maxLng - minLng) * cosLat, spanLat = maxLat - minLat
+  const scale = Math.min(innerW / spanLng, innerH / spanLat)
+  const project = ([lng, lat]: [number, number]): [number, number] => [
+    Math.round((48 + (innerW - spanLng * scale) / 2 + (lng - minLng) * cosLat * scale) * 10) / 10,
+    Math.round((44 + (innerH - spanLat * scale) / 2 + (maxLat - lat) * scale) * 10) / 10,
+  ]
+  const points: PosterPoint[] = validStops.map(({ stop, index, coord }, visibleIndex) => {
+    const [x, y] = project(coord)
+    return { id: stop.id, title: stop.title, displayIndex: index + 1, x, y, isFirst: visibleIndex === 0, isLast: visibleIndex === validStops.length - 1 && validStops.length > 1, dayBoundary: stop.dayBoundary }
   })
-
-  // 投影路线
-  const paths: string[] = []
-  if (legPathsCoords.length > 0) {
-    legPathsCoords.forEach(pts => {
-      const projected = pts.map(p => project(p[0], p[1]))
-      const d = projected.map((p, i) => (i === 0 ? `M ${p[0]} ${p[1]}` : `L ${p[0]} ${p[1]}`)).join(' ')
-      paths.push(d)
-    })
-  } else {
-    // 若无 geometry，直接连接相邻 stop
-    for (let i = 0; i < projectedStops.length - 1; i++) {
-      const p1 = projectedStops[i]
-      const p2 = projectedStops[i + 1]
-      // 优雅平滑连接
-      const mx = (p1.x + p2.x) / 2
-      const my = (p1.y + p2.y) / 2
-      paths.push(`M ${p1.x} ${p1.y} Q ${mx} ${my - 6} ${p2.x} ${p2.y}`)
-    }
-  }
-
-  return {
-    stops: projectedStops,
-    paths,
-    totalCount: validStops.length,
-  }
+  const paths = routeCoords.map(coords => coords.map(project))
+  const routePixels = paths.flatMap(path => path.filter((_, i) => i % Math.max(1, Math.ceil(path.length / 120)) === 0))
+  const nodes = clusterPosterPoints(points)
+  const labels = layoutPosterLabels(nodes, props.width, props.height, props.labelDensity, routePixels)
+  const routeMessage = !paths.length ? '路线未生成 · 仅显示规划点' : paths.length < props.legs.length ? '仅显示已生成的路线段' : ''
+  return { nodes, labels, paths: paths.map(path => path.map(([x, y], i) => (i ? 'L' : 'M') + ' ' + x + ' ' + y).join(' ')), routeMessage, omittedCount: props.stops.length - points.length, totalCount: points.length, coordinateSystem: crs }
 })
 </script>
 
@@ -230,54 +149,29 @@ const projectedData = computed(() => {
           />
         </g>
 
-        <!-- 站点 Marker 与 标签 -->
-        <g v-for="s in projectedData.stops" :key="s.id" class="stop-node">
-          <!-- 节点外光圈 (起终点加大) -->
-          <circle
-            :cx="s.x"
-            :cy="s.y"
-            :r="s.isFirst || s.isLast ? 13 : 10"
-            :fill="s.isFirst ? (theme === 'dark' ? '#22c55e' : '#16a34a') : s.isLast ? (theme === 'dark' ? '#f59e0b' : '#d97706') : (theme === 'dark' ? '#334155' : '#e2e8f0')"
-            :stroke="theme === 'dark' ? '#0f172a' : '#ffffff'"
-            stroke-width="2.5"
-          />
-
-          <!-- 节点序号或文字 -->
-          <text
-            :x="s.x"
-            :y="s.y + 3.5"
-            text-anchor="middle"
-            font-size="9"
-            font-weight="700"
-            :fill="s.isFirst || s.isLast ? '#ffffff' : (theme === 'dark' ? '#f1f5f9' : '#1e293b')"
-          >
-            {{ s.isFirst ? '起' : s.isLast ? '终' : s.displayIndex }}
+        <!-- 真实坐标聚合节点：密集区域合并编号，路线几何保持原样 -->
+        <g v-for="node in projectedData.nodes" :key="node.id" class="stop-node">
+          <circle :cx="node.x" :cy="node.y" :r="node.isFirst || node.isLast ? 12 : 10"
+            :fill="node.isFirst ? (theme === 'dark' ? '#22c55e' : '#16a34a') : node.isLast ? (theme === 'dark' ? '#f59e0b' : '#d97706') : (theme === 'dark' ? '#334155' : '#e2e8f0')"
+            :stroke="theme === 'dark' ? '#0f172a' : '#ffffff'" stroke-width="2.5" />
+          <text :x="node.x" :y="node.y + 3.5" text-anchor="middle" font-size="9" font-weight="700"
+            :fill="node.isFirst || node.isLast ? '#ffffff' : (theme === 'dark' ? '#f1f5f9' : '#1e293b')">
+            {{ node.count > 1 ? '+' + node.count : node.isFirst ? '起' : node.isLast ? '终' : node.displayIndex }}
           </text>
-
-          <!-- 站点地名标签 -->
-          <g :transform="`translate(${s.x}, ${s.y + 19})`">
-            <rect
-              :x="-(Math.min(s.title.length * 6 + 10, 60))"
-              y="-10"
-              :width="Math.min(s.title.length * 12 + 20, 120)"
-              height="18"
-              rx="9"
-              :fill="theme === 'dark' ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.92)'"
-              :stroke="theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.08)'"
-              stroke-width="1"
-            />
-            <text
-              x="0"
-              y="2.5"
-              text-anchor="middle"
-              font-size="10"
-              font-weight="500"
-              :fill="theme === 'dark' ? '#e2e8f0' : '#1e293b'"
-            >
-              {{ s.title.length > 7 ? s.title.slice(0, 6) + '…' : s.title }}
-            </text>
-          </g>
         </g>
+
+        <!-- 仅显示有空间的地名，优先起终点和每天首点 -->
+        <g v-for="label in projectedData.labels" :key="'label-' + label.id" class="topology-name-label">
+          <rect :x="label.x" :y="label.y" :width="label.width" :height="label.height" rx="9"
+            :fill="theme === 'dark' ? 'rgba(15, 23, 42, 0.88)' : 'rgba(255, 255, 255, 0.94)'"
+            :stroke="theme === 'dark' ? 'rgba(255, 255, 255, 0.17)' : 'rgba(0, 0, 0, 0.12)'" stroke-width="1" />
+          <text :x="label.x + label.width / 2" :y="label.y + 13" text-anchor="middle" font-size="10" font-weight="600"
+            :fill="theme === 'dark' ? '#e2e8f0' : '#1e293b'">{{ label.text }}</text>
+        </g>
+        <text v-if="projectedData.routeMessage" x="24" :y="height - 14" font-size="10" font-weight="700"
+          :fill="theme === 'dark' ? '#cbd5e1' : '#475569'">{{ projectedData.routeMessage }}</text>
+        <text v-if="projectedData.omittedCount" :x="width - 24" :y="height - 14" text-anchor="end" font-size="10"
+          :fill="theme === 'dark' ? '#cbd5e1' : '#475569'">{{ projectedData.omittedCount }} 点无同坐标系坐标</text>
       </template>
 
       <!-- 空数据状态 -->
