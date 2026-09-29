@@ -199,7 +199,7 @@ func TestValidateAndExportHTTPWorkflow(t *testing.T) {
 		t.Fatalf("round-trip import status %d", roundTrip.StatusCode)
 	}
 }
-func TestShareLinkReusesAndKeepsSnapshotAfterTripUpdates(t *testing.T) {
+func TestShareLinkReusesUnchangedSnapshotAndRefreshesAfterTripUpdates(t *testing.T) {
 	server := testHTTPServer(t)
 	defer server.Close()
 	trip := []byte(`{"schema_version":1,"title":"Share source","status":"draft","timezone":"Asia/Shanghai","date_range":{"start":"2026-04-18","end":"2026-04-18"},"days":[{"id":"day-1","date":"2026-04-18","stops":[]}]}`)
@@ -213,7 +213,7 @@ func TestShareLinkReusesAndKeepsSnapshotAfterTripUpdates(t *testing.T) {
 		t.Fatal(err)
 	}
 	tripID := created["id"].(string)
-	shareResponse, err := http.Post(server.URL+"/api/v1/shares", "application/json", strings.NewReader(`{"trip_id":"`+tripID+`"}`))
+	shareResponse, err := http.Post(server.URL+"/api/v1/shares", "application/json", strings.NewReader(`{"trip_id":"`+tripID+`","permanent":true}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +224,7 @@ func TestShareLinkReusesAndKeepsSnapshotAfterTripUpdates(t *testing.T) {
 	}
 	shareURL, _ := url.Parse(share["url"].(string))
 	token := strings.TrimPrefix(shareURL.Path, "/s/")
-	reusedResponse, err := http.Post(server.URL+"/api/v1/shares", "application/json", strings.NewReader(`{"trip_id":"`+tripID+`","existing_token":"`+token+`"}`))
+	reusedResponse, err := http.Post(server.URL+"/api/v1/shares", "application/json", strings.NewReader(`{"trip_id":"`+tripID+`","existing_token":"`+token+`","permanent":true}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,8 +236,8 @@ func TestShareLinkReusesAndKeepsSnapshotAfterTripUpdates(t *testing.T) {
 	if err := json.NewDecoder(reusedResponse.Body).Decode(&reused); err != nil {
 		t.Fatal(err)
 	}
-	if reused["url"] != share["url"] || reused["reused"] != true {
-		t.Fatalf("share was not reused: %+v", reused)
+	if reused["url"] != share["url"] || reused["reused"] != true || reused["revision"] != float64(1) {
+		t.Fatalf("share was not reused with its original revision: %+v", reused)
 	}
 	updated := []byte(`{"schema_version":1,"title":"Share updated","status":"draft","timezone":"Asia/Shanghai","date_range":{"start":"2026-04-18","end":"2026-04-18"},"days":[{"id":"day-1","date":"2026-04-18","stops":[]}]}`)
 	updateRequest, err := http.NewRequest(http.MethodPut, server.URL+"/api/v1/trips/"+tripID, strings.NewReader(string(updated)))
@@ -264,7 +264,65 @@ func TestShareLinkReusesAndKeepsSnapshotAfterTripUpdates(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(sharedBody), "Share source") || !strings.Contains(string(sharedBody), "\"revision\":1") || strings.Contains(string(sharedBody), "Share updated") {
-		t.Fatalf("share snapshot changed after update: %s", string(sharedBody))
+		t.Fatalf("existing share should remain an immutable snapshot: %s", string(sharedBody))
+	}
+
+	refreshedResponse, err := http.Post(server.URL+"/api/v1/shares", "application/json", strings.NewReader(`{"trip_id":"`+tripID+`","existing_token":"`+token+`","permanent":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer refreshedResponse.Body.Close()
+	if refreshedResponse.StatusCode != http.StatusCreated {
+		t.Fatalf("re-share status %d; expected a new snapshot link", refreshedResponse.StatusCode)
+	}
+	var refreshed map[string]any
+	if err := json.NewDecoder(refreshedResponse.Body).Decode(&refreshed); err != nil {
+		t.Fatal(err)
+	}
+	if refreshed["url"] == share["url"] || refreshed["revision"] != float64(2) {
+		t.Fatalf("re-share did not create a link for the current snapshot: %+v", refreshed)
+	}
+	refreshedURL, _ := url.Parse(refreshed["url"].(string))
+	refreshedPage, err := http.Get(server.URL + refreshedURL.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer refreshedPage.Body.Close()
+	refreshedBody, err := io.ReadAll(refreshedPage.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(refreshedBody), "Share updated") || !strings.Contains(string(refreshedBody), "\"revision\":2") {
+		t.Fatalf("new share does not contain the updated trip snapshot: %s", string(refreshedBody))
+	}
+
+	refreshBody := `{"trip_id":"` + tripID + `","existing_token":"` + token + `","permanent":true,"refresh_existing_snapshot":true}`
+	stableRefreshResponse, err := http.Post(server.URL+"/api/v1/shares", "application/json", strings.NewReader(refreshBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stableRefreshResponse.Body.Close()
+	if stableRefreshResponse.StatusCode != http.StatusOK {
+		t.Fatalf("same-link refresh status %d", stableRefreshResponse.StatusCode)
+	}
+	var stableRefresh map[string]any
+	if err := json.NewDecoder(stableRefreshResponse.Body).Decode(&stableRefresh); err != nil {
+		t.Fatal(err)
+	}
+	if stableRefresh["url"] != share["url"] || stableRefresh["id"] != share["id"] || stableRefresh["revision"] != float64(2) || stableRefresh["refreshed"] != true {
+		t.Fatalf("same-link refresh changed identity or missed latest revision: %+v", stableRefresh)
+	}
+	stablePage, err := http.Get(server.URL + shareURL.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stablePage.Body.Close()
+	stableBody, err := io.ReadAll(stablePage.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(stableBody), "Share updated") || !strings.Contains(string(stableBody), "\"revision\":2") {
+		t.Fatalf("original URL does not serve refreshed snapshot: %s", string(stableBody))
 	}
 }
 func TestMapKeysArePersistedWithoutReturningSecretValues(t *testing.T) {
@@ -392,4 +450,3 @@ func TestSharePermanentAndCustomTTL(t *testing.T) {
 		t.Fatalf("expected 400 for negative ttl, got %d", negResp.StatusCode)
 	}
 }
-

@@ -2,6 +2,7 @@ package share
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"journeyin/internal/store"
@@ -19,6 +20,16 @@ func (s *SQLiteStore) Get(hash [32]byte) (Record, error) {
 		return Record{}, err
 	}
 	return Record{ID: record.ID, TripID: record.TripID, Revision: record.Revision, ContentHash: record.ContentHash, TokenHash: record.TokenHash, ExpiresAt: record.ExpiresAt, RevokedAt: record.RevokedAt, CreatedAt: record.CreatedAt, Content: record.Snapshot}, nil
+}
+func (s *SQLiteStore) UpdateSnapshot(expected, updated Record) error {
+	err := s.db.UpdateShareSnapshot(context.Background(),
+		store.ShareRecord{ID: expected.ID, TripID: expected.TripID, Revision: expected.Revision, ContentHash: expected.ContentHash, TokenHash: expected.TokenHash, Snapshot: expected.Content, ExpiresAt: expected.ExpiresAt},
+		store.ShareRecord{ID: updated.ID, TripID: updated.TripID, Revision: updated.Revision, ContentHash: updated.ContentHash, TokenHash: updated.TokenHash, Snapshot: updated.Content, ExpiresAt: updated.ExpiresAt},
+	)
+	if errors.Is(err, store.ErrNotFound) {
+		return ErrNotFound
+	}
+	return err
 }
 func (s *SQLiteStore) Revoke(id string, at time.Time) error {
 	return s.db.RevokeShare(context.Background(), id, at)

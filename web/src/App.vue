@@ -458,6 +458,7 @@ const shareID = ref('')
 const shareExpiresAt = ref('')
 const shareCopyMessage = ref('')
 const shareNoticeVisible = ref(false)
+const shareNoticeTitle = ref('只读分享已创建')
 const shareModalOpen = ref(false)
 const shareExpiryType = ref<'1d' | '7d' | '30d' | '90d' | 'permanent' | 'custom'>('7d')
 const shareCustomDays = ref(30)
@@ -4853,17 +4854,19 @@ async function downloadTrip() {
 }
 function shareStorageKey(tripID: string) { return 'journeyin.share.' + tripID }
 function shareTokenFromURL(url: string) { try { const parsed = new URL(url, window.location.origin); const match = parsed.pathname.match(/^\/s\/([^/]+)$/); return match?.[1] || '' } catch { return '' } }
-function saveShareState(tripID: string) { if (shareURL.value) localStorage.setItem(shareStorageKey(tripID), JSON.stringify({ id: shareID.value, url: shareURL.value, expires_at: shareExpiresAt.value })) }
+function saveShareState(tripID: string) { if (shareURL.value) localStorage.setItem(shareStorageKey(tripID), JSON.stringify({ id: shareID.value, url: shareURL.value, expires_at: shareExpiresAt.value, expiry_type: shareExpiryType.value, custom_days: shareCustomDays.value })) }
 function restoreShareState(tripID: string) {
-  shareURL.value = ''; shareID.value = ''; shareExpiresAt.value = ''; shareCopyMessage.value = ''; shareNoticeVisible.value = false
+  shareURL.value = ''; shareID.value = ''; shareExpiresAt.value = ''; shareCopyMessage.value = ''; shareNoticeVisible.value = false; shareNoticeTitle.value = '只读分享已创建'
   try {
-    const saved = JSON.parse(localStorage.getItem(shareStorageKey(tripID)) || 'null') as { id?: string; url?: string; expires_at?: string } | null
+    const saved = JSON.parse(localStorage.getItem(shareStorageKey(tripID)) || 'null') as { id?: string; url?: string; expires_at?: string; expiry_type?: '1d' | '7d' | '30d' | '90d' | 'permanent' | 'custom'; custom_days?: number } | null
     if (!saved?.url) { localStorage.removeItem(shareStorageKey(tripID)); return }
     if (saved.expires_at && !Number.isNaN(Date.parse(saved.expires_at)) && Date.parse(saved.expires_at) <= Date.now()) {
       localStorage.removeItem(shareStorageKey(tripID))
       return
     }
     shareID.value = saved.id || ''; shareURL.value = saved.url; shareExpiresAt.value = saved.expires_at || ''
+    shareExpiryType.value = saved.expiry_type || '7d'
+    if (typeof saved.custom_days === 'number' && Number.isFinite(saved.custom_days)) shareCustomDays.value = Math.max(1, Math.min(3650, saved.custom_days))
   } catch { localStorage.removeItem(shareStorageKey(tripID)) }
 }
 function openShareModal() {
@@ -4879,7 +4882,7 @@ function openTripPosterFromShare() {
   shareModalOpen.value = false
   openTripPoster()
 }
-async function createShare(options?: { expiryType?: '1d' | '7d' | '30d' | '90d' | 'permanent' | 'custom'; customDays?: number; forceNew?: boolean }) {
+async function createShare(options?: { expiryType?: '1d' | '7d' | '30d' | '90d' | 'permanent' | 'custom'; customDays?: number; refreshExisting?: boolean }) {
   if (readOnlyView.value || !selected.value) return
   const tripID = selected.value.id
   const type = options?.expiryType || shareExpiryType.value
@@ -4903,14 +4906,15 @@ async function createShare(options?: { expiryType?: '1d' | '7d' | '30d' | '90d' 
     ttlSeconds = days * 86400
   }
 
-  let existingToken = ''
-  if (!options?.forceNew) {
-    existingToken = shareTokenFromURL(shareURL.value) || (() => {
-      try {
-        const saved = JSON.parse(localStorage.getItem(shareStorageKey(tripID)) || 'null') as { url?: string } | null
-        return saved?.url ? shareTokenFromURL(saved.url) : ''
-      } catch { return '' }
-    })()
+  const existingToken = shareTokenFromURL(shareURL.value) || (() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(shareStorageKey(tripID)) || 'null') as { url?: string } | null
+      return saved?.url ? shareTokenFromURL(saved.url) : ''
+    } catch { return '' }
+  })()
+  if (options?.refreshExisting && !existingToken) {
+    error.value = '找不到当前分享链接，请先创建分享链接'
+    return
   }
 
   shareGenerating.value = true
@@ -4928,17 +4932,21 @@ async function createShare(options?: { expiryType?: '1d' | '7d' | '30d' | '90d' 
     if (existingToken) {
       body.existing_token = existingToken
     }
+    if (options?.refreshExisting) {
+      body.refresh_existing_snapshot = true
+    }
 
     const response = await apiFetch('/api/v1/shares', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     })
-    const payload = await response.json() as { id?: string; url?: string; expires_at?: string; permanent?: boolean; error?: { message?: string } }
+    const payload = await response.json() as { id?: string; url?: string; expires_at?: string; permanent?: boolean; refreshed?: boolean; error?: { message?: string } }
     if (!response.ok || !payload.url) throw new Error(payload.error?.message || '分享链接创建失败')
     shareID.value = payload.id || ''
     shareURL.value = payload.url
     shareExpiresAt.value = payload.expires_at || ''
+    shareNoticeTitle.value = payload.refreshed ? '只读分享已更新' : '只读分享已创建'
     shareNoticeVisible.value = true
     saveShareState(tripID)
   } catch (cause) {
@@ -6017,7 +6025,7 @@ onUnmounted(() => {
               <div v-if="historyView" class="history-readonly-banner"><span><strong>历史版本 · 只读</strong><small>{{ historyView.label || '保存于 ' + formatDateTime(historyView.created_at) }} · 工作版本 {{ historyView.source_revision }}</small></span><button type="button" @click="exitTripHistory">返回当前版本</button></div>
               <div v-if="error" class="global-error"><IonIcon :icon="cloudOfflineOutline" /><span>{{ error }}</span><button type="button" class="notice-close-btn" aria-label="关闭错误提示" @click="closeError">×</button></div>
               <div v-if="tripDetailsNotice" class="global-notice"><IonIcon :icon="createOutline" /><span>{{ tripDetailsNotice }}</span><button type="button" class="notice-close-btn" aria-label="关闭提示" @click="closeNotice">×</button></div>
-              <div v-if="shareNoticeVisible && shareURL" class="share-banner"><span><strong>只读分享已创建</strong><a :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><small v-if="shareExpiresAt">有效期至 {{ formatDateTime(shareExpiresAt) }}</small><small v-else class="permanent-badge">永久有效</small><small v-if="shareCopyMessage" class="share-copy-feedback">{{ shareCopyMessage }}</small></span><div class="share-actions"><button type="button" @click="copyShareURL">复制链接</button><button type="button" @click="openShareModal">分享设置</button><button type="button" @click="openTripPoster">生成海报</button><button v-if="shareID" type="button" @click="revokeShare">撤销</button><button type="button" class="notice-close-btn" aria-label="关闭分享提示" @click="dismissShareNotice">×</button></div></div>
+              <div v-if="shareNoticeVisible && shareURL" class="share-banner"><span><strong>{{ shareNoticeTitle }}</strong><a :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><small v-if="shareExpiresAt">有效期至 {{ formatDateTime(shareExpiresAt) }}</small><small v-else class="permanent-badge">永久有效</small><small v-if="shareCopyMessage" class="share-copy-feedback">{{ shareCopyMessage }}</small></span><div class="share-actions"><button type="button" @click="copyShareURL">复制链接</button><button type="button" @click="openShareModal">分享设置</button><button type="button" @click="openTripPoster">生成海报</button><button v-if="shareID" type="button" @click="revokeShare">撤销</button><button type="button" class="notice-close-btn" aria-label="关闭分享提示" @click="dismissShareNotice">×</button></div></div>
             </section>
           </section>
         </main>
@@ -6525,9 +6533,9 @@ onUnmounted(() => {
 
               <!-- 修改有效期设置 -->
               <details class="share-change-expiry-details">
-                <summary>修改有效日期 / 重新生成</summary>
+                <summary>修改有效期 / 重新分享</summary>
                 <div class="share-reconfig-pane">
-                  <p class="share-reconfig-hint">选择新的有效期将更新当前行程的只读快照与过期规则：</p>
+                  <p class="share-reconfig-hint">只有点击下方按钮，当前分享链接才会更新为最新行程快照和所选有效期；所有持有此链接的人都将看到更新后的内容。仅保存行程不会改变已分享内容。</p>
                   <div class="share-expiry-grid">
                     <button type="button" class="share-expiry-card" :class="{ selected: shareExpiryType === '1d' }" @click="shareExpiryType = '1d'">
                       <strong>1 天</strong>
@@ -6562,8 +6570,8 @@ onUnmounted(() => {
                   </div>
 
                   <div class="share-reconfig-actions">
-                    <button type="button" class="share-reconfig-submit-btn" :disabled="actionLoading || shareGenerating" @click="createShare({ forceNew: true })">
-                      {{ shareGenerating ? '正在更新…' : '应用新有效期并更新分享' }}
+                    <button type="button" class="share-reconfig-submit-btn" :disabled="actionLoading || shareGenerating" @click="createShare({ refreshExisting: true })">
+                      {{ shareGenerating ? '正在更新…' : '重新分享并更新原链接' }}
                     </button>
                   </div>
                 </div>

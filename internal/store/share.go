@@ -28,6 +28,26 @@ func (s *Store) PutShare(ctx context.Context, record ShareRecord) error {
 	return err
 }
 
+func (s *Store) UpdateShareSnapshot(ctx context.Context, expected, updated ShareRecord) error {
+	expires := func(value time.Time) string {
+		if value.IsZero() {
+			return ""
+		}
+		return value.UTC().Format(time.RFC3339Nano)
+	}
+	result, err := s.db.ExecContext(ctx, "UPDATE shares SET revision = ?, content_hash = ?, snapshot_json = ?, expires_at = ? WHERE id = ? AND trip_id = ? AND token_hash = ? AND revision = ? AND content_hash = ? AND expires_at = ? AND revoked_at IS NULL", updated.Revision, updated.ContentHash, string(updated.Snapshot), expires(updated.ExpiresAt), expected.ID, expected.TripID, expected.TokenHash[:], expected.Revision, expected.ContentHash, expires(expected.ExpiresAt))
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
 func (s *Store) GetShareByTokenHash(ctx context.Context, hash [32]byte) (ShareRecord, error) {
 	var r ShareRecord
 	var token []byte

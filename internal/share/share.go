@@ -35,6 +35,7 @@ type Snapshot struct {
 type Store interface {
 	Put(Record) error
 	Get([32]byte) (Record, error)
+	UpdateSnapshot(expected, updated Record) error
 	Revoke(string, time.Time) error
 }
 type MemoryStore struct {
@@ -57,6 +58,19 @@ func (s *MemoryStore) Get(h [32]byte) (Record, error) {
 		return Record{}, ErrNotFound
 	}
 	return r, nil
+}
+func (s *MemoryStore) UpdateSnapshot(expected, updated Record) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := s.byHash[expected.TokenHash]
+	if !ok || current.ID != expected.ID || current.TripID != expected.TripID || current.Revision != expected.Revision || current.ContentHash != expected.ContentHash || !current.ExpiresAt.Equal(expected.ExpiresAt) || current.RevokedAt != nil {
+		return ErrNotFound
+	}
+	if updated.ID != expected.ID || updated.TripID != expected.TripID || updated.TokenHash != expected.TokenHash {
+		return ErrNotFound
+	}
+	s.byHash[updated.TokenHash] = updated
+	return nil
 }
 func (s *MemoryStore) Revoke(id string, at time.Time) error {
 	s.mu.Lock()
@@ -115,6 +129,41 @@ func (s *Service) Resolve(token string) (Record, error) {
 		return Record{}, ErrExpired
 	}
 	return r, nil
+}
+func (s *Service) RefreshSnapshot(token, tripID string, revision int, contentHash string, content []byte, ttl time.Duration) (Record, error) {
+	if token == "" || tripID == "" || revision < 1 || contentHash == "" {
+		return Record{}, errors.New("invalid share snapshot")
+	}
+	if ttl < 0 {
+		return Record{}, errors.New("ttl cannot be negative")
+	}
+	hash := sha256.Sum256([]byte(token))
+	current, err := s.store.Get(hash)
+	if err != nil {
+		return Record{}, err
+	}
+	if current.TripID != tripID {
+		return Record{}, ErrNotFound
+	}
+	now := s.now().UTC()
+	if current.RevokedAt != nil {
+		return Record{}, ErrRevoked
+	}
+	if !current.ExpiresAt.IsZero() && !now.Before(current.ExpiresAt) {
+		return Record{}, ErrExpired
+	}
+	updated := current
+	updated.Revision = revision
+	updated.ContentHash = contentHash
+	updated.Content = append([]byte(nil), content...)
+	updated.ExpiresAt = time.Time{}
+	if ttl > 0 {
+		updated.ExpiresAt = now.Add(ttl)
+	}
+	if err := s.store.UpdateSnapshot(current, updated); err != nil {
+		return Record{}, err
+	}
+	return updated, nil
 }
 func (s *Service) Revoke(id string) error { return s.store.Revoke(id, s.now().UTC()) }
 func (s *Service) Expire(id string) error {

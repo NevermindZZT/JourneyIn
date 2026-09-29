@@ -27,10 +27,11 @@ const sharePageContentSecurityPolicy = "default-src 'self'; " +
 	"base-uri 'self'; object-src 'none'; form-action 'none'; frame-ancestors 'none'"
 
 type createShareBody struct {
-	TripID        string `json:"trip_id"`
-	TTLSeconds    *int   `json:"ttl_seconds,omitempty"`
-	Permanent     *bool  `json:"permanent,omitempty"`
-	ExistingToken string `json:"existing_token,omitempty"`
+	TripID                  string `json:"trip_id"`
+	TTLSeconds              *int   `json:"ttl_seconds,omitempty"`
+	Permanent               *bool  `json:"permanent,omitempty"`
+	ExistingToken           string `json:"existing_token,omitempty"`
+	RefreshExistingSnapshot bool   `json:"refresh_existing_snapshot,omitempty"`
 }
 
 func (s *Server) createShare(w http.ResponseWriter, r *http.Request) {
@@ -75,13 +76,57 @@ func (s *Server) createShare(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if body.RefreshExistingSnapshot {
+		existingToken := strings.TrimSpace(body.ExistingToken)
+		if existingToken == "" {
+			writeError(w, http.StatusBadRequest, "missing_share_token", "refreshing a share requires its existing token", nil)
+			return
+		}
+		existing, resolveErr := s.shareService.Resolve(existingToken)
+		if resolveErr != nil || existing.TripID != record.ID {
+			writeError(w, http.StatusNotFound, "not_found", "active share not found for this trip", nil)
+			return
+		}
+		updated, refreshErr := s.shareService.RefreshSnapshot(existingToken, record.ID, record.Revision, record.ContentHash, record.Document, ttl)
+		if errors.Is(refreshErr, journeyshare.ErrNotFound) {
+			writeError(w, http.StatusConflict, "share_changed", "share changed while it was being refreshed; reload and try again", nil)
+			return
+		}
+		if errors.Is(refreshErr, journeyshare.ErrExpired) || errors.Is(refreshErr, journeyshare.ErrRevoked) {
+			writeError(w, http.StatusConflict, "share_inactive", "expired or revoked shares cannot be refreshed", nil)
+			return
+		}
+		if refreshErr != nil {
+			writeError(w, http.StatusInternalServerError, "share_error", refreshErr.Error(), nil)
+			return
+		}
+		shareURL := "/s/" + existingToken
+		if baseURL := s.shareBaseURL(r); baseURL != "" {
+			shareURL = baseURL + shareURL
+		}
+		var expiresAt any
+		if !updated.ExpiresAt.IsZero() {
+			expiresAt = updated.ExpiresAt
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"id":         updated.ID,
+			"trip_id":    updated.TripID,
+			"revision":   updated.Revision,
+			"expires_at": expiresAt,
+			"permanent":  updated.ExpiresAt.IsZero(),
+			"url":        shareURL,
+			"refreshed":  true,
+		})
+		return
+	}
 	if existingToken := strings.TrimSpace(body.ExistingToken); existingToken != "" {
 		if existing, resolveErr := s.shareService.Resolve(existingToken); resolveErr == nil && existing.TripID == record.ID {
-			reusable := false
-			if body.Permanent == nil && body.TTLSeconds == nil {
-				reusable = true
-			} else if isPermanent && existing.ExpiresAt.IsZero() {
-				reusable = true
+			// A token is reusable only while it still represents the current
+			// trip snapshot. If content changed, create a new immutable share
+			// instead of returning a link that silently serves stale data.
+			reusable := existing.ContentHash == record.ContentHash
+			if body.Permanent != nil || body.TTLSeconds != nil {
+				reusable = reusable && isPermanent && existing.ExpiresAt.IsZero()
 			}
 			if reusable {
 				shareURL := "/s/" + existingToken
@@ -95,7 +140,7 @@ func (s *Server) createShare(w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusOK, map[string]any{
 					"id":         existing.ID,
 					"trip_id":    record.ID,
-					"revision":   record.Revision,
+					"revision":   existing.Revision,
 					"expires_at": expiresAt,
 					"permanent":  existing.ExpiresAt.IsZero(),
 					"url":        shareURL,

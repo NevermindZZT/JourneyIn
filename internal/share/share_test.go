@@ -23,6 +23,44 @@ func TestCreateResolveRevokeExpire(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+func TestRefreshSnapshotPreservesLinkAndEnforcesExpiry(t *testing.T) {
+	m := NewMemoryStore()
+	s := NewService(m)
+	now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	s.now = func() time.Time { return now }
+	token, created, err := s.Create("trip", 1, "before", []byte("old"), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := s.RefreshSnapshot(token, "trip", 2, "after", []byte("new"), 2*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ID != created.ID || updated.TokenHash != created.TokenHash || !updated.CreatedAt.Equal(created.CreatedAt) {
+		t.Fatalf("refresh changed share identity: before=%+v after=%+v", created, updated)
+	}
+	if updated.Revision != 2 || updated.ContentHash != "after" || string(updated.Content) != "new" || !updated.ExpiresAt.Equal(now.Add(2*time.Hour)) {
+		t.Fatalf("refresh did not update snapshot and expiry: %+v", updated)
+	}
+	resolved, err := s.Resolve(token)
+	if err != nil || string(resolved.Content) != "new" || resolved.Revision != 2 {
+		t.Fatalf("original token did not resolve updated snapshot: %+v, %v", resolved, err)
+	}
+	if err := s.Revoke(created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RefreshSnapshot(token, "trip", 3, "later", []byte("later"), time.Hour); !errors.Is(err, ErrRevoked) {
+		t.Fatalf("expected revoked link to reject refresh, got %v", err)
+	}
+	expiredToken, _, err := s.Create("trip", 1, "expired", []byte("old"), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(3 * time.Hour)
+	if _, err := s.RefreshSnapshot(expiredToken, "trip", 2, "current", []byte("current"), time.Hour); !errors.Is(err, ErrExpired) {
+		t.Fatalf("expected expired link to reject refresh, got %v", err)
+	}
+}
 func TestExpired(t *testing.T) {
 	m := NewMemoryStore()
 	s := NewService(m)
