@@ -171,6 +171,9 @@ func TestAMapProviderWeatherAndReverseGeocode(t *testing.T) {
 	if err != nil || !weather.Available || weather.Condition != "晴转多云" || weather.TemperatureC == nil || *weather.TemperatureC != 20 {
 		t.Fatalf("weather=%+v err=%v", weather, err)
 	}
+	if got := weather.ExpiresAt.Sub(weather.FetchedAt); got != weatherSnapshotTTL {
+		t.Fatalf("weather snapshot TTL=%s, want %s", got, weatherSnapshotTTL)
+	}
 	if weather.TempMinC == nil || *weather.TempMinC != 15 || weather.TempMaxC == nil || *weather.TempMaxC != 25 {
 		t.Fatalf("weather range=%+v", weather)
 	}

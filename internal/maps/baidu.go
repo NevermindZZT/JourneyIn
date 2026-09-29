@@ -315,7 +315,7 @@ func (p *BaiduProvider) Weather(ctx context.Context, request WeatherRequest) (We
 				WindPower:        windPower,
 				PressureHPa:      pressure,
 				FetchedAt:        now,
-				ExpiresAt:        now.Add(6 * time.Hour),
+				ExpiresAt:        now.Add(weatherSnapshotTTL),
 				Available:        true,
 			}, nil
 		}

@@ -17,15 +17,18 @@ test('hides unavailable, mismatched and empty snapshots', () => {
   assert.equal(formatDayWeatherBadge({ available: true }, day, now), '')
 })
 
-test('labels expired forecasts honestly and avoids invalid temperatures', () => {
-  assert.equal(formatDayWeatherBadge({ condition: '阴', expires_at: '2026-10-01T00:00:00Z' }, day, now), '天气已过期')
+test('hides expired forecasts and avoids invalid temperatures', () => {
+  const expired = { condition: '阴', expires_at: '2026-10-01T00:00:00Z' }
+  assert.equal(formatDayWeatherBadge(expired, day, now), '')
+  assert.equal(formatDayWeatherBadge({ condition: '阴', expires_at: '2026-10-02T00:00:00Z' }, day, Date.parse('2026-10-02T00:00:00Z')), '')
   assert.equal(formatDayWeatherBadge({ condition: '晴', temp_min_c: 'not a number', temp_max_c: 20 }, day, now), '晴')
+  const overlay = { id: 'expired', x: 20, y: 20, hasWeather: Boolean(formatDayWeatherBadge(expired, day, now)), nameVisible: true }
+  assert.deepEqual([...visibleWeatherLabelIDs([overlay], 'always')], [])
 })
 
 test('weather labels have their own condition icon', () => {
   assert.equal(iconForWeatherLabel('晴 · 4～17°C'), '☀')
   assert.equal(iconForWeatherLabel('雨 · 6°C'), '☂')
-  assert.equal(iconForWeatherLabel('天气已过期'), '◷')
 })
 
 test('all and hidden modes apply to weather overlays separately', () => {

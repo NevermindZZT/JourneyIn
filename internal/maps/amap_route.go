@@ -774,7 +774,7 @@ func (p *AMapProvider) Weather(ctx context.Context, request WeatherRequest) (Wea
 				WindDirection:    windDirection,
 				WindPower:        windPower,
 				FetchedAt:        now,
-				ExpiresAt:        now.Add(6 * time.Hour),
+				ExpiresAt:        now.Add(weatherSnapshotTTL),
 				Available:        true,
 			}, nil
 		}

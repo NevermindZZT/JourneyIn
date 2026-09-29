@@ -3,7 +3,7 @@ export function formatDayWeatherBadge(weather: Record<string, unknown> | undefin
   if (typeof weather.local_date === 'string' && weather.local_date.slice(0, 10) !== dayDate) return ''
   if (typeof weather.expires_at === 'string') {
     const expiresAt = Date.parse(weather.expires_at)
-    if (Number.isFinite(expiresAt) && expiresAt < now) return '天气已过期'
+    if (Number.isFinite(expiresAt) && expiresAt <= now) return ''
   }
   const description = [weather.condition, weather.text_day, weather.text, weather.current_condition]
     .find(value => typeof value === 'string' && value.trim())
@@ -22,7 +22,6 @@ export function formatDayWeatherBadge(weather: Record<string, unknown> | undefin
 
 export function iconForWeatherLabel(text: string): string {
   const condition = text.toLowerCase()
-  if (condition.includes('已过期')) return '◷'
   if (/雷|thunder/.test(condition)) return '⚡'
   if (/雪|snow/.test(condition)) return '❄'
   if (/雨|rain|shower/.test(condition)) return '☂'

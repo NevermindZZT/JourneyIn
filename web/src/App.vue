@@ -585,6 +585,7 @@ let amapScriptPromise: Promise<void> | null = null
 let mapOverlays: any[] = []
 let currentStopMarkers: any[] = []
 let weatherLabelOverlays: any[] = []
+let weatherLabelExpiryTimer: number | null = null
 let atlasStopMarkers: any[] = []
 let atlasTripLabels: any[] = []
 let amapSatelliteLayer: any = null
@@ -2421,6 +2422,7 @@ async function renderBaiduMap(preserveView = false) {
         if (!mapReady.value) mapWarning.value = '百度地图底图加载较慢；请检查浏览器端 AK、' + window.location.hostname + ' 域名白名单和网络连接。地图仍可继续尝试加载。'
       }, 8000)
     }
+    clearWeatherLabelExpiryTimer()
     mapInstance.clearOverlays()
     weatherLabelOverlays = []
     currentStopMarkers = []
@@ -2507,6 +2509,7 @@ function resetMapSDK() {
   mapInstance = null
   mapAPI = null
   mapOverlays = []
+  clearWeatherLabelExpiryTimer()
   currentStopMarkers = []
   weatherLabelOverlays = []
   atlasStopMarkers = []
@@ -2570,7 +2573,8 @@ async function loadAMap() {
 function safeMapError(cause: unknown, fallback: string) { const message = cause instanceof Error ? cause.message : String(cause || ''); return (message || fallback).replace(/([?&](?:ak|key|jscode)=)[^&\s'\"]+/gi, '$1<redacted>') }
 function amapPointToArray(point: Coord) { return [point.lng, point.lat] }
 function addAMapOverlay(overlay: any) { mapInstance?.add?.(overlay); mapOverlays.push(overlay); return overlay }
-function clearAMapOverlays() { mapInstance?.clearMap?.(); mapOverlays = []; currentStopMarkers = []; weatherLabelOverlays = []; atlasStopMarkers = []; atlasTripLabels = [] }
+function clearWeatherLabelExpiryTimer() { if (weatherLabelExpiryTimer !== null) { window.clearTimeout(weatherLabelExpiryTimer); weatherLabelExpiryTimer = null } }
+function clearAMapOverlays() { clearWeatherLabelExpiryTimer(); mapInstance?.clearMap?.(); mapOverlays = []; currentStopMarkers = []; weatherLabelOverlays = []; atlasStopMarkers = []; atlasTripLabels = [] }
 function renderStopPinHTML(sequence: number | string, isTarget: boolean, isCarryOver: boolean, kind?: string): string {
   const bg = planningPointCategoryColor(kind)
   const text = isCarryOver ? '‹' : String(sequence)
@@ -2609,6 +2613,7 @@ function weatherOverlayHTML(text: string): string {
   return '<span class="journey-map-weather-badge"><span class="journey-map-weather-icon" aria-hidden="true">' + iconForWeatherLabel(text) + '</span>' + escapeHTML(text) + '</span>'
 }
 function updateWeatherLabelsVisibility(nameIDs = computeVisibleLabelStopIDs(mapLabelPoints.value)) {
+  clearWeatherLabelExpiryTimer()
   for (const overlay of weatherLabelOverlays) {
     try {
       if (selectedMapProvider.value === 'amap') mapInstance?.remove?.(overlay)
@@ -2617,12 +2622,17 @@ function updateWeatherLabelsVisibility(nameIDs = computeVisibleLabelStopIDs(mapL
   }
   weatherLabelOverlays = []
   if (!mapInstance || !mapAPI || selectedDay.value === 'all' || mapLabelMode.value === 'none') return
+  let nextWeatherExpiry = Number.POSITIVE_INFINITY
+  const now = Date.now()
   const candidates = currentStopMarkers.map(marker => {
     const stop = marker.__journeyinStop as Stop | SubStop
     const id = marker.__journeyinIsSubStop ? marker.__journeyinSubStopId : marker.__journeyinStopId
     const point = pointForProvider(stop, selectedMapProvider.value)
     const pixel = point ? getMapPointScreenPixel(point) : null
     const weatherText = dayMapWeatherLabel(stop, Boolean(marker.__journeyinCarryOver))
+    const expiry = stop.weather?.expires_at
+    const expiresAt = typeof expiry === 'string' ? Date.parse(expiry) : Number.NaN
+    if (weatherText && Number.isFinite(expiresAt) && expiresAt > now) nextWeatherExpiry = Math.min(nextWeatherExpiry, expiresAt)
     return { id: String(id || ''), x: pixel?.x ?? null, y: pixel?.y ?? null, hasWeather: Boolean(weatherText), nameVisible: nameIDs.has(id), labelWidth: Math.min(150, 30 + [...weatherText].length * 9) }
   })
   const visible = visibleWeatherLabelIDs(candidates, mapLabelMode.value, mapVisibleRect())
@@ -2643,6 +2653,13 @@ function updateWeatherLabelsVisibility(nameIDs = computeVisibleLabelStopIDs(mapL
       mapInstance.addOverlay?.(overlay)
       weatherLabelOverlays.push(overlay)
     }
+  }
+  if (Number.isFinite(nextWeatherExpiry)) {
+    const delay = Math.max(1, Math.min(2_147_483_647, nextWeatherExpiry - Date.now() + 1))
+    weatherLabelExpiryTimer = window.setTimeout(() => {
+      weatherLabelExpiryTimer = null
+      updateWeatherLabelsVisibility()
+    }, delay)
   }
 }
 function attachAMapLabel(marker: any, title: string, dayBadge = '', isTarget = false, shouldShow = true) {
@@ -5580,6 +5597,7 @@ onMounted(() => {
   applyTheme(); mediaQuery = window.matchMedia('(prefers-color-scheme: dark)'); mediaQuery.addEventListener?.('change', systemThemeChanged); if (shareMode) void loadSharedTrip(); else loadTrips()
 })
 onUnmounted(() => {
+  clearWeatherLabelExpiryTimer()
   mediaQuery?.removeEventListener?.('change', systemThemeChanged)
   window.removeEventListener('popstate', handleNavigationPopState)
   window.removeEventListener('keydown', handleGlobalKeyDown)

@@ -100,6 +100,9 @@ func TestCaiyunProvider_Forecast15DaysSuccess(t *testing.T) {
 	if !snapshot.Available {
 		t.Fatal("expected snapshot to be available")
 	}
+	if got := snapshot.ExpiresAt.Sub(snapshot.FetchedAt); got != weatherSnapshotTTL {
+		t.Fatalf("weather snapshot TTL=%s, want %s", got, weatherSnapshotTTL)
+	}
 	if snapshot.Condition != "中雨" {
 		t.Errorf("expected Condition 中雨, got %s", snapshot.Condition)
 	}

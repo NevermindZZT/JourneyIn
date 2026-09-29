@@ -76,6 +76,9 @@ func TestQWeatherProvider_Success(t *testing.T) {
 	if !snap.Available {
 		t.Fatal("expected snap to be available")
 	}
+	if got := snap.ExpiresAt.Sub(snap.FetchedAt); got != weatherSnapshotTTL {
+		t.Fatalf("weather snapshot TTL=%s, want %s", got, weatherSnapshotTTL)
+	}
 	if snap.Condition != "中雨转小雨" {
 		t.Errorf("expected condition 中雨转小雨, got %s", snap.Condition)
 	}

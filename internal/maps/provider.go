@@ -28,6 +28,8 @@ const (
 	PlatformIOS     Platform         = "ios"
 )
 
+const weatherSnapshotTTL = 24 * time.Hour
+
 var (
 	ErrProviderUnavailable   = errors.New("map provider unavailable")
 	ErrProviderTemporary     = errors.New("map provider temporarily unavailable")

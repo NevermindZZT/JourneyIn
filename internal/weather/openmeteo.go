@@ -174,7 +174,7 @@ func (p *OpenMeteoProvider) Weather(ctx context.Context, request WeatherRequest)
 			WindPower:        windPower,
 			PressureHPa:      pressure,
 			FetchedAt:        now,
-			ExpiresAt:        now.Add(6 * time.Hour),
+			ExpiresAt:        now.Add(weatherSnapshotTTL),
 			Available:        true,
 		}, nil
 	}

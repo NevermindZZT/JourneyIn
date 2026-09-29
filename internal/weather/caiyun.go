@@ -232,7 +232,7 @@ func (p *CaiyunProvider) Weather(ctx context.Context, request WeatherRequest) (W
 			WindPower:        windPower,
 			PressureHPa:      pressure,
 			FetchedAt:        now,
-			ExpiresAt:        now.Add(6 * time.Hour),
+			ExpiresAt:        now.Add(weatherSnapshotTTL),
 			Available:        true,
 		}, nil
 	}

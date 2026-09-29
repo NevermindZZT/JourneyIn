@@ -19,6 +19,8 @@ const (
 	ProviderBaidu     ProviderID = "baidu"
 )
 
+const weatherSnapshotTTL = 24 * time.Hour
+
 type CRS string
 
 const (

@@ -55,6 +55,9 @@ func TestBaiduProviderUsesStandardEndpointsAndNormalizesSnapshots(t *testing.T) 
 	if !weather.Available || weather.Condition != "晴" || weather.TemperatureC == nil || *weather.TemperatureC != 20 {
 		t.Fatalf("unexpected weather: %+v", weather)
 	}
+	if got := weather.ExpiresAt.Sub(weather.FetchedAt); got != weatherSnapshotTTL {
+		t.Fatalf("weather snapshot TTL=%s, want %s", got, weatherSnapshotTTL)
+	}
 	addr, poiName, err := provider.ReverseGeocodeDetails(t.Context(), GeoPoint{Lat: 38.067, Lng: 113.818, CRS: CRSBD09LL})
 	if err != nil {
 		t.Fatal(err)
