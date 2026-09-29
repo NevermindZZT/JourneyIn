@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "vue-tsc --noEmit",
-    "test": "node --test weatherMapLabel.test.mjs routeTopologyLayout.test.mjs"
+    "test": "node --test weatherMapLabel.test.mjs routeTopologyLayout.test.mjs collaborationShare.test.mjs"
   },
   "dependencies": {
     "@amap/amap-jsapi-loader": "^1.0.1",

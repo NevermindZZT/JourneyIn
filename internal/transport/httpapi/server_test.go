@@ -14,6 +14,7 @@ import (
 
 	journeyin "journeyin"
 	"journeyin/internal/application"
+	"journeyin/internal/collaboration"
 	journeymaps "journeyin/internal/maps"
 	journeyshare "journeyin/internal/share"
 	"journeyin/internal/store"
@@ -45,6 +46,7 @@ func testHTTPServer(t *testing.T) *httptest.Server {
 	api.SetMapService(mapService)
 	api.trips.SetMapService(mapService)
 	api.SetShareService(journeyshare.NewService(journeyshare.NewSQLiteStore(database)), "http://example.test")
+	api.SetCollaborationService(collaboration.NewService(collaboration.NewSQLiteStore(database)))
 	api.SetSyncStore(database)
 	api.SetSettingsStore(database)
 	return httptest.NewServer(api.Handler())
@@ -448,5 +450,234 @@ func TestSharePermanentAndCustomTTL(t *testing.T) {
 	defer negResp.Body.Close()
 	if negResp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected 400 for negative ttl, got %d", negResp.StatusCode)
+	}
+}
+func TestCollaborativeShareScopesEditsToOneTrip(t *testing.T) {
+	apiServer := testHTTPServer(t)
+	defer apiServer.Close()
+	ownerAuth := NewAuthenticator("owner", "secret", "owner-api-token")
+	protected := httptest.NewServer(RequireAPIAuthWithAuthenticator(apiServer.Config.Handler, ownerAuth))
+	defer protected.Close()
+	request := func(method, path, body, token string) *http.Request {
+		t.Helper()
+		var reader io.Reader
+		if body != "" {
+			reader = strings.NewReader(body)
+		}
+		req, err := http.NewRequest(method, protected.URL+path, reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		return req
+	}
+	tripJSON := `{"schema_version":1,"title":"共创行程","status":"draft","timezone":"Asia/Shanghai","date_range":{"start":"2026-04-18","end":"2026-04-18"},"days":[{"id":"day-1","date":"2026-04-18","stops":[]}]}`
+	createTrip, err := http.DefaultClient.Do(request(http.MethodPost, "/api/v1/trips", tripJSON, "owner-api-token"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tripResult map[string]any
+	if err := json.NewDecoder(createTrip.Body).Decode(&tripResult); err != nil {
+		t.Fatal(err)
+	}
+	_ = createTrip.Body.Close()
+	if createTrip.StatusCode != http.StatusCreated {
+		t.Fatalf("create trip status %d", createTrip.StatusCode)
+	}
+	tripID := tripResult["id"].(string)
+
+	localManagement, err := http.Post(apiServer.URL+"/api/v1/trips/not-existing/collaboration-shares", "application/json", strings.NewReader(`{"ttl_seconds":604800}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = localManagement.Body.Close()
+	if localManagement.StatusCode != http.StatusNotFound {
+		t.Fatalf("local share management should not have a second auth check: %d", localManagement.StatusCode)
+	}
+	unauthenticatedShare, err := http.DefaultClient.Do(request(http.MethodPost, "/api/v1/trips/"+tripID+"/collaboration-shares", `{"ttl_seconds":604800}`, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = unauthenticatedShare.Body.Close()
+	if unauthenticatedShare.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("global owner API auth did not protect remote share management: %d", unauthenticatedShare.StatusCode)
+	}
+
+	createdShare, err := http.DefaultClient.Do(request(http.MethodPost, "/api/v1/trips/"+tripID+"/collaboration-shares", `{"ttl_seconds":604800}`, "owner-api-token"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var shareResult map[string]any
+	if err := json.NewDecoder(createdShare.Body).Decode(&shareResult); err != nil {
+		t.Fatal(err)
+	}
+	_ = createdShare.Body.Close()
+	if createdShare.StatusCode != http.StatusCreated {
+		t.Fatalf("create collaboration status %d", createdShare.StatusCode)
+	}
+	link, err := url.Parse(shareResult["url"].(string))
+	if err != nil || link.Path != "/c" || link.Fragment == "" || len(link.Fragment) != 43 {
+		t.Fatalf("invalid fragment collaboration URL: %v %+v", err, shareResult)
+	}
+	token := link.Fragment
+
+	page, err := http.Get(apiServer.URL + "/c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pageBody, err := io.ReadAll(page.Body)
+	_ = page.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.StatusCode != http.StatusOK || page.Header.Get("X-Robots-Tag") == "" || strings.Contains(string(pageBody), token) {
+		t.Fatalf("collaboration shell should be noindex and must not contain token: status=%d", page.StatusCode)
+	}
+
+	ownerAsCollaborator, err := http.DefaultClient.Do(request(http.MethodGet, "/api/v1/collaboration/current", "", "owner-api-token"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = ownerAsCollaborator.Body.Close()
+	if ownerAsCollaborator.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("owner API token was accepted as collaboration token: %d", ownerAsCollaborator.StatusCode)
+	}
+
+	bootstrap, err := http.DefaultClient.Do(request(http.MethodGet, "/api/v1/collaboration/current", "", token))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var shared map[string]any
+	if err := json.NewDecoder(bootstrap.Body).Decode(&shared); err != nil {
+		t.Fatal(err)
+	}
+	_ = bootstrap.Body.Close()
+	if bootstrap.StatusCode != http.StatusOK || shared["trip_id"] != tripID || shared["revision"] != float64(1) {
+		t.Fatalf("collaboration bootstrap status=%d payload=%+v", bootstrap.StatusCode, shared)
+	}
+	cookies := bootstrap.Cookies()
+	if len(cookies) != 1 || !cookies[0].HttpOnly || cookies[0].Path != "/api/v1/collaboration/" || cookies[0].SameSite != http.SameSiteStrictMode {
+		t.Fatalf("bootstrap must exchange the fragment token for a scoped HttpOnly cookie: %+v", cookies)
+	}
+	collaborationCookie := cookies[0]
+	sessionRequest := request(http.MethodGet, "/api/v1/collaboration/current", "", "")
+	sessionRequest.AddCookie(collaborationCookie)
+	sessionResponse, err := http.DefaultClient.Do(sessionRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = sessionResponse.Body.Close()
+	if sessionResponse.StatusCode != http.StatusOK {
+		t.Fatalf("HttpOnly collaborator session status=%d", sessionResponse.StatusCode)
+	}
+	sharedTrip := shared["trip"].(map[string]any)
+	if sharedTrip["title"] != "共创行程" {
+		t.Fatalf("unexpected shared trip: %+v", sharedTrip)
+	}
+
+	// Collaboration tokens must not list trips, read another trip, or invoke owner-only APIs.
+	listTrips, err := http.DefaultClient.Do(request(http.MethodGet, "/api/v1/trips", "", token))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = listTrips.Body.Close()
+	if listTrips.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("collaboration token listed trips: status=%d", listTrips.StatusCode)
+	}
+	otherTrip, err := http.DefaultClient.Do(request(http.MethodGet, "/api/v1/collaboration/trips/not-this-trip", "", token))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = otherTrip.Body.Close()
+	if otherTrip.StatusCode != http.StatusNotFound {
+		t.Fatalf("collaboration token accessed another trip: status=%d", otherTrip.StatusCode)
+	}
+	deleteTrip, err := http.DefaultClient.Do(request(http.MethodDelete, "/api/v1/collaboration/trips/"+tripID, "", token))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = deleteTrip.Body.Close()
+	if deleteTrip.StatusCode != http.StatusNotFound {
+		t.Fatalf("collaboration token exposed trip deletion: status=%d", deleteTrip.StatusCode)
+	}
+
+	updated := `{"schema_version":1,"title":"共创已更新","status":"draft","timezone":"Asia/Shanghai","date_range":{"start":"2026-04-18","end":"2026-04-18"},"days":[{"id":"day-1","date":"2026-04-18","stops":[]}]}`
+	crossOriginEdit := request(http.MethodPut, "/api/v1/collaboration/trips/"+tripID, updated, "")
+	crossOriginEdit.AddCookie(collaborationCookie)
+	crossOriginEdit.Header.Set("Origin", "https://evil.example")
+	crossOriginEdit.Header.Set("If-Match", "revision-1")
+	crossOriginResponse, err := http.DefaultClient.Do(crossOriginEdit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = crossOriginResponse.Body.Close()
+	if crossOriginResponse.StatusCode != http.StatusForbidden {
+		t.Fatalf("cross-origin cookie edit status=%d, want 403", crossOriginResponse.StatusCode)
+	}
+	editTrip := request(http.MethodPut, "/api/v1/collaboration/trips/"+tripID, updated, "")
+	editTrip.AddCookie(collaborationCookie)
+	editTrip.Header.Set("Origin", "http://example.test")
+	editTrip.Header.Set("If-Match", "revision-1")
+	editResponse, err := http.DefaultClient.Do(editTrip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = editResponse.Body.Close()
+	if editResponse.StatusCode != http.StatusOK {
+		t.Fatalf("collaborative edit status=%d", editResponse.StatusCode)
+	}
+	staleEdit := request(http.MethodPut, "/api/v1/collaboration/trips/"+tripID, tripJSON, "")
+	staleEdit.AddCookie(collaborationCookie)
+	staleEdit.Header.Set("Origin", "http://example.test")
+	staleEdit.Header.Set("If-Match", "revision-1")
+	conflictResponse, err := http.DefaultClient.Do(staleEdit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = conflictResponse.Body.Close()
+	if conflictResponse.StatusCode != http.StatusConflict {
+		t.Fatalf("stale collaborator edit status=%d, want 409", conflictResponse.StatusCode)
+	}
+
+	listed, err := http.DefaultClient.Do(request(http.MethodGet, "/api/v1/trips/"+tripID+"/collaboration-shares", "", "owner-api-token"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listResult struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.NewDecoder(listed.Body).Decode(&listResult); err != nil {
+		t.Fatal(err)
+	}
+	_ = listed.Body.Close()
+	if listed.StatusCode != http.StatusOK || len(listResult.Items) != 1 || listResult.Items[0]["status"] != "active" {
+		t.Fatalf("collaboration share list=%+v status=%d", listResult, listed.StatusCode)
+	}
+	if _, ok := listResult.Items[0]["token_hash"]; ok {
+		t.Fatal("management response leaked token hash")
+	}
+
+	revoked, err := http.DefaultClient.Do(request(http.MethodPost, "/api/v1/trips/"+tripID+"/collaboration-shares/"+shareResult["id"].(string)+"/revoke", "{}", "owner-api-token"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = revoked.Body.Close()
+	if revoked.StatusCode != http.StatusNoContent {
+		t.Fatalf("revoke status=%d", revoked.StatusCode)
+	}
+	afterRevokeRequest := request(http.MethodGet, "/api/v1/collaboration/current", "", "")
+	afterRevokeRequest.AddCookie(collaborationCookie)
+	afterRevoke, err := http.DefaultClient.Do(afterRevokeRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = afterRevoke.Body.Close()
+	if afterRevoke.StatusCode != http.StatusGone {
+		t.Fatalf("revoked collaboration token status=%d, want 410", afterRevoke.StatusCode)
 	}
 }

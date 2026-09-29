@@ -15,6 +15,7 @@ import TripPosterModal from './TripPosterModal.vue'
 import BrandLogo from './BrandLogo.vue'
 import MapLoadingState from './MapLoadingState.vue'
 import { formatDayWeatherBadge, iconForWeatherLabel, visibleWeatherLabelIDs } from './weatherMapLabel'
+import { collaborationAPIPath, collaborationTokenFromHash } from './collaborationShare.mjs'
 
 type Theme = 'system' | 'light' | 'dark'
 type Coord = { lat: number; lng: number }
@@ -29,6 +30,7 @@ type TripDocument = { title: string; show_in_atlas?: boolean; date_range?: { sta
 type SharedBootstrap = { trip: TripDocument & { id?: string; status?: string }; browser_key?: string; amap_browser_key?: string; amap_security_proxy_path?: string; amap_security_js_code_configured?: boolean; default_map_provider?: 'baidu' | 'amap'; revision?: number }
 type TripSummary = { id: string; title: string; status: string; start_date: string; end_date: string; timezone: string; revision: number; days?: number; stops?: number; show_in_atlas?: boolean; updated_at?: string }
 type TripHistoryEntry = { id: string; history_id?: string; trip_id: string; source_revision: number; title: string; start_date: string; end_date: string; label?: string; content_hash: string; created_at: string; read_only?: boolean }
+type CollaborationShareSummary = { id: string; trip_id: string; permission: 'editor'; status: 'active' | 'expired' | 'revoked'; created_at: string; expires_at: string; revoked_at?: string }
 type TripSortMode = 'updated' | 'date'
 type Capabilities = { version?: string; default_map_provider?: 'baidu' | 'amap'; map_providers?: { baidu?: { browser_key_configured?: boolean; browser_key?: string }; amap?: { browser_key_configured?: boolean; browser_key?: string; security_proxy_path?: string; security_js_code_configured?: boolean } }; features?: { planning_point_edit?: boolean; coordinate_repair?: boolean }; mcp?: { http_endpoint?: string; transports?: string[]; token_configured?: boolean } }
 type KeySettings = { map?: { default_provider?: 'baidu' | 'amap'; baidu?: { browser_key_configured?: boolean; server_key_configured?: boolean }; amap?: { js_key_configured?: boolean; server_key_configured?: boolean; security_js_code_configured?: boolean } }; poi?: { provider_priority?: 'amap' | 'baidu'; local_directory_count?: number }; photos?: { root_dir?: string; configured?: boolean }; weather?: { default_provider?: 'auto' | 'openmeteo' | 'qweather' | 'caiyun' | 'amap' | 'baidu'; openmeteo?: { available?: boolean }; qweather?: { key_configured?: boolean; host?: string }; caiyun?: { token_configured?: boolean } }; mcp?: { http_endpoint?: string; token_configured?: boolean; token?: string } }
@@ -158,6 +160,7 @@ markdownRenderer.renderer.rules.image = (tokens, index, options, _env, self) => 
   return self.renderToken(tokens, index, options)
 }
 const shareMode = window.location.pathname.startsWith('/s/') && !window.location.pathname.endsWith('.json')
+const collaborationMode = window.location.pathname === '/c' || window.location.pathname === '/c/'
 const prototypeMode = new URLSearchParams(window.location.search).get('prototype') === '1'
 const redesignMode = true
 
@@ -410,7 +413,12 @@ const historyLabelDraft = ref('')
 const historyMessage = ref('')
 const historyError = ref('')
 const historyView = ref<TripHistoryEntry | null>(null)
-const readOnlyView = computed(() => shareMode || Boolean(historyView.value))
+const collaborationToken = ref(collaborationMode ? collaborationTokenFromHash(window.location.hash) : '')
+const collaborationTripID = ref('')
+const collaborationReady = ref(false)
+const collaborationFailure = ref('')
+const readOnlyView = computed(() => shareMode || Boolean(historyView.value) || (collaborationMode && !collaborationReady.value))
+const ownerWorkspace = computed(() => !shareMode && !collaborationMode && !historyView.value)
 const historyTitle = computed(() => historyView.value?.title || selected.value?.title || tripDocument.value?.title || '行程地图')
 const historyDateRange = computed(() => historyView.value ? formatDateRange(historyView.value.start_date, historyView.value.end_date) : selected.value ? formatDateRange(selected.value.start_date, selected.value.end_date) : tripDateRangeFor(tripDocument.value).start ? formatDateRange(tripDateRangeFor(tripDocument.value).start, tripDateRangeFor(tripDocument.value).end) : '')
 const stopDateEditing = ref(false)
@@ -460,6 +468,16 @@ const shareCopyMessage = ref('')
 const shareNoticeVisible = ref(false)
 const shareNoticeTitle = ref('只读分享已创建')
 const shareModalOpen = ref(false)
+const shareKind = ref<'readonly' | 'collaboration'>('readonly')
+const collaborationExpiryDays = ref(7)
+const collaborationShares = ref<CollaborationShareSummary[]>([])
+const collaborationShareURLs = ref<Record<string, string>>({})
+const collaborationSharingLoading = ref(false)
+const collaborationShareCreating = ref(false)
+const collaborationShareCopyingID = ref('')
+const collaborationShareMessage = ref('')
+watch(shareModalOpen, open => { if (!open) collaborationShareURLs.value = {} })
+watch(shareKind, kind => { if (kind !== 'collaboration') collaborationShareURLs.value = {} })
 const shareExpiryType = ref<'1d' | '7d' | '30d' | '90d' | 'permanent' | 'custom'>('7d')
 const shareCustomDays = ref(30)
 const shareGenerating = ref(false)
@@ -795,12 +813,35 @@ async function saveStopDate() {
 const themeLabel = computed(() => theme.value === 'system' ? '跟随系统' : theme.value === 'dark' ? '深色' : '浅色')
 const displayVersion = computed(() => capabilities.value?.version || APP_VERSION)
 
+function collaborationRequestPath(input: RequestInfo | URL) {
+  if (!collaborationMode) return null
+  return collaborationAPIPath(input, collaborationTripID.value, window.location.origin)
+}
 function apiFetch(input: RequestInfo | URL, init: RequestInit = {}) {
   const headers = new Headers(init.headers)
-  const token = authTokenInput.value.trim()
-  if (token) headers.set('Authorization', 'Bearer ' + token)
-  return fetch(input, { ...init, headers, credentials: 'same-origin' }).then(response => {
-    if (response.status === 401) { authOpen.value = true; settingsMessage.value = '当前服务需要登录令牌' }
+  let requestInput: RequestInfo | URL = input
+  let credentials: RequestCredentials = 'same-origin'
+  if (collaborationMode) {
+    const collaborationPath = collaborationRequestPath(input)
+    headers.delete('Authorization')
+    if (collaborationPath) requestInput = collaborationPath
+    else credentials = 'omit'
+  } else {
+    const token = authTokenInput.value.trim()
+    if (token) headers.set('Authorization', 'Bearer ' + token)
+  }
+  return fetch(requestInput, { ...init, headers, credentials }).then(response => {
+    if (response.status === 410 && collaborationMode) {
+      collaborationReady.value = false
+      collaborationFailure.value = '共创链接已过期或撤销，当前无法继续编辑'
+      error.value = collaborationFailure.value
+    }
+    if (response.status === 401 && collaborationMode) {
+      collaborationReady.value = false
+      collaborationFailure.value = '共创会话已失效，请重新打开收到的共创链接'
+      error.value = collaborationFailure.value
+    }
+    if (response.status === 401 && !collaborationMode) { authOpen.value = true; settingsMessage.value = '当前服务需要登录令牌' }
     return response
   })
 }
@@ -845,7 +886,7 @@ function currentNavigationState(): NavigationURLState {
 }
 
 function syncNavigationURL(mode: 'push' | 'replace' = 'replace', state = currentNavigationState()) {
-  if (readOnlyView.value || prototypeMode) return
+  if (readOnlyView.value || prototypeMode || collaborationMode) return
   const url = new URL(window.location.href)
   for (const key of ['trip', 'stop', 'substop', 'day', 'sheet']) url.searchParams.delete(key)
   if (state.tripID && state.layer !== 'list') {
@@ -863,7 +904,7 @@ function syncNavigationURL(mode: 'push' | 'replace' = 'replace', state = current
 }
 
 function ensureNavigationHistory() {
-  if (readOnlyView.value || prototypeMode || window.history.state?.journeyin) return
+  if (readOnlyView.value || prototypeMode || collaborationMode || window.history.state?.journeyin) return
   syncNavigationURL('replace', readNavigationURL())
 }
 
@@ -1053,7 +1094,7 @@ function startSheetDrag(event: PointerEvent) {
 }
 
 function navigateToList(mode: 'push' | 'replace' = 'push') {
-  if (readOnlyView.value) return
+  if (readOnlyView.value || collaborationMode) return
   historyOpen.value = false
   historyView.value = null
   cancelEditTripDetails()
@@ -1567,7 +1608,7 @@ function navigateBackFromStop() {
 }
 
 function navigateBackToList() {
-  if (readOnlyView.value) return
+  if (readOnlyView.value || collaborationMode) return
   navigateBackTo({ layer: 'list' })
 }
 
@@ -1703,6 +1744,47 @@ async function loadSharedTrip() {
   selectedDay.value = 'all'; tripView.value = 'detail'; panelMode.value = 'journey'; panelOpen.value = true; panelCollapsed.value = false; mobileMapToolsOpen.value = false; selectedStopId.value = ''; selectedSubStopId.value = ''; reorderMode.value = false; descriptionEditing.value = false; tripDescriptionEditing.value = false
   await nextTick(); await renderMap()
 }
+async function loadCollaborativeTrip() {
+  const token = collaborationToken.value.trim()
+  loading.value = true
+  collaborationFailure.value = ''
+  error.value = ''
+  try {
+    const headers = new Headers()
+    if (token) headers.set('Authorization', 'Bearer ' + token)
+    const response = await fetch('/api/v1/collaboration/current', { headers, credentials: 'same-origin', cache: 'no-store' })
+    const payload = await response.json() as SharedBootstrap & { trip_id?: string; error?: { message?: string } }
+    if (!response.ok || !payload.trip) {
+      throw new Error(payload.error?.message || (response.status === 410 ? '共创链接已过期或撤销' : '共创链接无效或已失效'))
+    }
+    const document = payload.trip
+    const tripID = payload.trip_id || document.id || ''
+    if (!tripID) throw new Error('共创行程数据缺少行程标识')
+    document.id = tripID
+    if (token && window.location.hash) {
+      window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)
+      collaborationToken.value = ''
+    }
+    collaborationTripID.value = tripID
+    tripDocument.value = document
+    const stopCount = document.days.reduce((total, day) => total + (day.stops || []).length, 0)
+    selected.value = { id: tripID, title: document.title, status: document.status || 'draft', start_date: document.days[0]?.date || '', end_date: document.days[document.days.length - 1]?.date || '', timezone: document.timezone, revision: payload.revision || 1, days: document.days.length, stops: stopCount, show_in_atlas: document.show_in_atlas ?? false }
+    if (payload.default_map_provider === 'baidu' || payload.default_map_provider === 'amap') defaultMapProvider.value = payload.default_map_provider
+    capabilities.value = { version: APP_VERSION, default_map_provider: defaultMapProvider.value, map_providers: { baidu: { browser_key_configured: Boolean(payload.browser_key), browser_key: payload.browser_key || '' }, amap: { browser_key_configured: Boolean(payload.amap_browser_key), browser_key: payload.amap_browser_key || '', security_proxy_path: payload.amap_security_proxy_path || '/_AMapService', security_js_code_configured: payload.amap_security_js_code_configured } } }
+    syncProviderFromDocument(document)
+    selectedDay.value = 'all'; tripView.value = 'detail'; panelMode.value = 'journey'; panelOpen.value = true; panelCollapsed.value = false; mobileMapToolsOpen.value = false; selectedStopId.value = ''; selectedSubStopId.value = ''; reorderMode.value = false
+    collaborationReady.value = true
+    await nextTick()
+    ensureNavigationHistory()
+    await renderMap()
+  } catch (cause) {
+    collaborationReady.value = false
+    collaborationFailure.value = cause instanceof Error ? cause.message : '无法打开共创行程'
+    error.value = collaborationFailure.value
+  } finally {
+    loading.value = false
+  }
+}
 function selectTrip(trip: TripSummary) { navigateToTrip(trip) }
 async function deleteTrip(trip: TripSummary) {
   if (!window.confirm('确认删除“' + trip.title + '”吗？该行程及其规划点、路线和天气快照都会删除。')) return
@@ -1751,7 +1833,7 @@ async function refreshTripHistoryList(tripID: string) {
   historyEntries.value = payload.items || []
 }
 async function openTripHistory() {
-  if (readOnlyView.value || !selected.value) return
+  if (!ownerWorkspace.value || !selected.value) return
   historyOpen.value = true
   historyLoading.value = true
   historyError.value = ''
@@ -4872,6 +4954,71 @@ async function downloadTrip() {
 function shareStorageKey(tripID: string) { return 'journeyin.share.' + tripID }
 function shareTokenFromURL(url: string) { try { const parsed = new URL(url, window.location.origin); const match = parsed.pathname.match(/^\/s\/([^/]+)$/); return match?.[1] || '' } catch { return '' } }
 function saveShareState(tripID: string) { if (shareURL.value) localStorage.setItem(shareStorageKey(tripID), JSON.stringify({ id: shareID.value, url: shareURL.value, expires_at: shareExpiresAt.value, expiry_type: shareExpiryType.value, custom_days: shareCustomDays.value })) }
+async function loadCollaborationShares(tripID: string) {
+  collaborationSharingLoading.value = true
+  collaborationShareMessage.value = ''
+  try {
+    const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(tripID) + '/collaboration-shares')
+    const payload = await response.json() as { items?: CollaborationShareSummary[]; error?: { message?: string } }
+    if (!response.ok) throw new Error(payload.error?.message || '无法读取共创分享')
+    collaborationShares.value = payload.items || []
+    const activeIDs = new Set(collaborationShares.value.filter(item => item.status === 'active').map(item => item.id))
+    collaborationShareURLs.value = Object.fromEntries(Object.entries(collaborationShareURLs.value).filter(([id, url]) => activeIDs.has(id) && typeof url === 'string'))
+  } catch (cause) {
+    collaborationShareMessage.value = cause instanceof Error ? cause.message : '无法读取共创分享'
+  } finally {
+    collaborationSharingLoading.value = false
+  }
+}
+async function createCollaborationShare() {
+  if (!ownerWorkspace.value || !selected.value || collaborationShareCreating.value) return
+  if (!window.confirm('共创链接默认有效 7 天，最长 90 天。任何持有此链接的人都可以查看并编辑当前行程，包括添加、修改、删除规划点、重新规划路线和刷新天气。请只发送给可信的人。确认创建？')) return
+  const tripID = selected.value.id
+  collaborationShareCreating.value = true
+  collaborationShareMessage.value = ''
+  try {
+    const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(tripID) + '/collaboration-shares', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ttl_seconds: collaborationExpiryDays.value * 86400 }),
+    })
+    const payload = await response.json() as { id?: string; url?: string; error?: { message?: string } }
+    if (!response.ok || !payload.id || !payload.url) throw new Error(payload.error?.message || '创建共创链接失败')
+    await loadCollaborationShares(tripID)
+    if (shareModalOpen.value && shareKind.value === 'collaboration' && selected.value?.id === tripID) {
+      collaborationShareURLs.value = { ...collaborationShareURLs.value, [payload.id]: payload.url }
+      collaborationShareMessage.value = '共创链接已创建；请立即复制并发送。链接持有者可编辑此行程。'
+    }
+  } catch (cause) {
+    collaborationShareMessage.value = cause instanceof Error ? cause.message : '创建共创链接失败'
+  } finally {
+    collaborationShareCreating.value = false
+  }
+}
+async function copyCollaborationShareURL(shareID: string) {
+  const value = collaborationShareURLs.value[shareID]
+  if (!value) { collaborationShareMessage.value = '此页面未保留链接原文；若无法从已发送的位置找回，请撤销后重新创建。'; return }
+  collaborationShareCopyingID.value = shareID
+  try {
+    await copyText(value)
+    collaborationShareMessage.value = '共创链接已复制。持有者可编辑当前行程。'
+  } catch { collaborationShareMessage.value = '复制失败，请检查浏览器剪贴板权限后重试。' } finally { collaborationShareCopyingID.value = '' }
+}
+async function revokeCollaborationShare(share: CollaborationShareSummary) {
+  if (!ownerWorkspace.value || !selected.value) return
+  if (!window.confirm('撤销后，此共创链接的所有持有者将立即失去访问和编辑权限。确认撤销？')) return
+  actionLoading.value = true
+  collaborationShareMessage.value = ''
+  try {
+    const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(selected.value.id) + '/collaboration-shares/' + encodeURIComponent(share.id) + '/revoke', { method: 'POST' })
+    if (!response.ok) { const payload = await response.json() as { error?: { message?: string } }; throw new Error(payload.error?.message || '撤销共创链接失败') }
+    delete collaborationShareURLs.value[share.id]
+    await loadCollaborationShares(selected.value.id)
+    collaborationShareMessage.value = '共创链接已撤销'
+  } catch (cause) {
+    collaborationShareMessage.value = cause instanceof Error ? cause.message : '撤销共创链接失败'
+  } finally { actionLoading.value = false }
+}
 function restoreShareState(tripID: string) {
   shareURL.value = ''; shareID.value = ''; shareExpiresAt.value = ''; shareCopyMessage.value = ''; shareNoticeVisible.value = false; shareNoticeTitle.value = '只读分享已创建'
   try {
@@ -4887,20 +5034,22 @@ function restoreShareState(tripID: string) {
   } catch { localStorage.removeItem(shareStorageKey(tripID)) }
 }
 function openShareModal() {
-  if (readOnlyView.value || !selected.value) return
+  if (!ownerWorkspace.value || !selected.value) return
   shareCopyMessage.value = ''
   error.value = ''
   if (shareURL.value && !shareExpiresAt.value) {
     shareExpiryType.value = 'permanent'
   }
+  shareKind.value = 'readonly'
   shareModalOpen.value = true
+  void loadCollaborationShares(selected.value.id)
 }
 function openTripPosterFromShare() {
   shareModalOpen.value = false
   openTripPoster()
 }
 async function createShare(options?: { expiryType?: '1d' | '7d' | '30d' | '90d' | 'permanent' | 'custom'; customDays?: number; refreshExisting?: boolean }) {
-  if (readOnlyView.value || !selected.value) return
+  if (!ownerWorkspace.value || !selected.value) return
   const tripID = selected.value.id
   const type = options?.expiryType || shareExpiryType.value
   let ttlSeconds: number | undefined = undefined
@@ -5357,6 +5506,7 @@ async function deletePlanningPoint(stop: Stop | SubStop) {
   }
 }
 async function openSettings() {
+  if (!ownerWorkspace.value) return
   settingsOpen.value = true
   try {
     const response = await apiFetch('/api/v1/settings')
@@ -5594,7 +5744,7 @@ onMounted(() => {
   window.addEventListener('pointermove', handleTouchPointerMove, true)
   window.addEventListener('pointerup', finishTouchPointer, true)
   window.addEventListener('pointercancel', finishTouchPointer, true)
-  applyTheme(); mediaQuery = window.matchMedia('(prefers-color-scheme: dark)'); mediaQuery.addEventListener?.('change', systemThemeChanged); if (shareMode) void loadSharedTrip(); else loadTrips()
+  applyTheme(); mediaQuery = window.matchMedia('(prefers-color-scheme: dark)'); mediaQuery.addEventListener?.('change', systemThemeChanged); if (shareMode) void loadSharedTrip(); else if (collaborationMode) void loadCollaborativeTrip(); else void loadTrips()
 })
 onUnmounted(() => {
   clearWeatherLabelExpiryTimer()
@@ -5620,21 +5770,21 @@ onUnmounted(() => {
   <IonApp v-else>
     <div class="journey-page redesign-page">
       <div class="redesign-content">
-        <main class="journey-redesign" :class="{ 'is-list-view': tripView === 'list', 'is-detail-view': tripView === 'detail', 'is-atlas-view': tripView === 'atlas', 'has-stop-selection': Boolean(selectedStop), 'is-shared-view': shareMode, 'is-history-view': Boolean(historyView) }">
+        <main class="journey-redesign" :class="{ 'is-list-view': tripView === 'list', 'is-detail-view': tripView === 'detail', 'is-atlas-view': tripView === 'atlas', 'has-stop-selection': Boolean(selectedStop), 'is-shared-view': shareMode || collaborationMode, 'is-history-view': Boolean(historyView) }">
           <input ref="fileInput" class="visually-hidden" type="file" accept="application/json,.json" aria-hidden="true" tabindex="-1" @change="importTrip" />
           <aside class="journey-rail" aria-label="JourneyIn 主导航">
-            <button class="rail-brand" type="button" aria-label="返回行程列表" @click="navigateToList()"><BrandLogo :size="38" variant="mark" shape="squircle" class="rail-brand-mark-logo" /><span class="rail-brand-name">JourneyIn</span></button>
+            <button v-if="ownerWorkspace" class="rail-brand" type="button" aria-label="返回行程列表" @click="navigateToList()"><BrandLogo :size="38" variant="mark" shape="squircle" class="rail-brand-mark-logo" /><span class="rail-brand-name">JourneyIn</span></button>
             <nav class="rail-nav" aria-label="工作区">
-              <button class="rail-nav-item" :class="{ selected: tripView === 'list' }" type="button" @click="navigateToList()"><IonIcon :icon="menuOutline" /><span>行程</span></button>
+              <button v-if="ownerWorkspace" class="rail-nav-item" :class="{ selected: tripView === 'list' }" type="button" @click="navigateToList()"><IonIcon :icon="menuOutline" /><span>行程</span></button>
               <button class="rail-nav-item" :class="{ selected: tripView === 'detail' }" type="button" :disabled="!selected" @click="selected ? navigateToTrip(selected, 'replace') : undefined"><IonIcon :icon="mapOutline" /><span>地图</span></button>
-              <button class="rail-nav-item" :class="{ selected: tripView === 'atlas' }" type="button" @click="navigateToAtlas()"><IonIcon :icon="footstepsOutline" /><span>足迹</span></button>
+              <button v-if="ownerWorkspace" class="rail-nav-item" :class="{ selected: tripView === 'atlas' }" type="button" @click="navigateToAtlas()"><IonIcon :icon="footstepsOutline" /><span>足迹</span></button>
             </nav>
             <div class="rail-spacer"></div>
-            <a v-if="!readOnlyView" class="rail-nav-item rail-link" :href="GITHUB_URL" target="_blank" rel="noopener noreferrer"><IonIcon :icon="linkOutline" /><span>项目</span></a>
-            <button v-if="!readOnlyView" class="rail-nav-item" type="button" @click="openSettings()"><IonIcon :icon="settingsOutline" /><span>设置</span></button>
+            <a v-if="ownerWorkspace" class="rail-nav-item rail-link" :href="GITHUB_URL" target="_blank" rel="noopener noreferrer"><IonIcon :icon="linkOutline" /><span>项目</span></a>
+            <button v-if="ownerWorkspace" class="rail-nav-item" type="button" @click="openSettings()"><IonIcon :icon="settingsOutline" /><span>设置</span></button>
           </aside>
 
-          <section v-if="tripView === 'list'" class="trip-list-view" aria-labelledby="trip-list-title">
+          <section v-if="tripView === 'list' && ownerWorkspace" class="trip-list-view" aria-labelledby="trip-list-title">
             <div ref="tripListScroll" class="trip-list-scroll" tabindex="0" role="region" aria-label="行程列表" @pointerdown="focusTripListScroll">
             <header class="list-page-header">
               <div>
@@ -5709,7 +5859,7 @@ onUnmounted(() => {
                 <strong>{{ mapError || (mapProviderLabel + '未配置') }}</strong>
                 <span>配置 {{ mapProviderLabel }} 浏览器端 Key 后即可呈现所有历史行程路线与足迹网络。</span>
                 <button v-if="mapError" type="button" class="secondary-action compact-action" @click="retryMap">重新尝试加载</button>
-                <button v-else-if="!readOnlyView" type="button" class="primary-action compact-action" @click="openSettings()">前往设置配置 Key</button>
+                <button v-else-if="ownerWorkspace" type="button" class="primary-action compact-action" @click="openSettings()">前往设置配置 Key</button>
               </div>
 
               <div v-if="mapWarning" class="map-warning"><span>{{ mapWarning }}</span><button type="button" @click="retryMap">重新加载</button></div>
@@ -5724,7 +5874,7 @@ onUnmounted(() => {
                 <button class="workspace-tool-trigger" type="button" :aria-expanded="mobileMapToolsOpen" aria-label="打开地图选项" @click="toggleMobileMapTools">
                   <IonIcon :icon="mapOutline" /><span>地图选项</span>
                 </button>
-                <button v-if="!readOnlyView" class="workspace-more" type="button" aria-label="打开更多操作" @click="openSettings">
+                <button v-if="ownerWorkspace" class="workspace-more" type="button" aria-label="打开更多操作" @click="openSettings">
                   <span>⋯</span>
                 </button>
               </div>
@@ -5926,6 +6076,10 @@ onUnmounted(() => {
             }"
             aria-label="地图工作区"
           >
+            <section v-if="collaborationMode && !collaborationReady" class="collaboration-entry-state" role="status">
+              <div class="collaboration-entry-icon">{{ loading ? "…" : "!" }}</div>
+              <div><strong>{{ loading ? "正在验证共创链接" : "无法打开共创行程" }}</strong><p>{{ collaborationFailure || "正在读取链接授权的行程…" }}</p></div>
+            </section>
             <div class="map-canvas redesign-map-canvas" :class="{ 'map-pick-active': mapPickMode }">
               <div v-if="keyConfigured && tripDocument && !mapError" :key="selectedMapProvider" ref="mapContainer" id="map"></div>
 
@@ -5950,7 +6104,7 @@ onUnmounted(() => {
                 <strong>{{ mapError || (mapProviderLabel + '未配置') }}</strong>
                 <span>{{ mapError ? '请确认浏览器端 Key、域名白名单和网络连接。当前页面：' + serverURL : '配置' + mapProviderLabel + '浏览器端 Key 后显示真实地图；已保存的行程数据仍然可查看。' }}</span>
                 <button v-if="mapError" type="button" class="secondary-action compact-action" @click="retryMap">重新尝试加载</button>
-                <button v-else-if="!readOnlyView" type="button" class="primary-action compact-action" @click="openSettings()">前往设置配置 Key</button>
+                <button v-else-if="ownerWorkspace" type="button" class="primary-action compact-action" @click="openSettings()">前往设置配置 Key</button>
               </div>
 
               <div v-if="mapWarning" class="map-warning"><span>{{ mapWarning }}</span><button type="button" @click="retryMap">重新加载</button></div>
@@ -5959,8 +6113,8 @@ onUnmounted(() => {
             <aside v-if="tripDocument" class="floating-panel workspace-panel itinerary-panel" :class="['sheet-' + sheetBreakpoint, { 'panel-search-mode': panelMode === 'search', 'is-sheet-dragging': sheetDragActive }]" :style="sheetDragStyle" aria-label="行程时间线">
               <button class="sheet-handle" type="button" :aria-label="sheetBreakpoint === 'peek' ? '展开行程' : '收起行程'" @pointerdown="startSheetDrag" @click="cycleSheetBreakpoint"><span></span></button>
               <header class="workspace-panel-head">
-                <div><div class="workspace-panel-kicker"><p class="eyebrow">{{ historyView ? 'HISTORY VERSION' : shareMode ? 'SHARED JOURNEY' : 'CURRENT JOURNEY' }}</p><span v-if="historyView" class="history-status-tag">只读</span><span v-else-if="shareURL" class="share-status-tag">已分享</span></div><h1>{{ historyTitle }}</h1><p>{{ historyDateRange || '选择一条行程查看详情' }}</p></div>
-                <div class="panel-head-actions"><button v-if="!readOnlyView" class="panel-action-button" type="button" aria-label="返回行程列表" @click="navigateBackToList"><span>‹</span><small>行程</small></button><button v-if="!readOnlyView" class="panel-action-button history-action" type="button" aria-label="打开版本历史" @click="openTripHistory"><span>↶</span><small>版本</small></button><button v-if="!readOnlyView" class="panel-action-button edit-trip-action" type="button" aria-label="编辑行程信息" @click="beginEditTripDetails"><IonIcon :icon="createOutline" /><small>编辑</small></button><button class="panel-action-button collapse-action" type="button" :aria-label="sheetBreakpoint === 'peek' ? '展开行程' : '收起到 Peek'" @click="setSheetBreakpoint(sheetBreakpoint === 'peek' ? 'half' : 'peek')"><IonIcon :icon="sheetBreakpoint === 'peek' ? chevronUpOutline : chevronDownOutline" /></button></div>
+                <div><div class="workspace-panel-kicker"><p class="eyebrow">{{ historyView ? 'HISTORY VERSION' : shareMode ? 'SHARED JOURNEY' : collaborationMode ? 'COLLABORATION EDIT' : 'CURRENT JOURNEY' }}</p><span v-if="historyView" class="history-status-tag">只读</span><span v-else-if="shareURL" class="share-status-tag">已分享</span><span v-else-if="collaborationMode" class="share-status-tag">共创编辑</span></div><h1>{{ historyTitle }}</h1><p>{{ historyDateRange || '选择一条行程查看详情' }}</p></div>
+                <div class="panel-head-actions"><button v-if="ownerWorkspace" class="panel-action-button" type="button" aria-label="返回行程列表" @click="navigateBackToList"><span>‹</span><small>行程</small></button><button v-if="ownerWorkspace" class="panel-action-button history-action" type="button" aria-label="打开版本历史" @click="openTripHistory"><span>↶</span><small>版本</small></button><button v-if="!readOnlyView" class="panel-action-button edit-trip-action" type="button" aria-label="编辑行程信息" @click="beginEditTripDetails"><IonIcon :icon="createOutline" /><small>编辑</small></button><button class="panel-action-button collapse-action" type="button" :aria-label="sheetBreakpoint === 'peek' ? '展开行程' : '收起到 Peek'" @click="setSheetBreakpoint(sheetBreakpoint === 'peek' ? 'half' : 'peek')"><IonIcon :icon="sheetBreakpoint === 'peek' ? chevronUpOutline : chevronDownOutline" /></button></div>
               </header>
               <nav v-if="panelMode === 'journey'" class="journey-view-tabs" aria-label="行程内容"><button type="button" :class="{ selected: journeySection === 'itinerary' }" @click="journeySection = 'itinerary'">规划点 <small>{{ visibleStops.length }}</small></button><button type="button" :class="{ selected: journeySection === 'overview' }" @click="journeySection = 'overview'">说明</button></nav>
               <div v-if="panelMode === 'journey'" class="journey-day-tabs" aria-label="行程日期"><button type="button" :class="{ selected: selectedDay === 'all' }" @click="selectJourneyDay('all')">全程</button><button v-for="(day, index) in tripDocument.days" :key="day.id" type="button" :class="{ selected: selectedDay === index + 1 }" @click="selectJourneyDay(index + 1)">D{{ index + 1 }} <small>{{ formatDate(day.date).slice(5) }}</small></button></div>
@@ -5982,7 +6136,7 @@ onUnmounted(() => {
                   <div v-if="visibleStops.length" class="redesign-stop-list"><article v-for="stop in visibleStops" :key="stop.id" class="redesign-stop-row" :class="{ selected: selectedStopId === stop.id, 'reorder-active': reorderMode, 'location-missing': !pointFor(stop), 'route-excluded': stop.exclude_from_route }"><button class="redesign-stop-main" type="button" @click="selectPlanningPointFromList(stop)"><span class="stop-number">{{ stop.sequence }}</span><span><strong>{{ stop.title }}</strong><small>{{ stopDate(stop) }} · {{ stop.address || '地址待补充' }}</small><span class="planning-point-badge-row"><em class="planning-point-kind-badge" :style="{ '--kind-color': planningPointCategoryColor(stop.kind) }">{{ planningPointCategoryLabel(stop.kind) }}</em><em class="stop-location-badge" :class="{ missing: !pointFor(stop) }">{{ locationStatus(stop) }}</em><em v-if="stop.exclude_from_route" class="stop-route-excluded-badge">已排除路线</em></span></span><span class="row-chevron">›</span></button><div v-if="reorderMode && !readOnlyView" class="reorder-actions" @click.stop><button class="reorder-move-button" type="button" :disabled="actionLoading || !canMovePlanningPoint(stop, -1)" :aria-label="'上移规划点 ' + stop.title" @click="movePlanningPoint(stop, -1)"><IonIcon :icon="chevronUpOutline" /></button><button class="reorder-move-button" type="button" :disabled="actionLoading || !canMovePlanningPoint(stop, 1)" :aria-label="'下移规划点 ' + stop.title" @click="movePlanningPoint(stop, 1)"><IonIcon :icon="chevronDownOutline" /></button></div><button v-if="!readOnlyView" class="stop-delete-button" type="button" :aria-label="'删除规划点 ' + stop.title" @click.stop="deletePlanningPoint(stop)">×</button></article></div><p v-else class="muted compact-empty">当前日期还没有规划点。</p>
                   <button v-if="!readOnlyView" class="add-place-action" type="button" @click="openJourneySearch()"><IonIcon :icon="searchOutline" /> 搜索并添加规划点</button>
                 </div>
-                <div v-if="!readOnlyView" class="panel-data-actions"><button type="button" @click="openImportPicker">导入</button><button type="button" :disabled="actionLoading" @click="downloadTrip">导出 JSON</button><button type="button" :disabled="actionLoading" @click="openShareModal">{{ shareURL ? '分享管理' : '在线分享' }}</button><button type="button" @click="openTripPoster">生成海报</button></div><div v-else class="panel-data-actions"><button type="button" @click="openTripPoster">保存为图片</button></div>
+                <div v-if="ownerWorkspace" class="panel-data-actions"><button type="button" @click="openImportPicker">导入</button><button type="button" :disabled="actionLoading" @click="downloadTrip">导出 JSON</button><button type="button" :disabled="actionLoading" @click="openShareModal">{{ shareURL ? '分享管理' : '在线分享' }}</button><button type="button" @click="openTripPoster">生成海报</button></div><div v-else class="panel-data-actions"><button type="button" @click="openTripPoster">保存为图片</button></div>
               </div>
             </aside>
 
@@ -6018,11 +6172,11 @@ onUnmounted(() => {
             </aside>
 
             <header class="workspace-topbar">
-              <button v-if="!readOnlyView" class="workspace-back" type="button" aria-label="返回行程列表" @click="navigateBackToList"><span>‹</span><small>行程</small></button>
+              <button v-if="ownerWorkspace" class="workspace-back" type="button" aria-label="返回行程列表" @click="navigateBackToList"><span>‹</span><small>行程</small></button>
               <div class="workspace-title"><strong>{{ historyTitle }}</strong><span>{{ historyDateRange || '地图工作区' }}</span></div>
               <div class="workspace-top-actions">
                 <button class="workspace-tool-trigger" type="button" :aria-expanded="mobileMapToolsOpen" aria-label="打开地图选项" @click="toggleMobileMapTools"><IonIcon :icon="mapOutline" /><span>地图选项</span></button>
-                <button v-if="!readOnlyView" class="workspace-more" type="button" aria-label="打开更多操作" @click="openSettings"><span>⋯</span></button>
+                <button v-if="ownerWorkspace" class="workspace-more" type="button" aria-label="打开更多操作" @click="openSettings"><span>⋯</span></button>
               </div>
             </header>
 
@@ -6154,7 +6308,7 @@ onUnmounted(() => {
           </form>
         </section>
       </div>
-      <div v-if="historyOpen && !shareMode" class="modal-backdrop trip-history-backdrop" @click.self="historyOpen = false">
+      <div v-if="historyOpen && ownerWorkspace" class="modal-backdrop trip-history-backdrop" @click.self="historyOpen = false">
         <section class="modal-panel trip-history-panel" role="dialog" aria-modal="true" aria-labelledby="trip-history-title">
           <header class="trip-history-header"><div><p class="eyebrow">VERSION HISTORY</p><h2 id="trip-history-title">版本历史</h2><p>普通编辑不会自动记录，只有你主动保存的当前版本才会出现在这里。</p></div><button class="modal-close" type="button" aria-label="关闭版本历史" @click="historyOpen = false">×</button></header>
           <div class="trip-history-current"><div><span class="eyebrow">CURRENT VERSION</span><strong>{{ selected?.title || tripDocument?.title || '当前行程' }}</strong><small>{{ historyDateRange || '当前日期范围' }} · 工作版本 {{ selected?.revision || '—' }}</small></div><span class="history-current-tag">当前</span></div>
@@ -6175,7 +6329,7 @@ onUnmounted(() => {
         </section>
       </div>
       <div v-if="false && newTripOpen" class="modal-backdrop" @click.self="newTripOpen = false"><section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="new-trip-title"><button class="modal-close" aria-label="关闭" @click="newTripOpen = false">×</button><p class="eyebrow">NEW JOURNEY</p><h2 id="new-trip-title">新建旅行规划</h2><form @submit.prevent="createTrip"><label>规划名称<input v-model="newTitle" maxlength="120" required /></label><div class="form-grid"><label>开始日期<input v-model="newStartDate" type="date" required /></label><label>结束日期<input v-model="newEndDate" type="date" required /></label></div><label>时区<input v-model="newTimezone" placeholder="Asia/Shanghai" required /></label><label>总体说明（Markdown）<textarea v-model="newDescription" rows="5" placeholder="写下这次旅行的总体说明"></textarea></label><div class="modal-actions"><button type="button" @click="newTripOpen = false">取消</button><button class="primary" type="submit" :disabled="actionLoading">创建草稿</button></div></form></section></div>
-      <div v-if="settingsOpen" class="settings-backdrop" @click.self="settingsOpen = false">
+      <div v-if="settingsOpen && ownerWorkspace" class="settings-backdrop" @click.self="settingsOpen = false">
         <section class="settings-window" role="dialog" aria-modal="true" aria-labelledby="settings-title">
           <header class="settings-header">
             <div><p class="eyebrow">JOURNEYIN / SETTINGS</p><h2 id="settings-title">设置</h2><p>把服务连接、地图能力和外观偏好集中到一个设置工作区。</p></div>
@@ -6502,13 +6656,13 @@ onUnmounted(() => {
       <div v-if="false && settingsOpen" class="modal-backdrop" @click.self="settingsOpen = false"><section class="modal-panel settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title"><button class="modal-close" aria-label="关闭" @click="settingsOpen = false">×</button><p class="eyebrow">JOURNEYIN SETTINGS</p><h2 id="settings-title">设置</h2><p class="settings-intro">当前主题：{{ themeLabel }}。Key 配置保存到 SQLite，服务端 Key 不会回显。</p><section class="settings-section"><h3>外观</h3><p class="settings-label">主题：{{ themeLabel }}</p><div class="theme-options"><button type="button" :class="{ selected: theme === 'system' }" @click="setTheme('system')">跟随系统</button><button type="button" :class="{ selected: theme === 'light' }" @click="setTheme('light')">浅色</button><button type="button" :class="{ selected: theme === 'dark' }" @click="setTheme('dark')">深色</button></div></section><section class="settings-section"><h3>服务端连接</h3><label>当前服务地址<input v-model="serverURL" readonly /></label><label>兼容 REST API Token<input v-model="authTokenInput" type="password" placeholder="仅用于兼容旧客户端，可留空" autocomplete="off" /></label><div class="modal-actions"><button type="button" @click="logout">清除令牌</button><button type="button" class="primary" @click="saveAuth">保存令牌</button></div><p v-if="settingsMessage" class="settings-message">{{ settingsMessage }}</p></section><section class="settings-section"><h3>默认地图</h3><label>默认地图 Provider<select v-model="defaultMapProvider"><option value="baidu">百度地图</option><option value="amap">高德地图</option></select></label><p class="key-help">用于没有单独地图偏好的新行程和查看页面；单个行程已保存的地图 Provider 不会被覆盖。地图工具仍可临时切换 Provider。</p><div class="modal-actions"><button type="button" class="primary" :disabled="settingsSaving" @click="saveDefaultMapProvider">{{ settingsSaving ? '保存中…' : '保存默认地图' }}</button></div></section><section class="settings-section"><h3>百度地图</h3><p class="key-status">浏览器端 Key：<strong>{{ baiduKey ? '已配置' : '未配置' }}</strong> · 服务端 Key：<strong>{{ settingsData?.map?.baidu?.server_key_configured ? '已配置' : '未配置' }}</strong></p><label>百度浏览器端 Key<input v-model="baiduBrowserKeyInput" type="password" :placeholder="settingsData?.map?.baidu?.browser_key_configured ? '已配置，输入新 Key 可替换' : '用于 JSAPI 4.0/BMap 网页地图'" autocomplete="off" /></label><label>百度服务端 Key<input v-model="baiduServerKeyInput" type="password" placeholder="已配置时输入新 Key 可替换；留空保持当前值" autocomplete="off" /></label><p class="key-help">浏览器端 Key 用于地图底图；服务端 Key 用于 POI 搜索、地理编码、路线和天气。请确认当前访问 host 在百度控制台白名单内。</p><a href="https://lbsyun.baidu.com/apiconsole/key" target="_blank" rel="noopener noreferrer">申请/管理百度地图 Key ↗</a></section><section class="settings-section"><h3>高德地图</h3><p class="key-status">JS Key：<strong>{{ settingsData?.map?.amap?.js_key_configured ? '已配置' : '未配置' }}</strong> · 服务端 Key：<strong>{{ settingsData?.map?.amap?.server_key_configured ? '已配置' : '未配置' }}</strong> · 安全密钥：<strong>{{ settingsData?.map?.amap?.security_js_code_configured ? '已配置' : '未配置' }}</strong></p><label>高德 JS Key<input v-model="amapJSKeyInput" type="password" placeholder="用于高德 Web 地图" autocomplete="off" /></label><label>高德服务端 Key<input v-model="amapServerKeyInput" type="password" placeholder="已配置时输入新 Key 可替换；留空保持当前值" autocomplete="off" /></label><label>高德 JS 安全密钥<input v-model="amapSecurityJSCodeInput" type="password" placeholder="用于 JSAPI 安全代理；已配置时输入新密钥可替换" autocomplete="off" /></label><a href="https://console.amap.com/dev/key/app" target="_blank" rel="noopener noreferrer">申请/管理高德 Key ↗</a><p class="key-help">保存后，规划点会优先使用已经保存的坐标，不会因为重新绘制地图重复查询。</p><div class="modal-actions"><button type="button" class="primary" :disabled="settingsSaving" @click="saveMapKeys">{{ settingsSaving ? '保存中…' : '保存地图 Key 到数据库' }}</button></div></section><section class="settings-section"><h3>地点检索</h3><label>优先 Provider<select v-model="poiProviderPriority"><option value="amap">高德优先</option><option value="baidu">百度优先</option></select></label><p class="key-help">当前策略会先查询本地地点目录；未命中后使用所选 Provider，Provider 不可用时自动尝试另一家。新搜索结果只保留 7 天。</p><p class="key-status">本地地点记录：<strong>{{ localDirectoryCount }}</strong> 条</p><div class="modal-actions"><button type="button" @click="savePOIPreferences">保存检索优先级</button><button type="button" @click="clearLocalDirectory">清除本地记录</button></div></section><section class="settings-section"><h3>MCP</h3><p>MCP 地址：{{ capabilities?.mcp?.http_endpoint || '/mcp' }}</p><p class="key-help">Docker 远程部署时设置 JOURNEYIN_MCP_TOKEN；本地 localhost 调试可不设置。</p></section></section></div>
       <div v-if="authOpen" class="modal-backdrop" @click.self="authOpen = false"><section class="modal-panel auth-panel" role="dialog" aria-modal="true" aria-labelledby="auth-title"><IonIcon class="auth-icon" :icon="logInOutline" /><h2 id="auth-title">登录 JourneyIn</h2><p>请输入 Docker 服务配置的账号和密码。登录成功后会在当前浏览器保存一个 HttpOnly 会话。</p><form class="auth-form" @submit.prevent="login"><label>账号<input v-model="loginUsername" type="text" autofocus autocomplete="username" /></label><label>密码<input v-model="loginPassword" type="password" autocomplete="current-password" /></label><p v-if="loginMessage" class="auth-error">{{ loginMessage }}</p><div class="modal-actions"><button type="button" @click="authOpen = false">稍后</button><button type="submit" class="primary" :disabled="loginLoading">{{ loginLoading ? '登录中…' : '登录' }}</button></div></form></section></div>
       <!-- 在线分享设置弹窗 -->
-      <div v-if="shareModalOpen && !readOnlyView" class="modal-backdrop share-modal-backdrop" @click.self="shareModalOpen = false">
+      <div v-if="shareModalOpen && ownerWorkspace" class="modal-backdrop share-modal-backdrop" @click.self="shareModalOpen = false">
         <section class="modal-panel share-modal-panel" role="dialog" aria-modal="true" aria-labelledby="share-modal-title">
           <header class="share-modal-header">
             <div>
               <p class="eyebrow">SHARE JOURNEY</p>
-              <h2 id="share-modal-title">{{ shareURL ? '管理在线分享' : '在线分享行程' }}</h2>
-              <p class="share-modal-subtitle">生成公开只读链接，任何持有链接的人均可查看当前行程快照与地图路线。</p>
+              <h2 id="share-modal-title">{{ shareKind === 'collaboration' ? '共创分享管理' : (shareURL ? '管理在线分享' : '在线分享行程') }}</h2>
+              <p class="share-modal-subtitle">只读分享固定当前快照；共创链接允许持有者在有效期内编辑当前行程。</p>
             </div>
             <button class="modal-close" type="button" aria-label="关闭分享窗口" @click="shareModalOpen = false">×</button>
           </header>
@@ -6523,8 +6677,13 @@ onUnmounted(() => {
               </span>
             </div>
 
+            <div class="share-kind-toggle" role="tablist" aria-label="分享类型">
+              <button type="button" role="tab" :aria-selected="shareKind === 'readonly'" :class="{ selected: shareKind === 'readonly' }" @click="shareKind = 'readonly'">只读快照</button>
+              <button type="button" role="tab" :aria-selected="shareKind === 'collaboration'" :class="{ selected: shareKind === 'collaboration' }" @click="shareKind = 'collaboration'; selected && loadCollaborationShares(selected.id)">共创编辑</button>
+            </div>
+
             <!-- 当前已分享状态卡片 -->
-            <div v-if="shareURL" class="share-active-box">
+            <div v-if="shareKind === 'readonly' && shareURL" class="share-active-box">
               <div class="share-active-head">
                 <span class="share-status-pill">
                   <span class="share-status-dot"></span>
@@ -6597,7 +6756,7 @@ onUnmounted(() => {
             </div>
 
             <!-- 未分享时：选择有效期并创建 -->
-            <div v-else class="share-create-box">
+            <div v-else-if="shareKind === 'readonly'" class="share-create-box">
               <label class="share-section-title">设置分享有效期限</label>
               <div class="share-expiry-grid">
                 <button type="button" class="share-expiry-card" :class="{ selected: shareExpiryType === '1d' }" @click="shareExpiryType = '1d'">
@@ -6643,6 +6802,43 @@ onUnmounted(() => {
                 </button>
               </div>
             </div>
+            <section v-else class="share-active-box collaboration-share-box">
+              <div class="share-active-head">
+                <span class="share-status-pill"><span class="share-status-dot"></span>共创编辑链接</span>
+                <span class="share-expiry-pill">默认 7 天 · 最长 90 天</span>
+              </div>
+              <div class="share-privacy-note">
+                <p><strong>编辑权限提示：</strong>持有共创链接的人都可以编辑此行程、重新规划路线并刷新天气。共用链接无法区分具体编辑者，请只发送给可信的人。普通只读链接仍保持只读快照。</p>
+                <p><strong>链接保管：</strong>出于安全考虑，链接原文只暂存在当前共创管理页；离开此页后会清除，不会保存到浏览器。请创建后立即复制并妥善保存，可随时撤销。</p>
+              </div>
+              <label class="share-section-title">设置共创链接有效期</label>
+              <div class="share-expiry-grid">
+                <button type="button" class="share-expiry-card" :class="{ selected: collaborationExpiryDays === 1 }" @click="collaborationExpiryDays = 1"><strong>1 天</strong><small>短期协作</small></button>
+                <button type="button" class="share-expiry-card" :class="{ selected: collaborationExpiryDays === 7 }" @click="collaborationExpiryDays = 7"><strong>7 天</strong><small>常用推荐</small></button>
+                <button type="button" class="share-expiry-card" :class="{ selected: collaborationExpiryDays === 30 }" @click="collaborationExpiryDays = 30"><strong>30 天</strong><small>月度规划</small></button>
+                <button type="button" class="share-expiry-card" :class="{ selected: collaborationExpiryDays === 90 }" @click="collaborationExpiryDays = 90"><strong>90 天</strong><small>最长有效期</small></button>
+              </div>
+              <div class="share-reconfig-actions">
+                <button type="button" class="share-reconfig-submit-btn" :disabled="collaborationShareCreating" @click="createCollaborationShare">{{ collaborationShareCreating ? '正在创建…' : '创建共创链接' }}</button>
+              </div>
+              <p v-if="collaborationShareMessage" class="share-copy-inline-hint" role="status">{{ collaborationShareMessage }}</p>
+              <div v-if="collaborationSharingLoading" class="share-copy-inline-hint" role="status">正在读取共创链接…</div>
+              <div v-else-if="collaborationShares.length" class="collaboration-share-list">
+                <article v-for="item in collaborationShares" :key="item.id" class="share-active-box collaboration-share-item">
+                  <div class="share-active-head">
+                    <span class="share-status-pill"><span class="share-status-dot" :class="{ 'status-revoked': item.status !== 'active' }"></span>{{ item.status === 'active' ? '共创中' : item.status === 'expired' ? '已过期' : '已撤销' }}</span>
+                    <span class="share-expiry-pill">有效期至 {{ formatDateTime(item.expires_at) }}</span>
+                  </div>
+                  <div v-if="collaborationShareURLs[item.id] && item.status === 'active'" class="share-url-row">
+                    <small class="share-copy-inline-hint">链接仅暂存在当前共创管理页；离开此页后将无法再次复制。</small>
+                    <button type="button" class="share-copy-btn" :disabled="collaborationShareCopyingID === item.id" @click="copyCollaborationShareURL(item.id)">{{ collaborationShareCopyingID === item.id ? '复制中…' : '复制链接' }}</button>
+                  </div>
+                  <small v-else-if="item.status === 'active'" class="share-copy-inline-hint">此页面未保留链接原文；若无法从已发送的位置找回，请撤销后重新创建。</small>
+                  <button v-if="item.status === 'active'" type="button" class="share-danger-btn" :disabled="actionLoading" @click="revokeCollaborationShare(item)">撤销共创链接</button>
+                </article>
+              </div>
+              <p v-else-if="!collaborationSharingLoading" class="muted compact-empty">当前没有共创链接。</p>
+            </section>
           </div>
         </section>
       </div>
@@ -6744,6 +6940,7 @@ onUnmounted(() => {
         :is-open="posterModalOpen"
         :trip="tripDocument"
         :share-url="shareURL"
+        :share-link-visible="ownerWorkspace || shareMode"
         :current-theme="effectiveTheme"
         @close="posterModalOpen = false"
         @create-share="createShare"

@@ -18,9 +18,11 @@ const props = withDefaults(defineProps<{
   isOpen: boolean
   trip: TripDoc | null
   shareUrl?: string
+  shareLinkVisible?: boolean
   currentTheme?: 'light' | 'dark'
 }>(), {
   shareUrl: '',
+  shareLinkVisible: true,
   currentTheme: 'light',
 })
 
@@ -54,6 +56,7 @@ watch(() => props.isOpen, (open) => {
 })
 
 const fallbackShareUrl = computed(() => {
+  if (!props.shareLinkVisible) return ''
   return props.shareUrl || window.location.href
 })
 
@@ -478,10 +481,10 @@ function formatWeatherBadge(stop: Stop): string {
                 <BrandLogo :size="20" variant="mark" shape="squircle" class="poster-footer-logo" />
                 <span>JourneyIn 线路规划</span>
               </div>
-              <p class="footer-slogan">在地图上规划每一段旅程 · 扫码查看实时交互地图与导航</p>
-              <span class="footer-copy">Made with JourneyIn · 只读快照分享</span>
+              <p class="footer-slogan">{{ shareLinkVisible ? "在地图上规划每一段旅程 · 扫码查看实时交互地图与导航" : "共创行程海报 · 持链接者可编辑" }}</p>
+              <span class="footer-copy">{{ shareLinkVisible ? "Made with JourneyIn · 只读快照分享" : "Made with JourneyIn · 共创行程海报" }}</span>
             </div>
-            <div class="footer-qr">
+            <div v-if="shareLinkVisible" class="footer-qr">
               <QrcodeVue
                 :value="fallbackShareUrl"
                 :size="72"
@@ -503,6 +506,7 @@ function formatWeatherBadge(stop: Stop): string {
       <footer class="poster-modal-actions">
         <button type="button" class="secondary-action" @click="emit('close')">关闭</button>
         <button
+          v-if="shareLinkVisible"
           type="button"
           class="secondary-action"
           :disabled="isGenerating"

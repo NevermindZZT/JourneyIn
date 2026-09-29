@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"journeyin/internal/application"
+	"journeyin/internal/collaboration"
 	"journeyin/internal/domain"
 	journeymaps "journeyin/internal/maps"
 	"journeyin/internal/photos"
@@ -22,26 +23,27 @@ import (
 )
 
 type Server struct {
-	trips              *application.TripService
-	web                fs.FS
-	schema             fs.FS
-	version            string
-	logger             *slog.Logger
-	mapRegistry        *journeymaps.Registry
-	mapService         *application.MapService
-	browserMapKey      string
-	amapBrowserKey     string
-	amapSecurityCode   string
-	defaultMapProvider string
-	defaultProviderMu  sync.RWMutex
-	shareService       *journeyshare.Service
-	publicURL          string
-	syncStore          *store.Store
-	settingsStore      *store.Store
-	auth               *Authenticator
-	photosService      *photos.Service
-	weatherService     *weather.Service
-	mcpToken           string
+	trips                *application.TripService
+	web                  fs.FS
+	schema               fs.FS
+	version              string
+	logger               *slog.Logger
+	mapRegistry          *journeymaps.Registry
+	mapService           *application.MapService
+	browserMapKey        string
+	amapBrowserKey       string
+	amapSecurityCode     string
+	defaultMapProvider   string
+	defaultProviderMu    sync.RWMutex
+	shareService         *journeyshare.Service
+	collaborationService *collaboration.Service
+	publicURL            string
+	syncStore            *store.Store
+	settingsStore        *store.Store
+	auth                 *Authenticator
+	photosService        *photos.Service
+	weatherService       *weather.Service
+	mcpToken             string
 }
 
 func NewServer(trips *application.TripService, web, schema fs.FS, version string, logger *slog.Logger) *Server {
@@ -75,6 +77,9 @@ func (s *Server) SetMapService(service *application.MapService) { s.mapService =
 func (s *Server) SetShareService(service *journeyshare.Service, publicURL string) {
 	s.shareService = service
 	s.publicURL = strings.TrimRight(publicURL, "/")
+}
+func (s *Server) SetCollaborationService(service *collaboration.Service) {
+	s.collaborationService = service
 }
 
 func (s *Server) SetSyncStore(syncStore *store.Store)         { s.syncStore = syncStore }
@@ -130,6 +135,26 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/shares", s.createShare)
 	mux.HandleFunc("POST /api/v1/shares/{id}/revoke", s.revokeShare)
 	mux.HandleFunc("GET /s/{token}", s.publicShare)
+	mux.HandleFunc("POST /api/v1/trips/{id}/collaboration-shares", s.createCollaborationShare)
+	mux.HandleFunc("GET /api/v1/trips/{id}/collaboration-shares", s.listCollaborationShares)
+	mux.HandleFunc("POST /api/v1/trips/{id}/collaboration-shares/{shareID}/revoke", s.revokeCollaborationShare)
+	mux.HandleFunc("GET /c", s.collaborationPage)
+	mux.Handle("GET /api/v1/collaboration/current", s.withCollaborationAuth(false, http.HandlerFunc(s.collaborationCurrent)))
+	mux.Handle("GET /api/v1/collaboration/trips/{id}", s.withCollaborationAuth(true, http.HandlerFunc(s.getTrip)))
+	mux.Handle("PATCH /api/v1/collaboration/trips/{id}", s.withCollaborationAuth(true, http.HandlerFunc(s.updateTripDetails)))
+	mux.Handle("PUT /api/v1/collaboration/trips/{id}", s.withCollaborationAuth(true, http.HandlerFunc(s.replaceTrip)))
+	mux.Handle("POST /api/v1/collaboration/trips/{id}/days/{dayID}/stops", s.withCollaborationAuth(true, http.HandlerFunc(s.addStop)))
+	mux.Handle("PATCH /api/v1/collaboration/trips/{id}/days/{dayID}/stops/{stopID}", s.withCollaborationAuth(true, http.HandlerFunc(s.updatePlanningPoint)))
+	mux.Handle("POST /api/v1/collaboration/trips/{id}/days/{dayID}/stops/{stopID}/move", s.withCollaborationAuth(true, http.HandlerFunc(s.moveStop)))
+	mux.Handle("DELETE /api/v1/collaboration/trips/{id}/days/{dayID}/stops/{stopID}", s.withCollaborationAuth(true, http.HandlerFunc(s.deleteStop)))
+	mux.Handle("POST /api/v1/collaboration/trips/{id}/days/{dayID}/stops/{stopID}/children", s.withCollaborationAuth(true, http.HandlerFunc(s.addSubStop)))
+	mux.Handle("POST /api/v1/collaboration/trips/{id}/weather/refresh", s.withCollaborationAuth(true, http.HandlerFunc(s.refreshTripWeatherBatch)))
+	mux.Handle("POST /api/v1/collaboration/trips/{id}/days/{dayID}/stops/{stopID}/weather", s.withCollaborationAuth(true, http.HandlerFunc(s.refreshWeather)))
+	mux.Handle("POST /api/v1/collaboration/trips/{id}/plan", s.withCollaborationAuth(true, http.HandlerFunc(s.planTrip)))
+	mux.Handle("POST /api/v1/collaboration/trips/{id}/routes/refresh", s.withCollaborationAuth(true, http.HandlerFunc(s.planTrip)))
+	mux.Handle("POST /api/v1/collaboration/maps/pois/search", s.withCollaborationAuth(false, http.HandlerFunc(s.searchPOI)))
+	mux.Handle("POST /api/v1/collaboration/maps/reverse-geocode", s.withCollaborationAuth(false, http.HandlerFunc(s.reverseGeocode)))
+	mux.Handle("/api/v1/collaboration/", http.NotFoundHandler())
 	mux.HandleFunc("GET /api/v1/sync/pull", s.syncPull)
 	mux.HandleFunc("POST /api/v1/sync/push", s.syncPush)
 	mux.HandleFunc("GET /api/v1/settings", s.getSettings)

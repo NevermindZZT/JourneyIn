@@ -16,6 +16,7 @@ import (
 
 	journeyin "journeyin"
 	"journeyin/internal/application"
+	"journeyin/internal/collaboration"
 	journeymaps "journeyin/internal/maps"
 	"journeyin/internal/photos"
 	journeyshare "journeyin/internal/share"
@@ -96,7 +97,9 @@ func main() {
 	api.SetAMapSecurityJSCode(amapSecurityCode)
 	api.SetMapService(mapService)
 	api.SetSettingsStore(database)
-	api.SetShareService(journeyshare.NewService(journeyshare.NewSQLiteStore(database)), envOr("JOURNEYIN_PUBLIC_URL", "http://"+listen))
+	publicURL := envOr("JOURNEYIN_PUBLIC_URL", "http://"+listen)
+	api.SetShareService(journeyshare.NewService(journeyshare.NewSQLiteStore(database)), publicURL)
+	api.SetCollaborationService(collaboration.NewService(collaboration.NewSQLiteStore(database)))
 	api.SetSyncStore(database)
 
 	photosDir := settingValue(ctx, database, "photos.root_dir", os.Getenv("JOURNEYIN_PHOTOS_DIR"))
