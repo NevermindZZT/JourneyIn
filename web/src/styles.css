@@ -817,6 +817,10 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .redesign-stop-main strong, .redesign-stop-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .redesign-stop-main strong { font-size: 12px; }
 .redesign-stop-main small { color: var(--muted); font-size: 10px; }
+.redesign-stop-main .stop-weather-preview { display: flex; min-width: 0; align-items: center; gap: 4px; color: var(--p); font-weight: 800; }
+.redesign-stop-main .stop-weather-preview > span:first-child { flex: 0 0 auto; }
+.redesign-stop-main .stop-weather-text { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.redesign-stop-main .stop-description-preview { color: color-mix(in srgb, var(--muted) 88%, var(--ink)); }
 .stop-number { display: grid; flex: 0 0 29px; width: 29px; height: 29px; place-items: center; border: 3px solid var(--panel); border-radius: 50%; color: var(--md-on-primary); background: var(--p); box-shadow: 0 0 0 1px color-mix(in srgb, var(--p) 36%, var(--line)); font-size: 10px; font-weight: 900; }
 .redesign-stop-row.selected .stop-number { background: var(--accent); }
 .row-chevron { flex: 0 0 auto; color: var(--muted); font-size: 20px; }

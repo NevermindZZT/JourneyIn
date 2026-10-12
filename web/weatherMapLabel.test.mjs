@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { formatCurrentWeatherText, formatDayWeatherBadge, iconForWeatherLabel, visibleWeatherLabelIDs } from './src/weatherMapLabel.ts'
 import { isPastTripDate } from './src/tripDate.mjs'
+import { shortMarkdownPreview } from './src/planningPointPreview.ts'
 
 const day = '2026-10-03'
 const now = Date.parse('2026-10-02T00:00:00Z')
@@ -9,6 +10,14 @@ const now = Date.parse('2026-10-02T00:00:00Z')
 test('formats forecast condition and daily temperature range', () => {
   assert.equal(formatDayWeatherBadge({ available: true, local_date: day, condition: '晴', temp_min_c: 4, temp_max_c: 17 }, day, now), '晴 · 4～17°C')
   assert.equal(formatDayWeatherBadge({ available: true, local_date: day, temperature_c: -2 }, day, now), '-2°C')
+})
+
+test('planning description preview strips Markdown and truncates by Unicode characters', () => {
+  assert.equal(shortMarkdownPreview('# 简介\n- [提前预约](https://example.test) 并带好 **外套**'), '简介 提前预约 并带好 外套')
+  const preview = shortMarkdownPreview('天气'.repeat(40), 12)
+  assert.equal([...preview].length, 12)
+  assert.equal(preview.endsWith('…'), true)
+  assert.equal(shortMarkdownPreview('   '), '')
 })
 
 test('past itinerary dates show only current weather using the trip timezone', () => {
