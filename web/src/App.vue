@@ -15,6 +15,7 @@ import TripPosterModal from './TripPosterModal.vue'
 import BrandLogo from './BrandLogo.vue'
 import MapLoadingState from './MapLoadingState.vue'
 import { formatDayWeatherBadge, iconForWeatherLabel, visibleWeatherLabelIDs } from './weatherMapLabel'
+import { isPastTripDate } from './tripDate.mjs'
 import { collaborationAPIPath, collaborationTokenFromHash } from './collaborationShare.mjs'
 
 type Theme = 'system' | 'light' | 'dark'
@@ -2689,7 +2690,7 @@ function dayMapWeatherLabel(stop: Stop | SubStop, carryOver = false): string {
   if (selectedDay.value === 'all' || carryOver || !tripDocument.value) return ''
   const day = tripDocument.value.days[selectedDay.value - 1]
   if (!day || dayForStop(stop)?.id !== day.id) return ''
-  return formatDayWeatherBadge(stop.weather, day.date)
+  return formatDayWeatherBadge(stop.weather, day.date, Date.now(), tripDocument.value.timezone)
 }
 function weatherOverlayHTML(text: string): string {
   return '<span class="journey-map-weather-badge"><span class="journey-map-weather-icon" aria-hidden="true">' + iconForWeatherLabel(text) + '</span>' + escapeHTML(text) + '</span>'
@@ -5223,12 +5224,20 @@ async function openNavigation(provider: 'baidu' | 'amap') {
     error.value = cause instanceof Error ? cause.message : '导航失败'
   }
 }
+function isPastWeatherDay(stop: Stop | SubStop) {
+  const day = dayForStop(stop)
+  const timezone = tripDocument.value?.timezone
+  return Boolean(day && timezone && isPastTripDate(day.date, timezone))
+}
 function weatherDetails(stop: Stop | SubStop) {
+  const currentOnly = isPastWeatherDay(stop)
   const weather = stop.weather || {}
-  if (!weather || Object.keys(weather).length === 0) return null
+  const provider = weather.provider === 'openmeteo' ? 'Open-Meteo' : weather.provider === 'qweather' ? '和风天气' : weather.provider === 'caiyun' ? '彩云天气' : weather.provider === 'amap' ? '高德天气' : weather.provider === 'baidu' ? '百度天气' : ''
+  if (Object.keys(weather).length === 0) {
+    return currentOnly ? { condition: '', rangeText: '', liveText: '', metricsText: '', provider, unavailable: true, currentOnly: true } : null
+  }
   if (weather.available === false) {
-    const provider = weather.provider === 'qweather' ? '和风天气' : weather.provider === 'caiyun' ? '彩云天气' : weather.provider === 'amap' ? '高德天气' : weather.provider === 'baidu' ? '百度天气' : weather.provider === 'openmeteo' ? 'Open-Meteo' : ''
-    return { condition: '暂无可用预报', rangeText: '', liveText: '', metricsText: '', provider, unavailable: true }
+    return { condition: currentOnly ? '' : '暂无可用预报', rangeText: '', liveText: '', metricsText: '', provider, unavailable: true, currentOnly }
   }
   const condition = String(weather.condition || weather.text_day || weather.text || '')
   const tempMin = weather.temp_min_c ?? weather.low
@@ -5254,6 +5263,7 @@ function weatherDetails(stop: Stop | SubStop) {
       liveText = Math.round(Number(currentTemp)) + '°C'
     }
   }
+  if (currentOnly) return { condition: '', rangeText: '', liveText, metricsText: '', provider, unavailable: false, currentOnly: true }
 
   // 更多气象指标：湿度、风向、风力、气压
   const metrics: string[] = []
@@ -5273,18 +5283,12 @@ function weatherDetails(stop: Stop | SubStop) {
     metrics.push(Math.round(Number(weather.pressure_hpa)) + ' hPa')
   }
 
-  return {
-    condition: condition || '天气预报',
-    rangeText,
-    liveText,
-    metricsText: metrics.join(' · '),
-    provider: weather.provider === 'openmeteo' ? 'Open-Meteo' : weather.provider === 'qweather' ? '和风天气' : weather.provider === 'caiyun' ? '彩云天气' : weather.provider === 'amap' ? '高德天气' : weather.provider === 'baidu' ? '百度天气' : '',
-    unavailable: false,
-  }
+  return { condition: condition || '天气预报', rangeText, liveText, metricsText: metrics.join(' · '), provider, unavailable: false, currentOnly: false }
 }
 function weatherText(stop: Stop | SubStop) {
   const details = weatherDetails(stop)
   if (!details) return '暂无天气快照'
+  if (details.currentOnly) return details.liveText ? '当前 ' + details.liveText : '暂无当前天气'
   const parts: string[] = []
   if (details.liveText) parts.push('当前 ' + details.liveText)
   if (details.condition) parts.push(String(details.condition))
@@ -5296,7 +5300,7 @@ async function refreshTripWeather() {
   if (readOnlyView.value || !selected.value || !tripDocument.value || weatherBatchLoading.value || weatherLoading.value) return
   const tripID = selected.value.id
   weatherBatchLoading.value = true
-  weatherBatchMessage.value = '准备刷新整趟行程天气…'
+  weatherBatchMessage.value = '准备刷新行程天气（已过日期查询当前天气）…'
   error.value = ''
   let offset = 0, updated = 0, skipped = 0, failed = 0, total = 0
   const failures: string[] = []
@@ -5313,7 +5317,7 @@ async function refreshTripWeather() {
       if (!payload.progress || (!payload.document && !payload.delta) || typeof payload.revision !== 'number') throw new Error('天气批次响应不完整，请重新加载行程')
       applyTripPayload(payload)
       updated += payload.progress.updated; skipped += payload.progress.skipped; failed += payload.progress.failed
-      for (const item of payload.progress.items) if (item.status !== 'updated' && failures.length < 5) failures.push(item.date + ' ' + item.title + '：' + (item.reason || '不可用'))
+      for (const item of payload.progress.items) if (item.status === 'failed' && failures.length < 5) failures.push(item.date + ' ' + item.title + '：' + (item.reason || '不可用'))
       total = payload.progress.total
       if (payload.progress.next_offset <= offset && offset < total) throw new Error('天气刷新未前进，请稍后重试')
       offset = payload.progress.next_offset
@@ -6152,10 +6156,13 @@ onUnmounted(() => {
                   <IonIcon :icon="sunnyOutline" />
                   <span class="weather-text-wrap">
                     <strong class="weather-title">
-                      <span v-if="weatherDetails(selectedTarget || selectedStop)?.liveText" class="weather-live-chip">当前 {{ weatherDetails(selectedTarget || selectedStop)?.liveText }}</span>
-                      <span class="weather-forecast-str">{{ weatherDetails(selectedTarget || selectedStop) ? (weatherDetails(selectedTarget || selectedStop)?.condition + (weatherDetails(selectedTarget || selectedStop)?.rangeText ? ' · ' + weatherDetails(selectedTarget || selectedStop)?.rangeText : '')) : '暂无天气快照' }}</span>
+                      <span v-if="weatherDetails(selectedTarget || selectedStop)?.currentOnly" class="weather-live-chip">{{ weatherDetails(selectedTarget || selectedStop)?.liveText ? '当前 ' + weatherDetails(selectedTarget || selectedStop)?.liveText : '暂无当前天气' }}</span>
+                      <template v-else>
+                        <span v-if="weatherDetails(selectedTarget || selectedStop)?.liveText" class="weather-live-chip">当前 {{ weatherDetails(selectedTarget || selectedStop)?.liveText }}</span>
+                        <span class="weather-forecast-str">{{ weatherDetails(selectedTarget || selectedStop) ? (weatherDetails(selectedTarget || selectedStop)?.condition + (weatherDetails(selectedTarget || selectedStop)?.rangeText ? ' · ' + weatherDetails(selectedTarget || selectedStop)?.rangeText : '')) : '暂无天气快照' }}</span>
+                      </template>
                     </strong>
-                    <span v-if="weatherDetails(selectedTarget || selectedStop)?.metricsText" class="weather-metrics-line">
+                    <span v-if="!weatherDetails(selectedTarget || selectedStop)?.currentOnly && weatherDetails(selectedTarget || selectedStop)?.metricsText" class="weather-metrics-line">
                       {{ weatherDetails(selectedTarget || selectedStop)?.metricsText }}
                     </span>
                     <small v-if="weatherUpdatedAt(selectedTarget || selectedStop)">

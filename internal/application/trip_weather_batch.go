@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"journeyin/internal/domain"
 	journeymaps "journeyin/internal/maps"
@@ -41,9 +42,19 @@ type weatherBatchTarget struct {
 	childIndex int // -1 means main stop
 }
 
+// tripLocalToday returns the current calendar date in the trip's IANA timezone.
+func tripLocalToday(now time.Time, timezone string) (string, error) {
+	location, err := time.LoadLocation(timezone)
+	if err != nil {
+		return "", fmt.Errorf("load trip timezone: %w", err)
+	}
+	return now.In(location).Format("2006-01-02"), nil
+}
+
 // RefreshTripWeatherBatch refreshes up to WeatherBatchSize planning points,
-// including child points, with one optimistic-revision write. Failures are
-// reported per point and never replace an existing usable snapshot.
+// including child points, with one optimistic-revision write. Past itinerary
+// days query current weather instead of requesting unavailable historical
+// forecasts. Failures are reported per point and never replace existing snapshots.
 func (s *TripService) RefreshTripWeatherBatch(ctx context.Context, tripID string, expectedRevision, offset int, input WeatherInput, source string) (store.TripRecord, WeatherBatchResult, error) {
 	result := WeatherBatchResult{Offset: offset, Items: make([]WeatherBatchItem, 0, WeatherBatchSize)}
 	if offset < 0 {
@@ -61,6 +72,10 @@ func (s *TripService) RefreshTripWeatherBatch(ctx context.Context, tripID string
 	}
 	var trip domain.Trip
 	if err := json.Unmarshal(record.Document, &trip); err != nil {
+		return store.TripRecord{}, result, err
+	}
+	today, err := tripLocalToday(time.Now(), trip.Timezone)
+	if err != nil {
 		return store.TripRecord{}, result, err
 	}
 	targets := make([]weatherBatchTarget, 0)
@@ -97,6 +112,11 @@ func (s *TripService) RefreshTripWeatherBatch(ctx context.Context, tripID string
 			id, title, location, snapshot = point.ID, point.Title, point.Location, &point.Weather
 		}
 		item := WeatherBatchItem{DayID: day.ID, Date: day.Date, StopID: id, Title: title}
+		weatherDate := day.Date
+		if day.Date < today {
+			weatherDate = today
+			item.Reason = "行程日期已过，已改查当前天气"
+		}
 		position, err := parseSavedLocation(location)
 		if err != nil {
 			item.Status, item.Reason = "skipped", "缺少可靠坐标"
@@ -107,7 +127,7 @@ func (s *TripService) RefreshTripWeatherBatch(ctx context.Context, tripID string
 		var weatherJSON []byte
 		if s.weatherService != nil {
 			requested := weather.ParseProviderID(string(input.Provider))
-			forecast, weatherErr := s.weatherService.WeatherWithCache(ctx, requested, weather.WeatherRequest{Location: weather.GeoPoint{Lat: position.Point.Lat, Lng: position.Point.Lng, CRS: weather.CRS(position.Point.CRS)}, LocalDate: day.Date, Timezone: trip.Timezone, CityCode: position.CityCode, AdCode: position.AdCode}, false)
+			forecast, weatherErr := s.weatherService.WeatherWithCache(ctx, requested, weather.WeatherRequest{Location: weather.GeoPoint{Lat: position.Point.Lat, Lng: position.Point.Lng, CRS: weather.CRS(position.Point.CRS)}, LocalDate: weatherDate, Timezone: trip.Timezone, CityCode: position.CityCode, AdCode: position.AdCode}, false)
 			if weatherErr == nil && forecast.Available {
 				weatherJSON, err = json.Marshal(forecast)
 			} else {
@@ -121,7 +141,7 @@ func (s *TripService) RefreshTripWeatherBatch(ctx context.Context, tripID string
 			if provider == "" {
 				provider = s.DefaultMapProvider()
 			}
-			forecast, weatherErr := s.mapService.WeatherWithCache(ctx, provider, journeymaps.WeatherRequest{Location: position.Point, LocalDate: day.Date, Timezone: trip.Timezone, CityCode: position.CityCode, AdCode: position.AdCode}, false)
+			forecast, weatherErr := s.mapService.WeatherWithCache(ctx, provider, journeymaps.WeatherRequest{Location: position.Point, LocalDate: weatherDate, Timezone: trip.Timezone, CityCode: position.CityCode, AdCode: position.AdCode}, false)
 			if weatherErr == nil && forecast.Available {
 				weatherJSON, err = json.Marshal(forecast)
 			} else {

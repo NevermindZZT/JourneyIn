@@ -1,21 +1,33 @@
-export function formatDayWeatherBadge(weather: Record<string, unknown> | undefined, dayDate: string, now = Date.now()): string {
+import { isPastTripDate } from './tripDate.mjs'
+
+function weatherNumber(value: unknown): number | null {
+  if (typeof value !== 'number' && (typeof value !== 'string' || !value.trim())) return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? Math.round(parsed) : null
+}
+
+export function formatCurrentWeatherText(weather: Record<string, unknown> | undefined): string {
+  if (!weather || weather.available === false) return ''
+  const condition = typeof weather.current_condition === 'string' ? weather.current_condition.trim() : ''
+  const temperature = weatherNumber(weather.current_temp_c)
+  const parts = [condition, temperature === null ? '' : temperature + '°C'].filter(Boolean)
+  return parts.length ? '当前 ' + parts.join(' · ') : ''
+}
+
+export function formatDayWeatherBadge(weather: Record<string, unknown> | undefined, dayDate: string, now = Date.now(), timezone = 'UTC'): string {
   if (!dayDate || !weather || weather.available === false) return ''
-  if (typeof weather.local_date === 'string' && weather.local_date.slice(0, 10) !== dayDate) return ''
   if (typeof weather.expires_at === 'string') {
     const expiresAt = Date.parse(weather.expires_at)
     if (Number.isFinite(expiresAt) && expiresAt <= now) return ''
   }
+  if (isPastTripDate(dayDate, timezone, now)) return formatCurrentWeatherText(weather)
+  if (typeof weather.local_date === 'string' && weather.local_date.slice(0, 10) !== dayDate) return ''
   const description = [weather.condition, weather.text_day, weather.text, weather.current_condition]
     .find(value => typeof value === 'string' && value.trim())
   const condition = typeof description === 'string' ? description.trim().slice(0, 12) : ''
-  const number = (value: unknown): number | null => {
-    if (typeof value !== 'number' && (typeof value !== 'string' || !value.trim())) return null
-    const parsed = Number(value)
-    return Number.isFinite(parsed) ? Math.round(parsed) : null
-  }
-  const low = number(weather.temp_min_c ?? weather.low)
-  const high = number(weather.temp_max_c ?? weather.high)
-  const average = number(weather.temperature_c ?? weather.temp)
+  const low = weatherNumber(weather.temp_min_c ?? weather.low)
+  const high = weatherNumber(weather.temp_max_c ?? weather.high)
+  const average = weatherNumber(weather.temperature_c ?? weather.temp)
   const range = low !== null && high !== null ? low + '～' + high + '°C' : average !== null ? average + '°C' : ''
   return [condition, range].filter(Boolean).join(' · ')
 }

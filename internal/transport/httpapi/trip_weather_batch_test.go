@@ -5,12 +5,19 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRefreshTripWeatherBatchHTTPReportsPointFailures(t *testing.T) {
 	server := testPlanningServer(t)
 	defer server.Close()
 	trip := "{\"schema_version\":1,\"title\":\"批量天气\",\"status\":\"draft\",\"timezone\":\"Asia/Shanghai\",\"date_range\":{\"start\":\"2026-04-18\",\"end\":\"2026-04-18\"},\"days\":[{\"id\":\"day-1\",\"date\":\"2026-04-18\",\"stops\":[{\"id\":\"stop-a\",\"sequence\":1,\"title\":\"待定位\"},{\"id\":\"stop-b\",\"sequence\":2,\"title\":\"已定位\",\"location\":{\"preferred\":\"bd09ll\",\"coordinates\":{\"bd09ll\":{\"lat\":30.2,\"lng\":120.1,\"crs\":\"bd09ll\"}}}}]}]}"
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	date := time.Now().In(location).AddDate(0, 0, 1).Format("2006-01-02")
+	trip = strings.ReplaceAll(trip, "2026-04-18", date)
 	create, err := http.Post(server.URL+"/api/v1/trips", "application/json", strings.NewReader(trip))
 	if err != nil {
 		t.Fatal(err)

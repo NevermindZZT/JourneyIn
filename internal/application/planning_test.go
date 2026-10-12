@@ -46,7 +46,7 @@ func (p *fakePlanningProvider) Weather(_ context.Context, request journeymaps.We
 	}
 	temperature := 18.5
 	now := time.Now().UTC()
-	return journeymaps.WeatherSnapshot{Provider: p.ID(), LocalDate: "2026-04-18", Condition: "晴", TemperatureC: &temperature, FetchedAt: now, ExpiresAt: now.Add(6 * time.Hour), Available: true}, nil
+	return journeymaps.WeatherSnapshot{Provider: p.ID(), LocalDate: request.LocalDate, Condition: "晴", TemperatureC: &temperature, FetchedAt: now, ExpiresAt: now.Add(6 * time.Hour), Available: true}, nil
 }
 func (p *fakePlanningProvider) NavigationURL(journeymaps.NavTarget, journeymaps.TravelMode, journeymaps.Platform) (string, error) {
 	return "https://example.test", nil

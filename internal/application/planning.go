@@ -858,8 +858,14 @@ func (s *TripService) RefreshWeather(ctx context.Context, tripID string, expecte
 	if err != nil {
 		return store.TripRecord{}, err
 	}
+	today, err := tripLocalToday(time.Now(), trip.Timezone)
+	if err != nil {
+		return store.TripRecord{}, err
+	}
 	localDate := input.LocalDate
-	if localDate == "" {
+	if dayDate < today {
+		localDate = today
+	} else if localDate == "" {
 		localDate = dayDate
 	}
 	var weatherRaw []byte

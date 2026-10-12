@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { formatDayWeatherBadge, iconForWeatherLabel, visibleWeatherLabelIDs } from './src/weatherMapLabel.ts'
+import { formatCurrentWeatherText, formatDayWeatherBadge, iconForWeatherLabel, visibleWeatherLabelIDs } from './src/weatherMapLabel.ts'
+import { isPastTripDate } from './src/tripDate.mjs'
 
 const day = '2026-10-03'
 const now = Date.parse('2026-10-02T00:00:00Z')
@@ -8,6 +9,18 @@ const now = Date.parse('2026-10-02T00:00:00Z')
 test('formats forecast condition and daily temperature range', () => {
   assert.equal(formatDayWeatherBadge({ available: true, local_date: day, condition: '晴', temp_min_c: 4, temp_max_c: 17 }, day, now), '晴 · 4～17°C')
   assert.equal(formatDayWeatherBadge({ available: true, local_date: day, temperature_c: -2 }, day, now), '-2°C')
+})
+
+test('past itinerary dates show only current weather using the trip timezone', () => {
+  const currentNow = Date.parse('2026-10-03T02:00:00Z') // Oct 3 in Asia/Shanghai
+  const pastDay = '2026-10-02'
+  const currentSnapshot = { available: true, local_date: '2026-10-03', condition: '雷阵雨', temp_min_c: 18, temp_max_c: 26, current_condition: '晴', current_temp_c: 21 }
+  assert.equal(isPastTripDate(pastDay, 'Asia/Shanghai', currentNow), true)
+  assert.equal(isPastTripDate('2026-10-03', 'Asia/Shanghai', currentNow), false)
+  assert.equal(formatDayWeatherBadge(currentSnapshot, pastDay, currentNow, 'Asia/Shanghai'), '当前 晴 · 21°C')
+  assert.equal(formatDayWeatherBadge(currentSnapshot, '2026-10-03', currentNow, 'Asia/Shanghai'), '雷阵雨 · 18～26°C')
+  assert.equal(formatDayWeatherBadge({ available: true, local_date: '2026-10-03', condition: '雷阵雨', temp_min_c: 18, temp_max_c: 26 }, pastDay, currentNow, 'Asia/Shanghai'), '')
+  assert.equal(formatCurrentWeatherText(currentSnapshot), '当前 晴 · 21°C')
 })
 
 test('hides unavailable, mismatched and empty snapshots', () => {

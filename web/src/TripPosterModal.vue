@@ -4,6 +4,8 @@ import { domToPng } from 'modern-screenshot'
 import QrcodeVue from 'qrcode.vue'
 import RouteTopologyMap from './RouteTopologyMap.vue'
 import { findDayRouteCarryOver } from './routeTopologyLayout'
+import { formatCurrentWeatherText } from './weatherMapLabel'
+import { isPastTripDate } from './tripDate.mjs'
 import BrandLogo from './BrandLogo.vue'
 
 type Coord = { lat: number; lng: number; crs?: string }
@@ -218,9 +220,10 @@ async function shareNative() {
   }
 }
 
-function formatWeatherBadge(stop: Stop): string {
+function formatWeatherBadge(stop: Stop, dayDate: string): string {
   const weather = stop.weather || {}
   if (!weather || Object.keys(weather).length === 0) return ''
+  if (props.trip && isPastTripDate(dayDate, props.trip.timezone)) return formatCurrentWeatherText(weather)
   const condition = String(weather.condition || weather.text_day || weather.text || '')
   const tempMin = weather.temp_min_c ?? weather.low
   const tempMax = weather.temp_max_c ?? weather.high
@@ -444,8 +447,8 @@ function formatWeatherBadge(stop: Stop): string {
                     <div class="step-header">
                       <strong class="stop-name">{{ stop.title }}</strong>
                       <div class="step-tags-row">
-                        <span v-if="formatWeatherBadge(stop)" class="stop-weather-tag">
-                          {{ formatWeatherBadge(stop) }}
+                        <span v-if="formatWeatherBadge(stop, day.date)" class="stop-weather-tag">
+                          {{ formatWeatherBadge(stop, day.date) }}
                         </span>
                         <span v-if="stop.time_window?.arrival" class="stop-time">
                           {{ stop.time_window.arrival }} 到达
