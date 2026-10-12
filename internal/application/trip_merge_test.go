@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"journeyin/internal/store"
@@ -191,6 +192,24 @@ func TestMergePatchRejectsUnsupportedFields(t *testing.T) {
 	}
 }
 
+func TestMergePatchRequiresExplicitLinksAndSupportsDayTitle(t *testing.T) {
+	emptyLinks := MergePatch{DescriptionMarkdown: stringPointer("正文"), Links: &MergeLinkPatch{}}
+	if err := validateMergePatch(emptyLinks); err == nil || !strings.Contains(err.Error(), "patch.links is optional") {
+		t.Fatalf("empty links patch error = %v", err)
+	}
+	notes := "当天说明"
+	title := "兰州→黄河汇流→刘家峡"
+	if err := validateMergePatch(MergePatch{Days: []MergeDayPatch{{DayID: "day-1", NotesMarkdown: &notes}}}); err != nil {
+		t.Fatalf("standalone notes patch without links was rejected: %v", err)
+	}
+	if err := validateMergePatch(MergePatch{Days: []MergeDayPatch{{DayID: "day-1", Title: &title}}}); err != nil {
+		t.Fatalf("standalone day title patch was rejected: %v", err)
+	}
+	tooLong := strings.Repeat("日", maxMergeDayTitleRunes+1)
+	if err := validateMergePatch(MergePatch{Days: []MergeDayPatch{{DayID: "day-1", Title: &tooLong}}}); err == nil {
+		t.Fatal("overlong day title was accepted")
+	}
+}
 func TestPreviewMergeRequiresCurrentRevisionAndTarget(t *testing.T) {
 	ctx := context.Background()
 	service := testService(t)

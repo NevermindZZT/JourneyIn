@@ -31,7 +31,7 @@ description: 将 AI 生成的单次旅行规划整理为 JourneyIn Trip JSON，�
    - journeyin.preview_save_trip
    - journeyin.commit_save_trip
    - journeyin.plan_trip（用户明确要求生成路线时）
-4. 如果服务端没有 preview/commit，而只有一个直接保存工具，不要静默降级为无预览写入；告知用户当前 server 不满足安全流程，请切换兼容版本或使用 JourneyIn UI。若要进行局部增补 merge，还要确认 capabilities.features.preview_merge=true；需要名称、地址、类别、时间窗口或子规划点增补时，确认 merge_patch_version >= 2。
+4. 如果服务端没有 preview/commit，而只有一个直接保存工具，不要静默降级为无预览写入；告知用户当前 server 不满足安全流程，请切换兼容版本或使用 JourneyIn UI。若要进行局部增补 merge，确认 capabilities.features.preview_merge=true；merge_patch_version >= 2 支持 Day.notes_markdown 与规划点详情，merge_patch_version >= 3 额外支持 Day.title。
 5. 确认当前 MCP 连接已获读取/写入目标行程的授权；不要在工具参数中自行携带或转发 Token。若服务端尚未声明细粒度 scope/Trip ACL，则把该连接视为受信任的全权限连接，不能假定存在未实际暴露的 trip:read、trip:write 权限边界。
 
 ## 标准工作流
@@ -192,7 +192,35 @@ description: 将 AI 生成的单次旅行规划整理为 JourneyIn Trip JSON，�
 }
 ```
 
-**只修改说明、Markdown 或来源时使用 merge：**
+**局部修改行程说明、每日内容或规划点详情时使用 merge：**
+
+优先只发送实际变更字段。比如只改某天标题/说明和一个规划点的说明/离开时间时，patch 应该长这样；不要补上未修改的字段，也不要带 `links`：
+
+```json
+{
+  "operation": "merge",
+  "target_trip_id": "trip_<id>",
+  "expected_revision": 453,
+  "patch": {
+    "days": [{
+      "day_id": "day_<stable-id>",
+      "title": "兰州→黄河汇流→刘家峡",
+      "notes_markdown": "当天安排说明",
+      "stops": [{
+        "stop_id": "stop_<stable-id>",
+        "description_markdown": "机场接驳说明",
+        "time_window": { "departure": "22:50" }
+      }]
+    }]
+  }
+}
+```
+
+`Day.title` 仅在 `merge_patch_version >= 3` 时可用；`Day.notes_markdown` 和规划点详情从 v2 开始支持。只改每日说明时省略 `title`，只改规划点时省略 `notes_markdown`。
+
+只有实际要增加或删除链接时才发送对应层级的 `links` 对象。新增时用 `links: { "add": [...] }`，删除时用 `links: { "remove_ids": ["link-id"] }`；不要发送 `links: {}` 或 `add: []` 与 `remove_ids: []` 都为空的对象。没有链接变更就完全省略 `links` 字段。
+
+以下是同时修改说明和执行真实链接操作的组合示例：
 
 ```json
 {
@@ -232,7 +260,7 @@ description: 将 AI 生成的单次旅行规划整理为 JourneyIn Trip JSON，�
 }
 ```
 
-merge 不得传 trip_json。Day/Stop 必须按稳定 day_id/stop_id 定位，不能按数组下标、标题或日期定位；子规划点额外提供 parent_stop_id。省略字段保持原值；空字符串可显式清空 Markdown、地址、类别或单个到达/离开时间。merge patch v2 允许修改 Trip.description_markdown、Trip.links 的 add/remove、Day.notes_markdown，以及主/子规划点的 title、address、kind、time_window.arrival、time_window.departure、description_markdown 和 links。time_window 只接受 HH:MM；不要替换整个对象。不得通过 merge 修改 location、provider_refs、天气、exclude_from_route、日期、顺序、地图、legs、route snapshot、geometry 或未知字段。位置、路线参与状态、日期、顺序和新增/删除规划点属于结构性变更：使用完整 replace 预览，或等待服务端提供专用安全 patch；绝不构造或猜测坐标。服务端会把 patch 应用到当前完整文档，并保留所有未修改路线数据。
+merge 不得传 trip_json。Day/Stop 必须按稳定 day_id/stop_id 定位，不能按数组下标、标题或日期定位；子规划点额外提供 parent_stop_id。省略字段保持原值；空字符串可显式清空每日/总体/地点 Markdown、Day.title、地址、类别或单个到达/离开时间。merge_patch_version v2 允许修改 Trip.description_markdown、Trip.links 的 add/remove、Day.notes_markdown，以及主/子规划点的 title、address、kind、time_window.arrival、time_window.departure、description_markdown 和 links；v3 额外允许修改 Day.title（最多 120 个字符）。time_window 只接受 HH:MM；不要替换整个对象。不得通过 merge 修改 location、provider_refs、天气、exclude_from_route、日期、顺序、地图、legs、route snapshot、geometry 或未知字段。位置、路线参与状态、日期、顺序和新增/删除规划点属于结构性变更：使用完整 replace 预览，或等待服务端提供专用安全 patch；绝不构造或猜测坐标。服务端会把 patch 应用到当前完整文档，并保留所有未修改路线数据。
 
 预览结果应至少包含 preview_id、expires_at、summary、diff、warnings、requires_confirmation 和一次性 confirmation_token。confirmation_token 只作为下一步 commit 的不透明值传递，不要在聊天、日志或分享链接中展示。
 
@@ -269,7 +297,7 @@ merge 不得传 trip_json。Day/Stop 必须按稳定 day_id/stop_id 定位，不
 - 用户要求继续优化；
 - 用户没有回应预览。
 
-如果用户修改了标题、地点、日期、顺序或任何结构 JSON 内容，必须重新生成完整 JSON、validate 和 replace preview；只修改说明/来源时必须重新生成 merge patch 和 preview。两者都不能沿用旧 confirmation_token。
+修改 Trip.title、日期、地点位置、规划点顺序、路线参与状态或路线数据时，必须重新生成完整 JSON、validate 和 replace preview。修改 Day.title/notes_markdown 或受支持的主/子规划点说明、类别、地址、时间窗、链接时使用受限 merge。无论 merge 还是 replace，只要 patch 内容改变，都必须重新 preview 并请求确认，不能沿用旧 confirmation_token。
 
 ### 9. 调用 commit_save_trip
 
@@ -328,12 +356,13 @@ merge 不得传 trip_json。Day/Stop 必须按稳定 day_id/stop_id 定位，不
 | schema_invalid / validation_failed | 根据字段路径修复，重新 validate；缺少坐标的点不能靠 warning 自动放行。 |
 | preview_required / confirmation_required | 不提交，重新生成预览并请求用户确认。 |
 | preview_expired | 重新 validate 和 preview，不复用旧 token。 |
-| revision_conflict | 重新读取目标 Trip，向用户展示差异；只改说明/来源时重新生成 merge patch，否则重新生成 replace 或创建新行程。 |
+| revision_conflict | 重新读取目标 Trip，向用户展示差异；仅修改 Day.title/notes 或受支持的规划点详情时重新生成 merge patch，否则重新生成 replace 或创建新行程。 |
 | idempotency_conflict | 停止重试，报告 key 已被不同 payload 使用。 |
 | forbidden / auth_required | 不请求用户把 Token 粘贴到线路内容中；让用户在 MCP 连接配置中完成授权。 |
 | location_required | 暂停写入，逐点请求用户明确允许本次以 draft 保存待解析点；未获允许不得继续。 |
 | upstream_unavailable / rate_limited | 保存已有草稿或无天气/路线快照的版本，前提是用户明确接受 warning；不要伪造上游结果。 |
 | payload_too_large | 减少 raw payload、过长 Markdown 或路线 geometry；不能通过截断破坏 JSON。 |
+| patch.links must contain add or remove_ids | 如果没有增删链接，完全省略 `links` 字段；不要发送空对象或两个空数组。只有实际变更链接时才发送 add/remove_ids 操作。 |
 
 ## 不能做的事
 

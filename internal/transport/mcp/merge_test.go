@@ -24,9 +24,10 @@ const mcpMergeTripDocument = `{
   "days": [{
     "id":"day-1",
     "date":"2026-04-18",
+    "title":"旧日标题",
     "notes_markdown":"旧日备注",
     "stops":[
-      {"id":"stop-1","sequence":1,"title":"起点","location":{"preferred":"bd09ll","coordinates":{"bd09ll":{"lat":30.1,"lng":120.1}}},"description_markdown":"旧地点说明","weather":{"source":"fixture"}},
+      {"id":"stop-1","sequence":1,"title":"起点","location":{"preferred":"bd09ll","coordinates":{"bd09ll":{"lat":30.1,"lng":120.1}}},"time_window":{"arrival":"09:00"},"description_markdown":"旧地点说明","weather":{"source":"fixture"}},
       {"id":"stop-2","sequence":2,"title":"终点"}
     ],
     "legs":[{"id":"leg-1","from_stop_id":"stop-1","to_stop_id":"stop-2","mode":"walking","snapshots":[{"provider":"baidu","coordinate_system":"bd09ll","mode":"walking","geometry":[[120.1,30.1],[120.2,30.2]],"distance_m":1000,"duration_s":900,"fetched_at":"2026-04-01T00:00:00Z","expires_at":"2026-04-02T00:00:00Z"}]}]
@@ -92,6 +93,18 @@ func TestPreviewMergeRejectsFullDocument(t *testing.T) {
 	}
 }
 
+func TestCapabilitiesAdvertiseMergePatchV3(t *testing.T) {
+	server := NewServer(nil, "test", nil)
+	_, capabilities, err := server.getCapabilities(context.Background(), nil, struct{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	features, ok := capabilities["features"].(map[string]any)
+	if !ok || features["merge_patch_version"] != 3 {
+		t.Fatalf("merge capabilities = %#v", capabilities["features"])
+	}
+}
+
 func TestPreviewMergeMCPFlowPreservesRouteData(t *testing.T) {
 	ctx := context.Background()
 	migrations, err := fs.Sub(journeyinroot.MigrationFS, "migrations")
@@ -123,6 +136,20 @@ func TestPreviewMergeMCPFlowPreservesRouteData(t *testing.T) {
 	}
 	defer clientSession.Close()
 
+	invalidLinksResult, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
+		Name: "journeyin.preview_save_trip",
+		Arguments: map[string]any{
+			"operation": "merge", "target_trip_id": record.ID, "expected_revision": record.Revision,
+			"patch": map[string]any{"description_markdown": "说明", "links": map[string]any{}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !invalidLinksResult.IsError {
+		t.Fatal("empty links patch unexpectedly succeeded")
+	}
+
 	previewResult, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
 		Name: "journeyin.preview_save_trip",
 		Arguments: map[string]any{
@@ -133,10 +160,12 @@ func TestPreviewMergeMCPFlowPreservesRouteData(t *testing.T) {
 				"description_markdown": "新总体说明",
 				"days": []any{map[string]any{
 					"day_id":         "day-1",
+					"title":          "兰州→黄河汇流→刘家峡",
 					"notes_markdown": "新日备注",
 					"stops": []any{map[string]any{
 						"stop_id":              "stop-1",
 						"description_markdown": "新地点说明",
+						"time_window":          map[string]any{"departure": "22:50"},
 					}},
 				}},
 			},
@@ -146,7 +175,8 @@ func TestPreviewMergeMCPFlowPreservesRouteData(t *testing.T) {
 		t.Fatal(err)
 	}
 	if previewResult.IsError {
-		t.Fatalf("merge preview returned error: %+v", previewResult.Content)
+		content, _ := json.Marshal(previewResult.Content)
+		t.Fatalf("merge preview returned error: %s", content)
 	}
 	payload, ok := previewResult.StructuredContent.(map[string]any)
 	if !ok {
@@ -208,12 +238,16 @@ func TestPreviewMergeMCPFlowPreservesRouteData(t *testing.T) {
 	}
 	days := document["days"].([]any)
 	day := days[0].(map[string]any)
-	if day["notes_markdown"] != "新日备注" {
-		t.Fatalf("day Markdown = %#v", day["notes_markdown"])
+	if day["title"] != "兰州→黄河汇流→刘家峡" || day["notes_markdown"] != "新日备注" {
+		t.Fatalf("daily content = title:%#v notes:%#v", day["title"], day["notes_markdown"])
 	}
 	stop := day["stops"].([]any)[0].(map[string]any)
 	if stop["description_markdown"] != "新地点说明" {
 		t.Fatalf("stop Markdown = %#v", stop["description_markdown"])
+	}
+	window, ok := stop["time_window"].(map[string]any)
+	if !ok || window["arrival"] != "09:00" || window["departure"] != "22:50" {
+		t.Fatalf("stop time window = %#v", stop["time_window"])
 	}
 	legs := day["legs"].([]any)
 	leg := legs[0].(map[string]any)

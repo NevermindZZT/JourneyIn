@@ -16,14 +16,15 @@ import (
 )
 
 const (
-	maxMergeRootMarkdown = 20000
-	maxMergeDayMarkdown  = 10000
-	maxMergeStopMarkdown = 10000
-	maxMergeDays         = 60
-	maxMergeStopsPerDay  = 100
-	maxMergeRootLinks    = 100
-	maxMergeStopLinks    = 50
-	maxMergePatchBytes   = 1 << 20
+	maxMergeRootMarkdown  = 20000
+	maxMergeDayMarkdown   = 10000
+	maxMergeDayTitleRunes = 120
+	maxMergeStopMarkdown  = 10000
+	maxMergeDays          = 60
+	maxMergeStopsPerDay   = 100
+	maxMergeRootLinks     = 100
+	maxMergeStopLinks     = 50
+	maxMergePatchBytes    = 1 << 20
 )
 
 // MergePatch is the intentionally small set of fields that a merge preview
@@ -42,6 +43,7 @@ func (p MergePatch) IsEmpty() bool {
 // MergeDayPatch addresses a Day by stable ID rather than array position.
 type MergeDayPatch struct {
 	DayID         string           `json:"day_id"`
+	Title         *string          `json:"title,omitempty"`
 	NotesMarkdown *string          `json:"notes_markdown,omitempty"`
 	Stops         []MergeStopPatch `json:"stops,omitempty"`
 }
@@ -106,6 +108,7 @@ func (p *MergeDayPatch) UnmarshalJSON(data []byte) error {
 	var decoded plain
 	if err := decodeStrictMergeObject(data, map[string]struct{}{
 		"day_id":         {},
+		"title":          {},
 		"notes_markdown": {},
 		"stops":          {},
 	}, &decoded, "day patch"); err != nil {
@@ -321,8 +324,11 @@ func validateMergePatch(patch MergePatch) error {
 			return fmt.Errorf("patch.days contains duplicate day_id %q", day.DayID)
 		}
 		seenDays[day.DayID] = struct{}{}
-		if day.NotesMarkdown == nil && len(day.Stops) == 0 {
-			return fmt.Errorf("patch.days[%d] must contain notes_markdown or stops", dayIndex)
+		if day.Title == nil && day.NotesMarkdown == nil && len(day.Stops) == 0 {
+			return fmt.Errorf("patch.days[%d] must contain title, notes_markdown, or stops", dayIndex)
+		}
+		if day.Title != nil && utf8.RuneCountInString(*day.Title) > maxMergeDayTitleRunes {
+			return fmt.Errorf("patch.days[%d].title exceeds the %d character limit", dayIndex, maxMergeDayTitleRunes)
 		}
 		if day.NotesMarkdown != nil {
 			if err := validateMergeMarkdown(fmt.Sprintf("patch.days[%d].notes_markdown", dayIndex), *day.NotesMarkdown, maxMergeDayMarkdown); err != nil {
@@ -353,7 +359,7 @@ func validateMergePatch(patch MergePatch) error {
 
 func validateMergeLinks(path string, patch *MergeLinkPatch) error {
 	if len(patch.Add) == 0 && len(patch.RemoveIDs) == 0 {
-		return fmt.Errorf("%s must contain add or remove_ids", path)
+		return fmt.Errorf("%s is optional; omit it when unchanged, and include a non-empty add or remove_ids operation when provided", path)
 	}
 	if len(patch.Add) > maxMergeRootLinks || len(patch.RemoveIDs) > maxMergeRootLinks {
 		return fmt.Errorf("%s contains too many link operations", path)
@@ -539,6 +545,17 @@ func applyRestrictedMergePatch(document []byte, patch MergePatch) ([]byte, []Pre
 				return nil, nil, err
 			}
 			changedDay := false
+			if dayPatch.Title != nil {
+				path := fmt.Sprintf("days[%s].title", dayPatch.DayID)
+				change, changed, err := setMergeText(dayObject, "title", path, *dayPatch.Title, maxMergeDayTitleRunes, false)
+				if err != nil {
+					return nil, nil, err
+				}
+				if changed {
+					changes = append(changes, change)
+					changedDay = true
+				}
+			}
 			if dayPatch.NotesMarkdown != nil {
 				path := fmt.Sprintf("days[%s].notes_markdown", dayPatch.DayID)
 				change, changed, err := setMergeMarkdown(dayObject, "notes_markdown", path, *dayPatch.NotesMarkdown, maxMergeDayMarkdown)
@@ -1034,6 +1051,7 @@ func protectedMergeProjection(data []byte) ([]byte, error) {
 			if err != nil {
 				return nil, err
 			}
+			delete(dayObject, "title")
 			delete(dayObject, "notes_markdown")
 			if rawStops, ok := dayObject["stops"]; ok {
 				stops, err := decodeRawArray(rawStops, fmt.Sprintf("trip.days[%d].stops", dayIndex))
