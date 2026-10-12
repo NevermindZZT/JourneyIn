@@ -15,7 +15,7 @@ import TripPosterModal from './TripPosterModal.vue'
 import BrandLogo from './BrandLogo.vue'
 import MapLoadingState from './MapLoadingState.vue'
 import { formatDayWeatherBadge, iconForWeatherLabel, visibleWeatherLabelIDs } from './weatherMapLabel'
-import { isPastTripDate } from './tripDate.mjs'
+import { isCalendarDateWithinDays, isPastTripDate, localDateInTimezone } from './tripDate.mjs'
 import { shortMarkdownPreview } from './planningPointPreview'
 import { collaborationAPIPath, collaborationTokenFromHash } from './collaborationShare.mjs'
 
@@ -365,6 +365,7 @@ const photoStatus = ref<PhotoStatus | null>(null)
 const atlasPhotos = ref<PhotoAtlasItem[]>([])
 const atlasShowTrips = ref(true)
 const atlasShowPhotos = ref<boolean>(localStorage.getItem('journeyin.atlasShowPhotos') !== 'false')
+const tripMapShowPhotos = ref<boolean>(localStorage.getItem('journeyin.tripMapShowPhotos') === 'true')
 let atlasPhotoMarkers: any[] = []
 const selectedPhotoCluster = ref<PhotoCluster | null>(null)
 const previewPhotoList = ref<PhotoAtlasItem[]>([])
@@ -658,6 +659,15 @@ function syncProviderFromDocument(document: TripDocument | null) {
 const visibleDays = computed(() => {
   if (!tripDocument.value) return []
   return selectedDay.value === 'all' ? tripDocument.value.days : tripDocument.value.days.filter((_, index) => index + 1 === selectedDay.value)
+})
+const tripMapPhotoMatches = computed(() => {
+  if (!tripMapShowPhotos.value || !ownerWorkspace.value || !photoStatus.value?.enabled || !tripDocument.value) return []
+  const days = visibleDays.value
+  if (!days.length) return []
+  return atlasPhotos.value.filter(photo => {
+    const photoDate = localDateInTimezone(photo.taken_at, tripDocument.value!.timezone)
+    return photoDate && days.some(day => isCalendarDateWithinDays(photoDate, day.date, 1))
+  })
 })
 const selectedDailyOverviewDay = computed(() => {
   if (!tripDocument.value || selectedDay.value === 'all') return null
@@ -1643,6 +1653,7 @@ function selectJourneyDay(day: number | 'all') {
     if (day === 'all' || editingIndex + 1 !== day) return
   }
   dailyContentNotice.value = ''
+  selectedPhotoCluster.value = null
   selectedDay.value = day
   if (selectedStopId.value && !visibleStops.value.some(stop => stop.id === selectedStopId.value)) {
     selectedStopId.value = ''
@@ -1827,6 +1838,7 @@ async function loadDetail(trip: TripSummary) {
   historyOpen.value = false
   historyView.value = null
   selected.value = trip
+  selectedPhotoCluster.value = null
   dailyContentEditingDayID.value = ''
   dailyContentTitleDraft.value = ''
   dailyContentNotesDraft.value = ''
@@ -1855,6 +1867,7 @@ async function loadDetail(trip: TripSummary) {
     tripDocument.value = payload.document || null
     syncProviderFromDocument(tripDocument.value)
     selectedDay.value = 'all'
+    if (ownerWorkspace.value) void ensureTripMapPhotoData()
     await nextTick()
     void renderMap()
   } catch (cause) {
@@ -3266,8 +3279,9 @@ async function renderMapNow(options?: { preserveView?: boolean }) {
   if (tripView.value === 'atlas') return renderAtlasMap(preserveView)
   if (!tripDocument.value) return
   if (!key.value) { resetMapSDK(); return }
-  if (selectedMapProvider.value === 'amap') return renderAMapMap(preserveView)
-  return renderBaiduMap(preserveView)
+  if (selectedMapProvider.value === 'amap') await renderAMapMap(preserveView)
+  else await renderBaiduMap(preserveView)
+  renderTripPhotoMarkers()
 }
 
 function toggleAtlasSheetBreakpoint() {
@@ -3313,6 +3327,13 @@ async function loadAtlasPhotos() {
   }
 }
 
+async function ensureTripMapPhotoData() {
+  if (!ownerWorkspace.value) return
+  if (!photoStatus.value) await loadPhotoStatus()
+  if (tripMapShowPhotos.value && photoStatus.value?.enabled) await loadAtlasPhotos()
+  renderTripPhotoMarkers()
+}
+
 async function triggerPhotoSync() {
   if (photoSyncing.value) return
   photoSyncing.value = true
@@ -3323,6 +3344,7 @@ async function triggerPhotoSync() {
       await loadAtlasPhotos()
       photoSyncing.value = false
       if (tripView.value === 'atlas') void renderAtlasMap(true)
+      else renderTripPhotoMarkers()
     }, 1500)
   } catch {
     photoSyncing.value = false
@@ -3387,11 +3409,11 @@ function clearAtlasPhotoMarkers() {
   atlasPhotoMarkers = []
 }
 
-function renderAtlasPhotoMarkers() {
+function renderPhotoMarkers(photos: PhotoAtlasItem[], enabled: boolean) {
   clearAtlasPhotoMarkers()
-  if (!atlasShowPhotos.value || !photoStatus.value?.enabled || !atlasPhotos.value.length || !mapInstance) return
+  if (!enabled || !photoStatus.value?.enabled || !photos.length || !mapInstance) return
   const zoom = mapInstance.getZoom?.() || 5
-  const clusters = clusterPhotos(atlasPhotos.value, zoom)
+  const clusters = clusterPhotos(photos, zoom)
 
   clusters.forEach(cluster => {
     const badgeHTML = cluster.count > 1 ? '<span class="photo-cluster-badge">' + cluster.count + '</span>' : ''
@@ -3429,6 +3451,13 @@ function renderAtlasPhotoMarkers() {
       atlasPhotoMarkers.push(label)
     }
   })
+}
+
+function renderAtlasPhotoMarkers() {
+  renderPhotoMarkers(atlasPhotos.value, atlasShowPhotos.value)
+}
+function renderTripPhotoMarkers() {
+  renderPhotoMarkers(tripMapPhotoMatches.value, tripMapShowPhotos.value && ownerWorkspace.value)
 }
 
 function handlePhotoClusterClick(cluster: PhotoCluster) {
@@ -3605,6 +3634,15 @@ function toggleAtlasPhotos(val?: boolean) {
   }
 }
 
+async function toggleTripMapPhotos(show: boolean) {
+  if (!ownerWorkspace.value || readOnlyView.value) return
+  tripMapShowPhotos.value = show
+  if (!show) selectedPhotoCluster.value = null
+  localStorage.setItem('journeyin.tripMapShowPhotos', show ? 'true' : 'false')
+  if (show) await ensureTripMapPhotoData()
+  else renderTripPhotoMarkers()
+}
+
 function formatPhotoTime(val?: string) {
   if (!val) return ''
   const d = new Date(val)
@@ -3618,6 +3656,7 @@ function navigateToAtlas() {
   selected.value = null
   tripDocument.value = null
   tripView.value = 'atlas'
+  selectedPhotoCluster.value = null
   selectedStopId.value = ''
   selectedSubStopId.value = ''
   panelOpen.value = false
@@ -4217,7 +4256,10 @@ function setMapProvider(provider: 'baidu' | 'amap') {
   resetMapSDK()
   mapError.value = ''
   mapWarning.value = ''
-  void nextTick().then(() => renderMap())
+  void nextTick().then(async () => {
+    if (ownerWorkspace.value && photoStatus.value?.enabled && (tripView.value === 'atlas' ? atlasShowPhotos.value : tripMapShowPhotos.value)) await loadAtlasPhotos()
+    await renderMap()
+  })
 }
 function retryMap() { mapError.value = ''; mapWarning.value = ''; resetMapSDK(); void nextTick().then(() => renderMap()) }
 
@@ -4485,11 +4527,13 @@ function handleMapZoomChange() {
     }, 120)
     return
   }
-  if (mapLabelMode.value !== 'auto') return
   if (mapZoomDebounceTimer !== null) window.clearTimeout(mapZoomDebounceTimer)
   mapZoomDebounceTimer = window.setTimeout(() => {
-    if (isMobileViewport()) updateStopLabelsVisibility()
-    else updateWeatherLabelsVisibility()
+    if (mapLabelMode.value === 'auto') {
+      if (isMobileViewport()) updateStopLabelsVisibility()
+      else updateWeatherLabelsVisibility()
+    }
+    renderTripPhotoMarkers()
   }, 120)
 }
 
@@ -6205,7 +6249,11 @@ onUnmounted(() => {
               <div v-if="mapWarning" class="map-warning"><span>{{ mapWarning }}</span><button type="button" @click="retryMap">重新加载</button></div>
             </div>
 
-            <aside v-if="tripDocument" class="floating-panel workspace-panel itinerary-panel" :class="['sheet-' + sheetBreakpoint, { 'panel-search-mode': panelMode === 'search', 'is-sheet-dragging': sheetDragActive }]" :style="sheetDragStyle" aria-label="行程时间线">
+            <div v-if="selectedPhotoCluster" class="atlas-photo-drawer trip-photo-drawer" role="dialog" aria-label="地图区域照片">
+  <div class="atlas-photo-drawer-head"><strong>该区域照片 ({{ selectedPhotoCluster.photos.length }} 张)</strong><button type="button" aria-label="关闭照片列表" @click="selectedPhotoCluster = null">×</button></div>
+  <div class="atlas-photo-grid"><div v-for="photo in selectedPhotoCluster.photos" :key="photo.id" class="atlas-photo-item-card" @click="openPhotoPreview(photo, selectedPhotoCluster.photos)"><img :src="photo.thumb_url + '?size=120'" class="atlas-photo-item-img" loading="lazy" /><span class="atlas-photo-item-date">{{ formatPhotoTime(photo.taken_at) }}</span></div></div>
+</div>
+<aside v-if="tripDocument" class="floating-panel workspace-panel itinerary-panel" :class="['sheet-' + sheetBreakpoint, { 'panel-search-mode': panelMode === 'search', 'is-sheet-dragging': sheetDragActive, 'has-photo-drawer-open': Boolean(selectedPhotoCluster) }]" :style="sheetDragStyle" aria-label="行程时间线">
               <button class="sheet-handle" type="button" :aria-label="sheetBreakpoint === 'peek' ? '展开行程' : '收起行程'" @pointerdown="startSheetDrag" @click="cycleSheetBreakpoint"><span></span></button>
               <header class="workspace-panel-head">
                 <div><div class="workspace-panel-kicker"><p class="eyebrow">{{ historyView ? 'HISTORY VERSION' : shareMode ? 'SHARED JOURNEY' : collaborationMode ? 'COLLABORATION EDIT' : 'CURRENT JOURNEY' }}</p><span v-if="historyView" class="history-status-tag">只读</span><span v-else-if="shareURL" class="share-status-tag">已分享</span><span v-else-if="collaborationMode" class="share-status-tag">共创编辑</span></div><h1>{{ historyTitle }}</h1><p>{{ historyDateRange || '选择一条行程查看详情' }}</p></div>
@@ -6300,6 +6348,8 @@ onUnmounted(() => {
               <div class="map-tool-row"><span>图层</span><div class="provider-segment layer-segment" role="group" aria-label="地图图层"><button type="button" :class="{ active: mapType === 'normal' }" :aria-pressed="mapType === 'normal'" @click="setMapType('normal')">标准图</button><button type="button" :class="{ active: mapType === 'satellite' }" :aria-pressed="mapType === 'satellite'" @click="setMapType('satellite')">卫星图</button></div></div>
               <div class="map-tool-row"><span>地图标签</span><div class="provider-segment label-segment" role="group" aria-label="地图标签显示模式"><button type="button" :class="{ active: mapLabelMode === 'auto' }" @click="setMapLabelMode('auto')">自动</button><button type="button" :class="{ active: mapLabelMode === 'always' }" @click="setMapLabelMode('always')">全部</button><button type="button" :class="{ active: mapLabelMode === 'none' }" @click="setMapLabelMode('none')">隐藏</button></div></div>
               <p class="map-tool-hint">{{ mapLabelMode === 'auto' ? '自动：有空间时显示，密集时自动防重叠' : mapLabelMode === 'always' ? '全部：始终展开全部地名与路线标签' : '隐藏：仅保留图钉，隐藏浮动文字' }}</p>
+              <div v-if="ownerWorkspace && photoStatus?.enabled" class="map-tool-row"><span>行程照片</span><div class="provider-segment"><button type="button" :class="{ active: tripMapShowPhotos }" :aria-pressed="tripMapShowPhotos" @click="toggleTripMapPhotos(true)">显示 ({{ tripMapPhotoMatches.length }})</button><button type="button" :class="{ active: !tripMapShowPhotos }" :aria-pressed="!tripMapShowPhotos" @click="toggleTripMapPhotos(false)">隐藏</button></div></div>
+              <p v-if="tripMapShowPhotos && ownerWorkspace" class="map-tool-hint">按行程时区匹配日期前后 1 天的定位照片。</p>
               <div v-if="tripDocument" class="map-category-legend" aria-label="规划点标签颜色图例"><span v-for="category in planningPointCategoryOptions" :key="category.value" :style="{ '--kind-color': planningPointCategoryColor(category.value) }"><i aria-hidden="true"></i>{{ category.label }}</span></div>
                <button v-if="!readOnlyView" class="map-pick-action" type="button" :disabled="!mapReady || !tripDocument" @click="toggleMapPick"><IonIcon :icon="mapOutline" /> {{ mapPickMode ? mapPickTargetID ? '取消更新选点' : '取消地图选点' : '地图选点' }}</button>
             </div>

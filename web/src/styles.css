@@ -1750,7 +1750,8 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 
 @media (max-width: 900px) {
   /* 移动端打开照片抽屉时，底部的足迹漫游看板平滑滑出隐藏，消除遮挡 */
-  .atlas-floating-panel.has-photo-drawer-open {
+  .atlas-floating-panel.has-photo-drawer-open,
+  .itinerary-panel.has-photo-drawer-open {
     transform: translateY(120%) !important;
     opacity: 0 !important;
     pointer-events: none !important;

@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { formatCurrentWeatherText, formatDayWeatherBadge, iconForWeatherLabel, visibleWeatherLabelIDs } from './src/weatherMapLabel.ts'
-import { isPastTripDate } from './src/tripDate.mjs'
+import { isCalendarDateWithinDays, isPastTripDate, localDateInTimezone } from './src/tripDate.mjs'
 import { shortMarkdownPreview } from './src/planningPointPreview.ts'
 
 const day = '2026-10-03'
@@ -18,6 +18,15 @@ test('planning description preview strips Markdown and truncates by Unicode char
   assert.equal([...preview].length, 12)
   assert.equal(preview.endsWith('…'), true)
   assert.equal(shortMarkdownPreview('   '), '')
+})
+
+test('photo capture dates use trip timezone and allow one calendar day error', () => {
+  const capture = Date.parse('2026-10-02T18:30:00Z')
+  assert.equal(localDateInTimezone(capture, 'Asia/Shanghai'), '2026-10-03')
+  assert.equal(isCalendarDateWithinDays('2026-10-03', '2026-10-02', 1), true)
+  assert.equal(isCalendarDateWithinDays('2026-10-03', '2026-10-04', 1), true)
+  assert.equal(isCalendarDateWithinDays('2026-10-03', '2026-10-01', 1), false)
+  assert.equal(isCalendarDateWithinDays('invalid', '2026-10-03', 1), false)
 })
 
 test('past itinerary dates show only current weather using the trip timezone', () => {
