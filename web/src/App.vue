@@ -216,6 +216,12 @@ const tripDescriptionFullscreen = ref(false)
 const tripDescriptionDraft = ref('')
 const tripDescriptionEditorMode = ref<MarkdownEditorMode>('edit')
 const tripDescriptionSaving = ref(false)
+const dailyContentEditingDayID = ref('')
+const dailyContentTitleDraft = ref('')
+const dailyContentNotesDraft = ref('')
+const dailyContentEditorMode = ref<'edit' | 'preview'>('edit')
+const dailyContentSaving = ref(false)
+const dailyContentNotice = ref('')
 const tripDetailsEditing = ref(false)
 const tripDetailsTitleDraft = ref('')
 const tripDetailsStartDateDraft = ref('')
@@ -652,6 +658,10 @@ function syncProviderFromDocument(document: TripDocument | null) {
 const visibleDays = computed(() => {
   if (!tripDocument.value) return []
   return selectedDay.value === 'all' ? tripDocument.value.days : tripDocument.value.days.filter((_, index) => index + 1 === selectedDay.value)
+})
+const selectedDailyOverviewDay = computed(() => {
+  if (!tripDocument.value || selectedDay.value === 'all') return null
+  return tripDocument.value.days[selectedDay.value - 1] || null
 })
 const tripDayOptions = computed(() => (tripDocument.value?.days || []).map((day, index) => ({ value: day.id, label: 'D' + (index + 1) + ' · ' + formatDate(day.date), description: day.title || '第 ' + (index + 1) + ' 天' })))
 const mapPickAvailableParentStops = computed(() => {
@@ -1622,7 +1632,17 @@ function navigateBackToList() {
   navigateBackTo({ layer: 'list' })
 }
 
+function selectJourneySection(section: JourneySection) {
+  if (dailyContentSaving.value || (dailyContentEditingDayID.value && section !== 'overview') || (tripDescriptionEditing.value && section !== 'overview')) return
+  journeySection.value = section
+}
 function selectJourneyDay(day: number | 'all') {
+  if (dailyContentSaving.value || (tripDescriptionEditing.value && day !== 'all')) return
+  if (dailyContentEditingDayID.value) {
+    const editingIndex = tripDocument.value?.days.findIndex(item => item.id === dailyContentEditingDayID.value) ?? -1
+    if (day === 'all' || editingIndex + 1 !== day) return
+  }
+  dailyContentNotice.value = ''
   selectedDay.value = day
   if (selectedStopId.value && !visibleStops.value.some(stop => stop.id === selectedStopId.value)) {
     selectedStopId.value = ''
@@ -1807,6 +1827,11 @@ async function loadDetail(trip: TripSummary) {
   historyOpen.value = false
   historyView.value = null
   selected.value = trip
+  dailyContentEditingDayID.value = ''
+  dailyContentTitleDraft.value = ''
+  dailyContentNotesDraft.value = ''
+  dailyContentEditorMode.value = 'edit'
+  dailyContentNotice.value = ''
   restoreShareState(trip.id)
   detailMoreOpen.value = false
   pointEditorOpen.value = false
@@ -1814,6 +1839,11 @@ async function loadDetail(trip: TripSummary) {
   pointEditorDayID.value = ''
   pointUpdateNotice.value = ''
   weatherBatchMessage.value = ''
+  dailyContentEditingDayID.value = ''
+  dailyContentTitleDraft.value = ''
+  dailyContentNotesDraft.value = ''
+  dailyContentEditorMode.value = 'edit'
+  dailyContentNotice.value = ''
   cancelMapPick()
   selectedStopId.value = ''
   detailLoading.value = true
@@ -2447,6 +2477,58 @@ async function saveTripDetails() {
     error.value = cause instanceof Error ? cause.message : '保存行程信息失败'
   } finally {
     tripDetailsSaving.value = false
+  }
+}
+function beginEditDailyContent(day: Day) {
+  if (readOnlyView.value || dailyContentSaving.value) return
+  dailyContentEditingDayID.value = day.id
+  dailyContentTitleDraft.value = day.title || ''
+  dailyContentNotesDraft.value = day.notes_markdown || ''
+  dailyContentEditorMode.value = 'edit'
+  dailyContentNotice.value = ''
+  error.value = ''
+}
+function cancelEditDailyContent() {
+  if (dailyContentSaving.value) return
+  dailyContentEditingDayID.value = ''
+  dailyContentTitleDraft.value = ''
+  dailyContentNotesDraft.value = ''
+  dailyContentEditorMode.value = 'edit'
+}
+async function saveDailyContent() {
+  if (readOnlyView.value || !selected.value || !tripDocument.value || dailyContentSaving.value) return
+  const dayID = dailyContentEditingDayID.value
+  const dayExists = tripDocument.value.days.some(day => day.id === dayID)
+  if (!dayID || !dayExists) { error.value = '找不到要保存的日期，请重新加载行程'; return }
+  const tripID = selected.value.id
+  const revision = selected.value.revision
+  const title = dailyContentTitleDraft.value.trim()
+  const notes = dailyContentNotesDraft.value.trim()
+  const document: TripDocument = { ...tripDocument.value, days: tripDocument.value.days.map(day => day.id === dayID ? { ...day, title: title || undefined, notes_markdown: notes || undefined } : day) }
+  dailyContentSaving.value = true
+  dailyContentNotice.value = ''
+  error.value = ''
+  try {
+    const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(tripID), { method: 'PUT', headers: { 'Content-Type': 'application/json', 'If-Match': 'revision-' + revision }, body: JSON.stringify(document) })
+    const payload = await response.json() as { document?: TripDocument; revision?: number; stops?: number; days?: number; updated_at?: string; error?: { message?: string } }
+    if (!response.ok) {
+      if (response.status === 409 && selected.value?.id === tripID) {
+        await loadDetail(selected.value)
+        throw new Error('行程已被其他操作更新，请检查最新每日内容后再保存')
+      }
+      throw new Error(payload.error?.message || '保存每日安排失败')
+    }
+    if (selected.value?.id !== tripID) throw new Error('行程已切换，保存结果未应用到当前页面')
+    applyTripPayload(payload)
+    dailyContentEditingDayID.value = ''
+    dailyContentTitleDraft.value = ''
+    dailyContentNotesDraft.value = ''
+    dailyContentEditorMode.value = 'edit'
+    dailyContentNotice.value = '每日安排已保存，分享海报内容已同步'
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '保存每日安排失败'
+  } finally {
+    dailyContentSaving.value = false
   }
 }
 async function saveTripDescription() {
@@ -6129,8 +6211,8 @@ onUnmounted(() => {
                 <div><div class="workspace-panel-kicker"><p class="eyebrow">{{ historyView ? 'HISTORY VERSION' : shareMode ? 'SHARED JOURNEY' : collaborationMode ? 'COLLABORATION EDIT' : 'CURRENT JOURNEY' }}</p><span v-if="historyView" class="history-status-tag">只读</span><span v-else-if="shareURL" class="share-status-tag">已分享</span><span v-else-if="collaborationMode" class="share-status-tag">共创编辑</span></div><h1>{{ historyTitle }}</h1><p>{{ historyDateRange || '选择一条行程查看详情' }}</p></div>
                 <div class="panel-head-actions"><button v-if="ownerWorkspace" class="panel-action-button" type="button" aria-label="返回行程列表" @click="navigateBackToList"><span>‹</span><small>行程</small></button><button v-if="ownerWorkspace" class="panel-action-button history-action" type="button" aria-label="打开版本历史" @click="openTripHistory"><span>↶</span><small>版本</small></button><button v-if="!readOnlyView" class="panel-action-button edit-trip-action" type="button" aria-label="编辑行程信息" @click="beginEditTripDetails"><IonIcon :icon="createOutline" /><small>编辑</small></button><button class="panel-action-button collapse-action" type="button" :aria-label="sheetBreakpoint === 'peek' ? '展开行程' : '收起到 Peek'" @click="setSheetBreakpoint(sheetBreakpoint === 'peek' ? 'half' : 'peek')"><IonIcon :icon="sheetBreakpoint === 'peek' ? chevronUpOutline : chevronDownOutline" /></button></div>
               </header>
-              <nav v-if="panelMode === 'journey'" class="journey-view-tabs" aria-label="行程内容"><button type="button" :class="{ selected: journeySection === 'itinerary' }" @click="journeySection = 'itinerary'">规划点 <small>{{ visibleStops.length }}</small></button><button type="button" :class="{ selected: journeySection === 'overview' }" @click="journeySection = 'overview'">说明</button></nav>
-              <div v-if="panelMode === 'journey'" class="journey-day-tabs" aria-label="行程日期"><button type="button" :class="{ selected: selectedDay === 'all' }" @click="selectJourneyDay('all')">全程</button><button v-for="(day, index) in tripDocument.days" :key="day.id" type="button" :class="{ selected: selectedDay === index + 1 }" @click="selectJourneyDay(index + 1)">D{{ index + 1 }} <small>{{ formatDate(day.date).slice(5) }}</small></button></div>
+              <nav v-if="panelMode === 'journey'" class="journey-view-tabs" aria-label="行程内容"><button type="button" :class="{ selected: journeySection === 'itinerary' }" @click="selectJourneySection('itinerary')">规划点 <small>{{ visibleStops.length }}</small></button><button type="button" :class="{ selected: journeySection === 'overview' }" @click="selectJourneySection('overview')">说明</button></nav>
+              <div v-if="panelMode === 'journey'" class="journey-day-tabs" aria-label="行程日期"><button type="button" :disabled="dailyContentSaving || (dailyContentEditingDayID !== '' && selectedDay !== 'all')" :class="{ selected: selectedDay === 'all' }" @click="selectJourneyDay('all')">全程</button><button v-for="(day, index) in tripDocument.days" :key="day.id" type="button" :disabled="dailyContentSaving || tripDescriptionEditing || (dailyContentEditingDayID !== '' && dailyContentEditingDayID !== day.id)" :class="{ selected: selectedDay === index + 1 }" @click="selectJourneyDay(index + 1)">D{{ index + 1 }} <small>{{ formatDate(day.date).slice(5) }}</small></button></div>
 
               <div v-if="panelMode === 'search'" class="panel-scroll panel-search-scroll">
                 <div class="search-panel-heading"><button class="inline-back-button" type="button" @click="closeJourneySearch"><span>‹</span> 返回行程</button><span class="eyebrow">{{ locationSearchMode === 'repair' ? 'RELOCATE POINT' : searchParentStopId ? 'ADD CHILD POINT' : 'ADD A PLACE' }}</span><h2>{{ locationSearchMode === 'repair' ? '重新定位规划点' : searchParentStopId ? '添加子规划点' : '搜索地点' }}</h2><p>{{ locationSearchMode === 'repair' ? '为“' + (findPlanningPoint(locationSearchTargetID)?.title || '当前规划点') + '”查找新的坐标；名称可以一起调整。' : searchParentStopId && selectedStop ? '添加到：' + selectedStop.title : '搜索结果会保留名称、地址、坐标系和 Provider 引用。' }}</p></div>
@@ -6141,8 +6223,21 @@ onUnmounted(() => {
 
               <div v-else class="panel-scroll itinerary-scroll">
                 <div class="peek-summary"><div><span class="eyebrow">{{ selectedDay === 'all' ? 'FULL JOURNEY' : 'DAY ' + selectedDay }}</span><strong>{{ visibleStops.length }} 个规划点</strong></div><span>{{ formatDistance(visibleRouteSummary.distanceM) || '距离待生成' }} · {{ formatDuration(visibleRouteSummary.durationS) || '时间待生成' }}</span></div>
-                <div v-if="journeySection === 'overview'" class="trip-overview redesign-overview"><div class="section-title-row"><div><span class="eyebrow">JOURNEY NOTE</span><h2>行程说明</h2></div><div v-if="!readOnlyView" class="section-actions"><button class="text-action" type="button" @click="beginEditTripDescription">{{ tripDescriptionEditing ? '编辑中' : '编辑' }}</button><button v-if="tripDescriptionEditing" class="text-action" type="button" @click="openTripDescriptionFullscreen">全屏</button></div></div><template v-if="tripDescriptionEditing && !readOnlyView"><MarkdownEditor v-model="tripDescriptionDraft" v-model:mode="tripDescriptionEditorMode" :preview-html="renderMarkdown(tripDescriptionDraft)" :rows="4" editor-label="MARKDOWN" preview-label="行程说明预览" editor-aria-label="行程说明 Markdown 原始文本" placeholder="补充整个行程的背景、节奏和注意事项" /><div class="editor-actions"><button class="secondary-action compact-action" type="button" @click="cancelEditTripDescription">取消</button><button class="primary-action compact-action" type="button" :disabled="tripDescriptionSaving" @click="saveTripDescription">{{ tripDescriptionSaving ? '保存中…' : '保存说明' }}</button></div></template><div v-else-if="tripDocument.description_markdown" class="markdown" v-html="renderMarkdown(tripDocument.description_markdown)"></div><p v-else class="muted">{{ shareMode ? '暂无行程总体说明。' : '暂无行程总体说明，点击“编辑”添加。' }}</p></div>
-                <div v-else class="itinerary-section"><div class="section-title-row"><div><span class="eyebrow">ITINERARY</span><h2>规划点</h2></div><div class="section-actions"><span>{{ visibleStops.length }} 个</span><button v-if="!readOnlyView" class="text-action weather-batch-action" type="button" :disabled="weatherBatchLoading || weatherLoading || !tripDocument" @click="refreshTripWeather">{{ weatherBatchLoading ? "刷新天气中…" : "一键刷新天气" }}</button><button v-if="!readOnlyView" class="text-action" type="button" :class="{ selected: reorderMode }" @click="toggleReorderMode">{{ reorderMode ? '完成排序' : '调整顺序' }}</button></div></div>
+                <div v-if="journeySection === 'overview' && selectedDay === 'all'" class="trip-overview redesign-overview"><div class="section-title-row"><div><span class="eyebrow">JOURNEY NOTE</span><h2>行程说明</h2></div><div v-if="!readOnlyView" class="section-actions"><button class="text-action" type="button" @click="beginEditTripDescription">{{ tripDescriptionEditing ? '编辑中' : '编辑' }}</button><button v-if="tripDescriptionEditing" class="text-action" type="button" @click="openTripDescriptionFullscreen">全屏</button></div></div><template v-if="tripDescriptionEditing && !readOnlyView"><MarkdownEditor v-model="tripDescriptionDraft" v-model:mode="tripDescriptionEditorMode" :preview-html="renderMarkdown(tripDescriptionDraft)" :rows="4" editor-label="MARKDOWN" preview-label="行程说明预览" editor-aria-label="行程说明 Markdown 原始文本" placeholder="补充整个行程的背景、节奏和注意事项" /><div class="editor-actions"><button class="secondary-action compact-action" type="button" @click="cancelEditTripDescription">取消</button><button class="primary-action compact-action" type="button" :disabled="tripDescriptionSaving" @click="saveTripDescription">{{ tripDescriptionSaving ? '保存中…' : '保存说明' }}</button></div></template><div v-else-if="tripDocument.description_markdown" class="markdown" v-html="renderMarkdown(tripDocument.description_markdown)"></div><p v-else class="muted">{{ shareMode ? '暂无行程总体说明。' : '暂无行程总体说明，点击“编辑”添加。' }}</p></div>
+                <div v-else-if="journeySection === 'overview' && selectedDailyOverviewDay" class="trip-overview redesign-overview daily-overview">
+  <div class="daily-overview-heading"><div><span class="eyebrow">D{{ selectedDay }} · {{ formatDate(selectedDailyOverviewDay.date) }}</span><h2>{{ selectedDailyOverviewDay.title || ('第 ' + selectedDay + ' 天') }}</h2></div><button v-if="!readOnlyView && dailyContentEditingDayID !== selectedDailyOverviewDay.id" class="text-action daily-overview-edit" type="button" @click="beginEditDailyContent(selectedDailyOverviewDay)">编辑每日内容</button></div>
+  <p class="daily-content-help">每日内容和说明会同步显示在分享海报中。</p>
+  <p v-if="dailyContentNotice" class="inline-message daily-content-notice" role="status">{{ dailyContentNotice }}</p>
+  <template v-if="dailyContentEditingDayID === selectedDailyOverviewDay.id && !readOnlyView">
+    <label class="daily-content-title-field"><span>每日内容 / 路线标题</span><input v-model="dailyContentTitleDraft" type="text" placeholder="例如：兰州 → 黄河汇流 → 刘家峡" autocomplete="off" /></label>
+    <MarkdownEditor v-model="dailyContentNotesDraft" v-model:mode="dailyContentEditorMode" :preview-html="renderMarkdown(dailyContentNotesDraft)" :rows="7" editor-label="每日说明" preview-label="每日说明预览" editor-aria-label="每日说明 Markdown 文本" placeholder="补充当天安排、交通、住宿、注意事项等" />
+    <div class="editor-actions daily-content-actions"><button class="secondary-action compact-action" type="button" :disabled="dailyContentSaving" @click="cancelEditDailyContent">取消</button><button class="primary-action compact-action" type="button" :disabled="dailyContentSaving" @click="saveDailyContent">{{ dailyContentSaving ? '保存中…' : '保存每日安排' }}</button></div>
+  </template>
+  <div v-else-if="selectedDailyOverviewDay.notes_markdown" class="markdown daily-arrangement-notes" v-html="renderMarkdown(selectedDailyOverviewDay.notes_markdown)"></div>
+  <p v-else class="muted daily-arrangement-empty">{{ readOnlyView ? '暂无每日说明。' : '暂无每日说明，点击“编辑每日内容”添加。' }}</p>
+</div>
+
+<div v-else class="itinerary-section"><div class="section-title-row"><div><span class="eyebrow">ITINERARY</span><h2>规划点</h2></div><div class="section-actions"><span>{{ visibleStops.length }} 个</span><button v-if="!readOnlyView" class="text-action weather-batch-action" type="button" :disabled="weatherBatchLoading || weatherLoading || !tripDocument" @click="refreshTripWeather">{{ weatherBatchLoading ? "刷新天气中…" : "一键刷新天气" }}</button><button v-if="!readOnlyView" class="text-action" type="button" :class="{ selected: reorderMode }" @click="toggleReorderMode">{{ reorderMode ? '完成排序' : '调整顺序' }}</button></div></div>
                   <div v-if="!readOnlyView" class="redesign-plan-controls"><label class="select-field">路线 Provider<UiSelect v-model="planningProvider" aria-label="路线 Provider" :options="mapProviderOptions" /></label><label class="select-field">出行方式<UiSelect v-model="planningMode" aria-label="出行方式" :options="travelModeOptions" /></label><label v-if="planningMode === 'driving' && supportsDrivingStrategy" class="select-field">驾车策略<UiSelect v-model="planningStrategy" aria-label="驾车策略" :options="availableDrivingStrategyOptions" /></label><button class="primary-action compact-action plan-button" type="button" :disabled="planningLoading || !canPlanRoutes" @click="planRoutes"><IonIcon :icon="navigateOutline" /> {{ planningLoading ? '规划中…' : '生成路线' }}</button></div>
                   <div v-if="unlocatedPlanningPoints.length" class="location-readiness-banner"><div><strong>{{ unlocatedPlanningPoints.length }} 个规划点待定位</strong><span v-if="unlocatedRouteStops.length">参与路线的主规划点没有可靠坐标前，路线和导航不会启用。</span><span v-else-if="unlocatedMainStops.length">已排除路线的规划点不影响路线生成，但仍建议补充坐标以便导航。</span><span v-else>子规划点不参与主路线，但仍建议补充坐标。</span></div><button v-if="!readOnlyView" class="text-action" type="button" @click="selectPlanningPointFromList(unlocatedRouteStops[0] || unlocatedMainStops[0] || unlocatedPlanningPoints[0])">去定位</button><span v-else class="location-readiness-readonly">只读</span></div><div class="redesign-route-summary"><div><span>{{ selectedDay === 'all' ? '全程路线' : 'D' + selectedDay + ' 当天路线' }}</span><strong v-if="visibleRouteSummary.segments">{{ formatDistance(visibleRouteSummary.distanceM) || '距离未知' }} · {{ formatDuration(visibleRouteSummary.durationS) || '时间未知' }}</strong><em v-else-if="visibleRouteSummary.zeroSegments">有 {{ visibleRouteSummary.zeroSegments }} 段为同一地点</em><em v-else>尚未生成路线</em></div><small v-if="visibleRouteSummary.segments">{{ visibleRouteSummary.segments }} 段 · {{ mapProviderLabel }}</small></div>
                   <p v-if="weatherBatchMessage" class="inline-message" role="status" aria-live="polite">{{ weatherBatchMessage }}</p><p v-if="hasCarryOverRoute" class="route-hint">路线从前一天最后一个规划点“{{ carryOverStop?.title }}”开始。</p><p v-if="reorderMessage" class="inline-message">{{ reorderMessage }}</p><p v-if="pointUpdateNotice" class="inline-message">{{ pointUpdateNotice }}</p><p v-if="!plannableDays.length" class="muted">{{ shareMode ? '当前选择范围暂无可生成的路线。' : '添加至少两个相邻的带坐标规划点后，可以生成路线。' }}</p>

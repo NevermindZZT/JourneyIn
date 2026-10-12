@@ -757,11 +757,29 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .journey-view-tabs button.selected { color: var(--p); background: color-mix(in srgb, var(--p) 9%, transparent); box-shadow: inset 0 -2px 0 var(--p); }
 @media (hover: hover) and (pointer: fine) { .journey-view-tabs button:hover { color: var(--p); background: color-mix(in srgb, var(--p) 9%, transparent); box-shadow: inset 0 -2px 0 var(--p); } }
 .journey-view-tabs button small { padding-left: 3px; color: inherit; font-size: 9px; }
+.daily-overview { display: grid; gap: 12px; }
+.daily-overview-heading { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.daily-overview-heading > div { display: grid; min-width: 0; gap: 3px; }
+.daily-overview-heading h2 { margin: 1px 0 0; color: var(--ink); font-size: 18px; line-height: 1.35; overflow-wrap: anywhere; }
+.daily-overview-edit { min-height: 44px; flex: 0 0 auto; padding-inline: 10px; border: 1px solid color-mix(in srgb, var(--p) 30%, var(--line)); }
+.daily-content-title-field { display: grid; gap: 6px; color: var(--muted); font-size: 11px; font-weight: 800; }
+.daily-content-title-field input { width: 100%; min-height: 44px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 11px; outline: none; color: var(--ink); background: var(--surface); font: inherit; font-weight: 500; }
+.daily-content-title-field input:focus { border-color: var(--p); box-shadow: 0 0 0 3px color-mix(in srgb, var(--p) 15%, transparent); }
+.daily-content-help { margin: -5px 0 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.daily-arrangement-notes { min-width: 0; color: var(--ink); font-size: 12px; line-height: 1.65; overflow-wrap: anywhere; }
+.daily-arrangement-notes > :first-child { margin-top: 0; }
+.daily-arrangement-notes > :last-child { margin-bottom: 0; }
+.daily-arrangement-empty { margin: 0; font-size: 11px; }
+.daily-content-actions { justify-content: flex-end; margin-top: 0; }
+.daily-overview .daily-content-notice { margin: 0; }
+@container workspace-panel (max-width: 430px) { .daily-overview-heading h2 { font-size: 16px; } .daily-overview-edit { min-height: 44px; padding-inline: 8px; } }
+
 .journey-day-tabs { display: flex; gap: 5px; min-height: 48px; align-items: center; overflow-x: auto; padding: 7px 17px 8px; border-bottom: 1px solid var(--line); scrollbar-width: none; }
 .journey-day-tabs::-webkit-scrollbar { display: none; }
 .journey-day-tabs button { display: inline-flex; flex: 0 0 auto; min-height: 32px; align-items: center; gap: 4px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 9px; color: var(--muted); background: transparent; font-size: 10px; font-weight: 900; white-space: nowrap; }
 .journey-day-tabs button small { font-size: 9px; font-weight: 700; }
 .journey-day-tabs button.selected { border-color: var(--p); color: var(--md-on-primary); background: var(--p); }
+.journey-day-tabs button:disabled { cursor: not-allowed; opacity: .48; }
 @media (hover: hover) and (pointer: fine) { .journey-day-tabs button:hover { border-color: var(--p); color: var(--md-on-primary); background: var(--p); } }
 .workspace-panel.sheet-peek .journey-view-tabs { display: none; }
 .workspace-panel.sheet-peek .journey-day-tabs { display: none; }
