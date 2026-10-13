@@ -189,14 +189,14 @@ func decodeStrictMergeObject(data []byte, allowed map[string]struct{}, target an
 	if raw == nil {
 		return fmt.Errorf("%s must be a JSON object", name)
 	}
-	for key, value := range raw {
+	for key := range raw {
 		if _, ok := allowed[key]; !ok {
 			return fmt.Errorf("%s.%s is not supported", name, key)
 		}
-		if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
-			return fmt.Errorf("%s.%s must not be null", name, key)
-		}
 	}
+	// Some MCP clients serialize omitted optional fields as explicit null.
+	// Pointer fields decode null to nil, matching the sparse-merge meaning of
+	// omission; required scalar fields are still rejected by domain validation.
 	if err := json.Unmarshal(data, target); err != nil {
 		return fmt.Errorf("decode %s: %w", name, err)
 	}

@@ -182,13 +182,53 @@ func TestMergePatchRejectsUnsupportedFields(t *testing.T) {
 		`{"map":{}}`,
 		`{"days":[{"day_id":"day-1","stops":[{"stop_id":"stop-1","location":{}}]}]}`,
 		`{"links":{"add":[{"title":"来源","url":"https://example.com","purpose":"unsupported"}]}}`,
-		`{"description_markdown":null}`,
 	}
 	for _, input := range cases {
 		var patch MergePatch
 		if err := json.Unmarshal([]byte(input), &patch); err == nil {
 			t.Errorf("unsupported merge patch was accepted: %s", input)
 		}
+	}
+}
+
+func TestMergePatchTreatsNullOptionalFieldsAsOmitted(t *testing.T) {
+	var patch MergePatch
+	input := `{"description_markdown":null,"links":null,"days":[{"day_id":"day-1","title":null,"notes_markdown":"新日备注","stops":[{"stop_id":"stop-1","title":null,"address":null,"kind":null,"time_window":null,"description_markdown":"新地点说明","links":null}]}]}`
+	if err := json.Unmarshal([]byte(input), &patch); err != nil {
+		t.Fatalf("decode MCP null placeholders: %v", err)
+	}
+	if patch.DescriptionMarkdown != nil || patch.Links != nil {
+		t.Fatalf("null root fields should be omitted: %+v", patch)
+	}
+	if len(patch.Days) != 1 || patch.Days[0].Title != nil || patch.Days[0].NotesMarkdown == nil {
+		t.Fatalf("day null fields were not omitted: %+v", patch.Days)
+	}
+	stop := patch.Days[0].Stops[0]
+	if stop.Title != nil || stop.Address != nil || stop.Kind != nil || stop.TimeWindow != nil || stop.Links != nil || stop.DescriptionMarkdown == nil {
+		t.Fatalf("stop null fields were not omitted: %+v", stop)
+	}
+	if err := validateMergePatch(patch); err != nil {
+		t.Fatalf("valid sparse patch with MCP null placeholders rejected: %v", err)
+	}
+}
+
+func TestMergePatchWithOnlyNullOptionalFieldsHasNoChange(t *testing.T) {
+	var patch MergePatch
+	if err := json.Unmarshal([]byte(`{"description_markdown":null,"links":null,"days":null}`), &patch); err != nil {
+		t.Fatalf("decode null-only patch: %v", err)
+	}
+	if err := validateMergePatch(patch); err == nil || !strings.Contains(err.Error(), "at least one supported field") {
+		t.Fatalf("null-only patch error = %v, want empty patch validation error", err)
+	}
+}
+
+func TestMergePatchNullRequiredDayIDIsRejected(t *testing.T) {
+	var patch MergePatch
+	if err := json.Unmarshal([]byte(`{"days":[{"day_id":null,"notes_markdown":"新日备注"}]}`), &patch); err != nil {
+		t.Fatalf("decode required-ID fixture: %v", err)
+	}
+	if err := validateMergePatch(patch); err == nil || !strings.Contains(err.Error(), "day_id must be a non-empty stable ID") {
+		t.Fatalf("null day_id error = %v, want required stable-ID validation error", err)
 	}
 }
 

@@ -218,7 +218,9 @@ description: 将 AI 生成的单次旅行规划整理为 JourneyIn Trip JSON，�
 
 `Day.title` 仅在 `merge_patch_version >= 3` 时可用；`Day.notes_markdown` 和规划点详情从 v2 开始支持。只改每日说明时省略 `title`，只改规划点时省略 `notes_markdown`。
 
-只有实际要增加或删除链接时才发送对应层级的 `links` 对象。新增时用 `links: { "add": [...] }`，删除时用 `links: { "remove_ids": ["link-id"] }`；不要发送 `links: {}` 或 `add: []` 与 `remove_ids: []` 都为空的对象。没有链接变更就完全省略 `links` 字段。
+只有实际要增加或删除链接时才发送对应层级的 `links` 操作对象。新增时用 `links: { "add": [...] }`，删除时用 `links: { "remove_ids": ["link-id"] }`；不要发送 `links: {}` 或空操作数组。通常应完全省略未变更的可选字段；若当前 MCP 调用 schema 强制要求这些可选字段显式取值，则 `null` 只表示“未修改/省略”，空字符串才表示清空 Markdown 等可清空字段。对于 links，强制占位时用 `links: null`，绝不能用虚构 ID、空对象或空操作数组。
+
+如果 MCP 返回 `... must not be null`、空链接 patch 错误或类似校验错误，说明 Host 工具 schema 与服务端 sparse-merge 解码契约不一致。不要用空链接操作或假 ID 重试，也不要重复发送相同参数；停止写入并报告精确错误，等待 schema/服务端修复后重新读取当前 revision 并生成新的 preview。
 
 以下是同时修改说明和执行真实链接操作的组合示例：
 
@@ -362,7 +364,7 @@ merge 不得传 trip_json。Day/Stop 必须按稳定 day_id/stop_id 定位，不
 | location_required | 暂停写入，逐点请求用户明确允许本次以 draft 保存待解析点；未获允许不得继续。 |
 | upstream_unavailable / rate_limited | 保存已有草稿或无天气/路线快照的版本，前提是用户明确接受 warning；不要伪造上游结果。 |
 | payload_too_large | 减少 raw payload、过长 Markdown 或路线 geometry；不能通过截断破坏 JSON。 |
-| patch.links must contain add or remove_ids | 如果没有增删链接，完全省略 `links` 字段；不要发送空对象或两个空数组。只有实际变更链接时才发送 add/remove_ids 操作。 |
+| patch.links must contain add or remove_ids | 未变更 links 时优先省略；若调用 schema 强制占位，使用 `links: null`。不要发送空对象/空操作数组或虚构 ID；若服务端仍拒绝 null，停止并报告 Host schema/服务端解码不兼容，修复后重新 preview。 |
 
 ## 不能做的事
 

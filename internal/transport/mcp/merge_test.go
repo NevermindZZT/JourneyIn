@@ -158,14 +158,19 @@ func TestPreviewMergeMCPFlowPreservesRouteData(t *testing.T) {
 			"expected_revision": record.Revision,
 			"patch": map[string]any{
 				"description_markdown": "新总体说明",
+				"links":                nil,
 				"days": []any{map[string]any{
 					"day_id":         "day-1",
 					"title":          "兰州→黄河汇流→刘家峡",
 					"notes_markdown": "新日备注",
 					"stops": []any{map[string]any{
 						"stop_id":              "stop-1",
+						"title":                nil,
+						"address":              nil,
+						"kind":                 nil,
 						"description_markdown": "新地点说明",
-						"time_window":          map[string]any{"departure": "22:50"},
+						"links":                nil,
+						"time_window":          map[string]any{"arrival": nil, "departure": "22:50"},
 					}},
 				}},
 			},
