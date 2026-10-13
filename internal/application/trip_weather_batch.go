@@ -56,6 +56,9 @@ func tripLocalToday(now time.Time, timezone string) (string, error) {
 // days query current weather instead of requesting unavailable historical
 // forecasts. Failures are reported per point and never replace existing snapshots.
 func (s *TripService) RefreshTripWeatherBatch(ctx context.Context, tripID string, expectedRevision, offset int, input WeatherInput, source string) (store.TripRecord, WeatherBatchResult, error) {
+	if err := s.requireTripEdit(ctx, tripID); err != nil {
+		return store.TripRecord{}, WeatherBatchResult{}, err
+	}
 	result := WeatherBatchResult{Offset: offset, Items: make([]WeatherBatchItem, 0, WeatherBatchSize)}
 	if offset < 0 {
 		return store.TripRecord{}, result, errors.New("weather offset must be nonnegative")

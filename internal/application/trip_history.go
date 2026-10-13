@@ -34,6 +34,9 @@ func normalizeSavedTripVersionLabel(label string) (string, error) {
 }
 
 func (s *TripService) SaveTripVersion(ctx context.Context, tripID string, expectedRevision int, label string) (store.SavedTripVersion, bool, error) {
+	if err := s.requireTripEdit(ctx, tripID); err != nil {
+		return store.SavedTripVersion{}, false, err
+	}
 	label, err := normalizeSavedTripVersionLabel(label)
 	if err != nil {
 		return store.SavedTripVersion{}, false, err
@@ -42,6 +45,9 @@ func (s *TripService) SaveTripVersion(ctx context.Context, tripID string, expect
 }
 
 func (s *TripService) SaveTripVersionIdempotent(ctx context.Context, tripID string, expectedRevision int, label, idempotencyKey string) (store.SavedTripVersion, bool, bool, error) {
+	if err := s.requireTripEdit(ctx, tripID); err != nil {
+		return store.SavedTripVersion{}, false, false, err
+	}
 	idempotencyKey = strings.TrimSpace(idempotencyKey)
 	if idempotencyKey == "" {
 		return store.SavedTripVersion{}, false, false, ErrIdempotencyKeyRequired
@@ -88,10 +94,16 @@ func (s *TripService) SaveTripVersionIdempotent(ctx context.Context, tripID stri
 }
 
 func (s *TripService) ListTripVersions(ctx context.Context, tripID string, limit int) ([]store.SavedTripVersion, error) {
+	if err := s.requireTripRead(ctx, tripID); err != nil {
+		return nil, err
+	}
 	return s.store.ListSavedTripVersions(ctx, tripID, limit)
 }
 
 func (s *TripService) GetTripVersion(ctx context.Context, tripID, versionID string) (store.SavedTripVersion, error) {
+	if err := s.requireTripRead(ctx, tripID); err != nil {
+		return store.SavedTripVersion{}, err
+	}
 	return s.store.GetSavedTripVersion(ctx, tripID, versionID)
 }
 
@@ -99,6 +111,9 @@ func (s *TripService) GetTripVersion(ctx context.Context, tripID, versionID stri
 // its immutable, user-saved history snapshots. The target Trip ID is retained
 // and the normal optimistic revision check protects newer edits.
 func (s *TripService) RestoreTripVersionIdempotent(ctx context.Context, tripID, versionID string, expectedRevision int, idempotencyKey string) (store.TripRecord, bool, error) {
+	if err := s.requireTripEdit(ctx, tripID); err != nil {
+		return store.TripRecord{}, false, err
+	}
 	idempotencyKey = strings.TrimSpace(idempotencyKey)
 	if idempotencyKey == "" {
 		return store.TripRecord{}, false, ErrIdempotencyKeyRequired
@@ -145,10 +160,16 @@ func (s *TripService) RestoreTripVersionIdempotent(ctx context.Context, tripID, 
 }
 
 func (s *TripService) DeleteTripVersion(ctx context.Context, tripID, versionID string) error {
+	if err := s.requireTripEdit(ctx, tripID); err != nil {
+		return err
+	}
 	return s.store.DeleteSavedTripVersion(ctx, tripID, versionID)
 }
 
 func (s *TripService) DeleteTripVersionIdempotent(ctx context.Context, tripID, versionID, idempotencyKey string) (bool, error) {
+	if err := s.requireTripEdit(ctx, tripID); err != nil {
+		return false, err
+	}
 	idempotencyKey = strings.TrimSpace(idempotencyKey)
 	if idempotencyKey == "" {
 		return false, ErrIdempotencyKeyRequired

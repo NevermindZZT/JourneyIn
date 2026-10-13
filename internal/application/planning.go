@@ -63,6 +63,9 @@ var ErrPlanningLocationRequired = errors.New("all planned stops must have a save
 var ErrWeatherUnavailable = errors.New("weather forecast unavailable")
 
 func (s *TripService) AddStop(ctx context.Context, tripID string, expectedRevision int, dayID string, input AddStopInput, source string) (store.TripRecord, error) {
+	if err := s.requireTripEdit(ctx, tripID); err != nil {
+		return store.TripRecord{}, err
+	}
 	if strings.TrimSpace(input.Title) == "" {
 		return store.TripRecord{}, errors.New("stop title is required")
 	}
@@ -119,6 +122,9 @@ func (s *TripService) AddStop(ctx context.Context, tripID string, expectedRevisi
 }
 
 func (s *TripService) PlanTrip(ctx context.Context, tripID string, expectedRevision int, input PlanInput, source string) (store.TripRecord, error) {
+	if err := s.requireTripEdit(ctx, tripID); err != nil {
+		return store.TripRecord{}, err
+	}
 	if s.mapService == nil {
 		return store.TripRecord{}, errors.New("map service is not configured")
 	}
@@ -478,6 +484,9 @@ type WeatherInput struct {
 }
 
 func (s *TripService) AddSubStop(ctx context.Context, tripID string, expectedRevision int, dayID, parentStopID string, input AddStopInput, source string) (store.TripRecord, error) {
+	if err := s.requireTripEdit(ctx, tripID); err != nil {
+		return store.TripRecord{}, err
+	}
 	if strings.TrimSpace(input.Title) == "" {
 		return store.TripRecord{}, errors.New("sub-stop title is required")
 	}
@@ -541,6 +550,9 @@ func (s *TripService) AddSubStop(ctx context.Context, tripID string, expectedRev
 // MoveStop changes the order of a main stop or one of its child stops.
 // Main-stop moves invalidate this day's legs and the following day's cross-day leg; child-stop moves do not.
 func (s *TripService) MoveStop(ctx context.Context, tripID string, expectedRevision int, dayID, stopID, direction, source string) (store.TripRecord, error) {
+	if err := s.requireTripEdit(ctx, tripID); err != nil {
+		return store.TripRecord{}, err
+	}
 	direction = strings.ToLower(strings.TrimSpace(direction))
 	if direction != "up" && direction != "down" {
 		return store.TripRecord{}, errors.New("direction must be up or down")
@@ -625,6 +637,9 @@ func (s *TripService) MoveStop(ctx context.Context, tripID string, expectedRevis
 // ReorderStop moves a main stop or child stop to an exact 1-based sequence.
 // Main-stop reordering invalidates this day's legs and the following day's cross-day leg.
 func (s *TripService) ReorderStop(ctx context.Context, tripID string, expectedRevision int, dayID, stopID string, targetSequence int, source string) (store.TripRecord, error) {
+	if err := s.requireTripEdit(ctx, tripID); err != nil {
+		return store.TripRecord{}, err
+	}
 	if targetSequence < 1 {
 		return store.TripRecord{}, errors.New("target sequence must be positive")
 	}
@@ -713,6 +728,9 @@ func (s *TripService) ReorderStop(ctx context.Context, tripID string, expectedRe
 	return s.Replace(ctx, tripID, expectedRevision, normalized, source)
 }
 func (s *TripService) MoveStopToDay(ctx context.Context, tripID string, expectedRevision int, sourceDayID, stopID, targetDayID string, targetSequence int, source string) (store.TripRecord, error) {
+	if err := s.requireTripEdit(ctx, tripID); err != nil {
+		return store.TripRecord{}, err
+	}
 	sourceDayID = strings.TrimSpace(sourceDayID)
 	targetDayID = strings.TrimSpace(targetDayID)
 	stopID = strings.TrimSpace(stopID)
@@ -807,6 +825,9 @@ func (s *TripService) MoveStopToDay(ctx context.Context, tripID string, expected
 	return s.Replace(ctx, tripID, expectedRevision, normalized, source)
 }
 func (s *TripService) RefreshWeather(ctx context.Context, tripID string, expectedRevision int, dayID, stopID string, input WeatherInput, source string) (store.TripRecord, error) {
+	if err := s.requireTripEdit(ctx, tripID); err != nil {
+		return store.TripRecord{}, err
+	}
 	if s.weatherService == nil && s.mapService == nil {
 		return store.TripRecord{}, errors.New("weather service is not configured")
 	}
@@ -942,6 +963,9 @@ func (s *TripService) RefreshWeather(ctx context.Context, tripID string, expecte
 }
 
 func (s *TripService) DeleteStop(ctx context.Context, tripID string, expectedRevision int, dayID, stopID, source string) (store.TripRecord, error) {
+	if err := s.requireTripEdit(ctx, tripID); err != nil {
+		return store.TripRecord{}, err
+	}
 	record, err := s.store.GetTrip(ctx, tripID)
 	if err != nil {
 		return store.TripRecord{}, err

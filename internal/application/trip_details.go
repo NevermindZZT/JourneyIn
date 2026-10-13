@@ -52,6 +52,9 @@ func (e *DateRangeConflictError) Error() string {
 }
 
 func (s *TripService) UpdateTripDetails(ctx context.Context, tripID string, expectedRevision int, input UpdateTripDetailsInput, source string) (store.TripRecord, TripDetailsChangeSummary, error) {
+	if err := s.requireTripEdit(ctx, tripID); err != nil {
+		return store.TripRecord{}, TripDetailsChangeSummary{}, err
+	}
 	if input.Title == nil && input.DateRange == nil && input.ShowInAtlas == nil {
 		return store.TripRecord{}, TripDetailsChangeSummary{}, ErrTripDetailsEmpty
 	}
@@ -132,6 +135,9 @@ type tripDetailsIdempotencyPayload struct {
 }
 
 func (s *TripService) UpdateTripDetailsIdempotent(ctx context.Context, tripID string, expectedRevision int, input UpdateTripDetailsInput, idempotencyKey, source string) (store.TripRecord, TripDetailsChangeSummary, bool, error) {
+	if err := s.requireTripEdit(ctx, tripID); err != nil {
+		return store.TripRecord{}, TripDetailsChangeSummary{}, false, err
+	}
 	idempotencyKey = strings.TrimSpace(idempotencyKey)
 	if idempotencyKey == "" {
 		return store.TripRecord{}, TripDetailsChangeSummary{}, false, ErrIdempotencyKeyRequired

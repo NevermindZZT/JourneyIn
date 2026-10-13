@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
+	"errors"
 	"flag"
 	"io/fs"
 	"log"
@@ -19,6 +21,7 @@ import (
 	"journeyin/internal/collaboration"
 	journeymaps "journeyin/internal/maps"
 	"journeyin/internal/photos"
+	"journeyin/internal/security"
 	journeyshare "journeyin/internal/share"
 	"journeyin/internal/store"
 	"journeyin/internal/transport/httpapi"
@@ -58,7 +61,16 @@ func main() {
 		log.Fatal(err)
 	}
 	defer database.Close()
+	userService := application.NewUserService(database)
+	bootstrapUsername := strings.TrimSpace(os.Getenv("JOURNEYIN_AUTH_USERNAME"))
+	bootstrapPassword := os.Getenv("JOURNEYIN_AUTH_PASSWORD")
+	if bootstrapped, err := userService.BootstrapAdminIfEmpty(ctx, bootstrapUsername, bootstrapPassword); err != nil {
+		log.Fatal(err)
+	} else if bootstrapped {
+		logger.Info("bootstrapped first JourneyIn administrator", "username", bootstrapUsername)
+	}
 	app := application.NewTripService(database)
+	app.SetUserService(userService)
 	webFS, err := fs.Sub(journeyin.WebFS, "web/dist")
 	if err != nil {
 		log.Fatal(err)
@@ -69,7 +81,13 @@ func main() {
 	}
 	api := httpapi.NewServer(app, webFS, schemaFS, version, logger)
 	authenticator := httpapi.NewAuthenticator(os.Getenv("JOURNEYIN_AUTH_USERNAME"), os.Getenv("JOURNEYIN_AUTH_PASSWORD"), os.Getenv("JOURNEYIN_API_TOKEN"))
+	authenticator.SetUserService(userService)
 	api.SetAuthenticator(authenticator)
+	api.SetUserService(userService)
+	if !isLoopback(listen) && !authenticator.Enabled() {
+		logger.Error("remote HTTP listener requires a bootstrap user or JOURNEYIN_API_TOKEN")
+		os.Exit(2)
+	}
 	baiduServerAK := os.Getenv("JOURNEYIN_BAIDU_SERVER_AK")
 	if strings.TrimSpace(baiduServerAK) == "" {
 		baiduServerAK = settingValue(ctx, database, "map.baidu.server_key", os.Getenv("BMAP_WEBAPI_AK"))
@@ -167,16 +185,19 @@ func main() {
 	api.SetWeatherService(weatherService)
 
 	mcpToken := strings.TrimSpace(settingValue(ctx, database, "mcp.token", os.Getenv("JOURNEYIN_MCP_TOKEN")))
-	if !isLoopback(listen) && mcpToken == "" {
-		logger.Error("remote listen address requires JOURNEYIN_MCP_TOKEN")
+	if !isLoopback(listen) && mcpToken == "" && !authenticator.Enabled() {
+		logger.Error("remote MCP requires an admin token or configured user accounts with scoped API tokens")
 		os.Exit(2)
 	}
 	api.SetMCPToken(mcpToken)
 	mcpServer := mcptransport.NewServer(app, version, schemaFS)
 	mux := http.NewServeMux()
-	mux.Handle("/mcp", mcptransport.RequireBearer(mcpServer.HTTPHandler(), mcpToken))
-	apiHandler := httpapi.RequireAPIAuthWithAuthenticator(api.Handler(), authenticator)
-	mux.Handle("/", apiHandler)
+	mcpHandler := mcpServer.HTTPHandler()
+	if mcpToken != "" || authenticator.Enabled() {
+		mcpHandler = mcptransport.RequireBearerWithResolver(mcpHandler, mcpToken, authenticator.PrincipalForBearer)
+	}
+	mux.Handle("/mcp", mcpHandler)
+	mux.Handle("/", api.Handler())
 	readTimeout := durationEnv("JOURNEYIN_READ_TIMEOUT", 120*time.Second)
 	readHeaderTimeout := durationEnv("JOURNEYIN_READ_HEADER_TIMEOUT", 30*time.Second)
 	writeTimeout := durationEnv("JOURNEYIN_WRITE_TIMEOUT", 120*time.Second)
@@ -215,14 +236,53 @@ func runStdio() {
 		log.New(os.Stderr, "", log.LstdFlags).Fatal(err)
 	}
 	defer database.Close()
+	userService := application.NewUserService(database)
+	bootstrapUsername := strings.TrimSpace(os.Getenv("JOURNEYIN_AUTH_USERNAME"))
+	if _, err := userService.BootstrapAdminIfEmpty(context.Background(), bootstrapUsername, os.Getenv("JOURNEYIN_AUTH_PASSWORD")); err != nil {
+		log.New(os.Stderr, "", log.LstdFlags).Fatal(err)
+	}
+	authenticator := httpapi.NewAuthenticator(bootstrapUsername, os.Getenv("JOURNEYIN_AUTH_PASSWORD"), os.Getenv("JOURNEYIN_API_TOKEN"))
+	authenticator.SetUserService(userService)
+	mcpToken := strings.TrimSpace(settingValue(context.Background(), database, "mcp.token", os.Getenv("JOURNEYIN_MCP_TOKEN")))
+	stdioToken := strings.TrimSpace(os.Getenv("JOURNEYIN_STDIO_API_TOKEN"))
+	if stdioToken == "" {
+		stdioToken = strings.TrimSpace(os.Getenv("JOURNEYIN_API_TOKEN"))
+	}
+	if stdioToken == "" {
+		stdioToken = mcpToken
+	}
+	principal, err := resolveStdioPrincipal(context.Background(), authenticator, mcpToken, stdioToken)
+	if err != nil {
+		logger.Error("MCP stdio authentication failed", "error", err)
+		os.Exit(2)
+	}
 	schemaFS, err := fs.Sub(journeyin.SchemaFS, "schemas")
 	if err != nil {
 		log.New(os.Stderr, "", log.LstdFlags).Fatal(err)
 	}
-	if err := mcptransport.NewServer(application.NewTripService(database), version, schemaFS).RunStdio(context.Background()); err != nil {
+	app := application.NewTripService(database)
+	app.SetUserService(userService)
+	stdioCtx := security.WithPrincipal(context.Background(), principal)
+	if err := mcptransport.NewServer(app, version, schemaFS).RunStdio(stdioCtx); err != nil {
 		logger.Error("MCP stdio stopped", "error", err)
 		os.Exit(1)
 	}
+}
+
+func resolveStdioPrincipal(ctx context.Context, authenticator *httpapi.Authenticator, globalMCPToken, rawToken string) (security.Principal, error) {
+	if rawToken == "" {
+		if authenticator == nil || !authenticator.Enabled() {
+			return security.SystemPrincipal(), nil
+		}
+		return security.Principal{}, errors.New("JOURNEYIN_STDIO_API_TOKEN is required when authentication is enabled")
+	}
+	if globalMCPToken != "" && subtle.ConstantTimeCompare([]byte(rawToken), []byte(globalMCPToken)) == 1 {
+		return security.SystemPrincipal(), nil
+	}
+	if authenticator == nil {
+		return security.Principal{}, errors.New("MCP stdio authenticator is not configured")
+	}
+	return authenticator.PrincipalForBearer(ctx, rawToken)
 }
 
 func settingValue(ctx context.Context, database *store.Store, key, fallback string) string {

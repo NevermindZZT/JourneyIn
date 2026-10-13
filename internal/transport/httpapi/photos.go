@@ -10,6 +10,9 @@ import (
 )
 
 func (s *Server) getPhotoStatus(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdminPrincipal(w, r); !ok {
+		return
+	}
 	if s.photosService == nil {
 		writeJSON(w, http.StatusOK, photos.PhotoStatus{Enabled: false})
 		return
@@ -23,6 +26,9 @@ func (s *Server) getPhotoStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) syncPhotos(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdminPrincipal(w, r); !ok {
+		return
+	}
 	if s.photosService == nil || !s.photosService.IsEnabled() {
 		writeError(w, http.StatusBadRequest, "disabled", "photo service is not enabled", nil)
 		return
@@ -35,6 +41,9 @@ func (s *Server) syncPhotos(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getAtlasPhotos(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdminPrincipal(w, r); !ok {
+		return
+	}
 	if s.photosService == nil || !s.photosService.IsEnabled() {
 		writeJSON(w, http.StatusOK, []photos.PhotoAtlasItem{})
 		return
@@ -57,6 +66,9 @@ func (s *Server) getAtlasPhotos(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getPhotoThumbnail(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdminPrincipal(w, r); !ok {
+		return
+	}
 	if s.photosService == nil || !s.photosService.IsEnabled() {
 		http.NotFound(w, r)
 		return
@@ -84,6 +96,9 @@ func (s *Server) getPhotoThumbnail(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getPhotoPreview(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdminPrincipal(w, r); !ok {
+		return
+	}
 	if s.photosService == nil || !s.photosService.IsEnabled() {
 		http.NotFound(w, r)
 		return
@@ -121,6 +136,9 @@ func setVersionedPhotoCacheHeaders(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getPhotoFile(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdminPrincipal(w, r); !ok {
+		return
+	}
 	if s.photosService == nil || !s.photosService.IsEnabled() {
 		http.NotFound(w, r)
 		return

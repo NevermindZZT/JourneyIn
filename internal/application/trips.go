@@ -12,12 +12,14 @@ import (
 
 	"journeyin/internal/domain"
 	journeymaps "journeyin/internal/maps"
+	"journeyin/internal/security"
 	"journeyin/internal/store"
 	"journeyin/internal/weather"
 )
 
 type TripService struct {
 	store              *store.Store
+	userService        *UserService
 	mapService         *MapService
 	weatherService     *weather.Service
 	mu                 sync.Mutex
@@ -38,6 +40,7 @@ type preview struct {
 	ExpectedRevision int
 	ExpiresAt        time.Time
 	CreatedBy        string
+	PrincipalID      string
 }
 
 type PreviewResult struct {
@@ -65,6 +68,53 @@ type CommitResult struct {
 func NewTripService(s *store.Store) *TripService {
 	return &TripService{store: s, previews: make(map[string]preview), planLocks: make(map[string]chan struct{}), defaultMapProvider: journeymaps.ProviderAMap}
 }
+func (s *TripService) SetUserService(service *UserService) { s.userService = service }
+
+func (s *TripService) requireTripRead(ctx context.Context, tripID string) error {
+	principal, ok := security.PrincipalFromContext(ctx)
+	if !ok || principal.IsAdmin() {
+		return nil
+	}
+	if principal.UserID == "" {
+		return security.ErrForbidden
+	}
+	return nil // All authenticated account tiers are read-only outside edit grants.
+}
+
+func (s *TripService) requireTripEdit(ctx context.Context, tripID string) error {
+	principal, ok := security.PrincipalFromContext(ctx)
+	if !ok || principal.IsAdmin() || principal.AccessMode == security.AccessAllTripsEdit {
+		return nil
+	}
+	if principal.UserID == "" || s.userService == nil {
+		return security.ErrForbidden
+	}
+	allowed, err := s.userService.CanEditTrip(ctx, principal, tripID)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return security.ErrForbidden
+	}
+	return nil
+}
+
+func (s *TripService) requireCreateTrip(ctx context.Context) error {
+	principal, ok := security.PrincipalFromContext(ctx)
+	if !ok || principal.CanCreateTrips() {
+		return nil
+	}
+	return security.ErrForbidden
+}
+
+func principalIDFromContext(ctx context.Context) string {
+	principal, ok := security.PrincipalFromContext(ctx)
+	if !ok {
+		return ""
+	}
+	return principal.UserID
+}
+
 func (s *TripService) SetMapService(service *MapService) { s.mapService = service }
 
 func (s *TripService) SetWeatherService(service *weather.Service) {
@@ -112,12 +162,18 @@ func (s *TripService) Validate(document []byte) ([]byte, domain.Trip, []domain.V
 	return domain.NormalizeTrip(document)
 }
 func (s *TripService) Create(ctx context.Context, document []byte, source string) (store.TripRecord, error) {
+	if err := s.requireCreateTrip(ctx); err != nil {
+		return store.TripRecord{}, err
+	}
 	return s.store.CreateTrip(ctx, document, source)
 }
 
 // Import creates a new Trip copy and intentionally drops the exported root ID.
 // This makes export -> import round-trips safe even when the original Trip remains stored.
 func (s *TripService) Import(ctx context.Context, document []byte, source string) (store.TripRecord, error) {
+	if err := s.requireCreateTrip(ctx); err != nil {
+		return store.TripRecord{}, err
+	}
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(document, &raw); err != nil {
 		return store.TripRecord{}, err
@@ -133,15 +189,24 @@ func (s *TripService) Import(ctx context.Context, document []byte, source string
 	return s.store.CreateTrip(ctx, withoutID, source)
 }
 func (s *TripService) Get(ctx context.Context, id string) (store.TripRecord, error) {
+	if err := s.requireTripRead(ctx, id); err != nil {
+		return store.TripRecord{}, err
+	}
 	return s.store.GetTrip(ctx, id)
 }
 func (s *TripService) List(ctx context.Context, limit int) ([]store.TripRecord, error) {
 	return s.store.ListTrips(ctx, limit)
 }
 func (s *TripService) Replace(ctx context.Context, id string, expectedRevision int, document []byte, source string) (store.TripRecord, error) {
+	if err := s.requireTripEdit(ctx, id); err != nil {
+		return store.TripRecord{}, err
+	}
 	return s.store.ReplaceTrip(ctx, id, expectedRevision, document, source)
 }
 func (s *TripService) Delete(ctx context.Context, id string, expectedRevision int) error {
+	if err := s.requireTripEdit(ctx, id); err != nil {
+		return err
+	}
 	return s.store.DeleteTrip(ctx, id, expectedRevision)
 }
 
@@ -170,6 +235,17 @@ func (s *TripService) PreviewSave(ctx context.Context, document []byte, operatio
 	if operation == "replace" && expectedRevision < 1 {
 		return PreviewResult{}, errors.New("expected_revision is required for replace")
 	}
+	if operation == "create" {
+		if err := s.requireCreateTrip(ctx); err != nil {
+			return PreviewResult{}, err
+		}
+	} else if err := s.requireTripEdit(ctx, targetID); err != nil {
+		return PreviewResult{}, err
+	}
+	principalID := ""
+	if principal, ok := security.PrincipalFromContext(ctx); ok {
+		principalID = principal.UserID
+	}
 	previewID, err := opaqueID("preview")
 	if err != nil {
 		return PreviewResult{}, err
@@ -179,7 +255,7 @@ func (s *TripService) PreviewSave(ctx context.Context, document []byte, operatio
 		return PreviewResult{}, err
 	}
 	now := time.Now().UTC()
-	p := preview{ID: previewID, ConfirmationHash: domain.ContentHash([]byte(token)), PayloadHash: domain.ContentHash(normalized), Document: normalized, Operation: operation, TargetTripID: targetID, ExpectedRevision: expectedRevision, ExpiresAt: now.Add(15 * time.Minute), CreatedBy: createdBy}
+	p := preview{ID: previewID, ConfirmationHash: domain.ContentHash([]byte(token)), PayloadHash: domain.ContentHash(normalized), Document: normalized, Operation: operation, TargetTripID: targetID, ExpectedRevision: expectedRevision, ExpiresAt: now.Add(15 * time.Minute), CreatedBy: createdBy, PrincipalID: principalID}
 	s.mu.Lock()
 	s.previews[previewID] = p
 	s.mu.Unlock()
@@ -203,6 +279,20 @@ func (s *TripService) CommitSave(ctx context.Context, previewID, confirmationTok
 	if domain.ContentHash([]byte(confirmationToken)) != p.ConfirmationHash {
 		return CommitResult{}, errors.New("invalid confirmation token")
 	}
+	principalID := ""
+	if principal, ok := security.PrincipalFromContext(ctx); ok {
+		principalID = principal.UserID
+	}
+	if p.PrincipalID != "" && p.PrincipalID != principalID {
+		return CommitResult{}, security.ErrForbidden
+	}
+	if p.Operation == "create" {
+		if err := s.requireCreateTrip(ctx); err != nil {
+			return CommitResult{}, err
+		}
+	} else if err := s.requireTripEdit(ctx, p.TargetTripID); err != nil {
+		return CommitResult{}, err
+	}
 	if p.Operation != "create" {
 		if expectedRevision < 1 {
 			return CommitResult{}, errors.New("expected_revision is required for update")
@@ -217,6 +307,9 @@ func (s *TripService) CommitSave(ctx context.Context, previewID, confirmationTok
 	scope := "trip:" + p.TargetTripID
 	if p.Operation == "create" {
 		scope = "trip:create"
+	}
+	if principalID != "" {
+		scope += ":user:" + principalID
 	}
 	if replay, ok, err := s.store.Idempotency(ctx, scope, idempotencyKey, requestHash); err != nil {
 		return CommitResult{}, err

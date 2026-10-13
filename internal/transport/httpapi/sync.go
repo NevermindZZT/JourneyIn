@@ -28,6 +28,10 @@ func (s *Server) syncPush(w http.ResponseWriter, r *http.Request) {
 	}
 	accepted := make([]journeysync.Change, 0, len(body.Changes))
 	for _, change := range body.Changes {
+		if !s.canEditTrip(r.Context(), change.AggregateID) {
+			writeError(w, http.StatusForbidden, "forbidden", "this account cannot edit the requested trip", map[string]any{"change_id": change.ChangeID})
+			return
+		}
 		result, err := s.syncStore.PushChange(r.Context(), change)
 		if err != nil {
 			code := "sync_error"

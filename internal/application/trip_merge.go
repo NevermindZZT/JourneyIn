@@ -204,6 +204,9 @@ func decodeStrictMergeObject(data []byte, allowed map[string]struct{}, target an
 }
 
 func (s *TripService) PreviewMerge(ctx context.Context, patch MergePatch, targetID string, expectedRevision int, createdBy string) (PreviewResult, error) {
+	if err := s.requireTripEdit(ctx, targetID); err != nil {
+		return PreviewResult{}, err
+	}
 	if strings.TrimSpace(targetID) == "" {
 		return PreviewResult{}, errors.New("target_trip_id is required for merge")
 	}
@@ -270,6 +273,7 @@ func (s *TripService) PreviewMerge(ctx context.Context, patch MergePatch, target
 		ExpectedRevision: expectedRevision,
 		ExpiresAt:        now.Add(15 * time.Minute),
 		CreatedBy:        createdBy,
+		PrincipalID:      principalIDFromContext(ctx),
 	}
 	s.mu.Lock()
 	s.previews[previewID] = p

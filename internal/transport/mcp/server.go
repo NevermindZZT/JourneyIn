@@ -2,6 +2,7 @@ package mcptransport
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -13,6 +14,7 @@ import (
 	"journeyin/internal/application"
 	"journeyin/internal/domain"
 	journeymaps "journeyin/internal/maps"
+	"journeyin/internal/security"
 	"journeyin/internal/store"
 )
 
@@ -241,17 +243,42 @@ func (s *Server) listTrips(ctx context.Context, req *mcp.CallToolRequest, input 
 	return nil, ListOutput{Items: items}, nil
 }
 
+type BearerPrincipalResolver func(context.Context, string) (security.Principal, error)
+
 func RequireBearer(next http.Handler, token string) http.Handler {
-	if token == "" {
+	return RequireBearerWithResolver(next, token, nil)
+}
+
+func RequireBearerWithResolver(next http.Handler, token string, resolver BearerPrincipalResolver) http.Handler {
+	if strings.TrimSpace(token) == "" && resolver == nil {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		value := strings.TrimSpace(r.Header.Get("Authorization"))
-		if value != "Bearer "+token {
+		if !strings.HasPrefix(value, "Bearer ") {
 			w.Header().Set("WWW-Authenticate", "Bearer")
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		raw := strings.TrimSpace(strings.TrimPrefix(value, "Bearer "))
+		var principal security.Principal
+		if token != "" && subtle.ConstantTimeCompare([]byte(raw), []byte(token)) == 1 {
+			principal = security.SystemPrincipal()
+		} else if resolver != nil {
+			resolved, err := resolver(r.Context(), raw)
+			if err == nil {
+				principal = resolved
+			} else {
+				w.Header().Set("WWW-Authenticate", "Bearer")
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+		} else {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		r = r.WithContext(security.WithPrincipal(r.Context(), principal))
 		next.ServeHTTP(w, r)
 	})
 }

@@ -41,6 +41,7 @@ type Server struct {
 	syncStore            *store.Store
 	settingsStore        *store.Store
 	auth                 *Authenticator
+	userService          *application.UserService
 	photosService        *photos.Service
 	weatherService       *weather.Service
 	mcpToken             string
@@ -84,16 +85,39 @@ func (s *Server) SetCollaborationService(service *collaboration.Service) {
 
 func (s *Server) SetSyncStore(syncStore *store.Store)         { s.syncStore = syncStore }
 func (s *Server) SetSettingsStore(settingsStore *store.Store) { s.settingsStore = settingsStore }
-func (s *Server) SetAuthenticator(auth *Authenticator)        { s.auth = auth }
-func (s *Server) SetPhotoService(service *photos.Service)     { s.photosService = service }
-func (s *Server) SetWeatherService(service *weather.Service)  { s.weatherService = service }
-func (s *Server) SetMCPToken(token string)                    { s.mcpToken = strings.TrimSpace(token) }
+func (s *Server) SetAuthenticator(auth *Authenticator) {
+	s.auth = auth
+	if s.auth != nil && s.userService != nil {
+		s.auth.SetUserService(s.userService)
+	}
+}
+func (s *Server) SetUserService(service *application.UserService) {
+	s.userService = service
+	if s.trips != nil {
+		s.trips.SetUserService(service)
+	}
+	if s.auth == nil {
+		s.auth = NewAuthenticator("", "", "")
+	}
+	s.auth.SetUserService(service)
+}
+func (s *Server) SetPhotoService(service *photos.Service)    { s.photosService = service }
+func (s *Server) SetWeatherService(service *weather.Service) { s.weatherService = service }
+func (s *Server) SetMCPToken(token string)                   { s.mcpToken = strings.TrimSpace(token) }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", s.health)
 	mux.HandleFunc("POST /api/v1/auth/login", s.login)
 	mux.HandleFunc("POST /api/v1/auth/logout", s.logout)
+	mux.HandleFunc("GET /api/v1/auth/me", s.currentUser)
+	mux.HandleFunc("GET /api/v1/admin/users", s.listUsers)
+	mux.HandleFunc("POST /api/v1/admin/users", s.createUser)
+	mux.HandleFunc("PATCH /api/v1/admin/users/{userID}", s.updateUser)
+	mux.HandleFunc("DELETE /api/v1/admin/users/{userID}", s.deleteUser)
+	mux.HandleFunc("GET /api/v1/admin/users/{userID}/tokens", s.listUserTokens)
+	mux.HandleFunc("POST /api/v1/admin/users/{userID}/tokens", s.createUserToken)
+	mux.HandleFunc("DELETE /api/v1/admin/users/{userID}/tokens/{tokenID}", s.revokeUserToken)
 	mux.HandleFunc("GET /api/v1/capabilities", s.capabilities)
 	mux.HandleFunc("GET /api/v1/schema/trip/v1.json", s.schemaTrip)
 	mux.HandleFunc("POST /api/v1/validate", s.validateTrip)
@@ -166,7 +190,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/v1/settings/weather", s.updateWeatherSettings)
 	mux.HandleFunc("/_AMapService/", s.amapServiceProxy)
 	mux.Handle("/", s.staticHandler())
-	return requestLogger(compressAPIJSON(mux), s.logger)
+	return requestLogger(compressAPIJSON(RequireAPIAuthWithAuthenticator(mux, s.auth)), s.logger)
 }
 
 type loginRequest struct {
@@ -175,8 +199,8 @@ type loginRequest struct {
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
-	if s.auth == nil || !s.auth.UsernamePasswordEnabled() {
-		writeError(w, http.StatusServiceUnavailable, "auth_not_configured", "username/password authentication is not configured", nil)
+	if s.auth == nil {
+		writeError(w, http.StatusServiceUnavailable, "auth_not_configured", "user authentication is not configured", nil)
 		return
 	}
 	var body loginRequest
@@ -189,8 +213,12 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "invalid_credentials", "账号或密码错误", nil)
 		return
 	}
+	if errors.Is(err, ErrAuthNotConfigured) {
+		writeError(w, http.StatusServiceUnavailable, "auth_not_configured", "no user account has been configured", nil)
+		return
+	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "auth_error", err.Error(), nil)
+		writeError(w, http.StatusInternalServerError, "auth_error", "could not create login session", nil)
 		return
 	}
 	s.auth.SetSessionCookie(w, session, r.TLS != nil)
@@ -284,7 +312,9 @@ func (s *Server) listTrips(w http.ResponseWriter, r *http.Request) {
 	}
 	result := make([]map[string]any, 0, len(records))
 	for _, record := range records {
-		result = append(result, tripSummary(record))
+		summary := tripSummary(record)
+		summary["can_edit"] = s.canEditTrip(r.Context(), record.ID)
+		result = append(result, summary)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": result, "next_cursor": nil})
 }
@@ -329,7 +359,9 @@ func (s *Server) getTrip(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "store_error", err.Error(), nil)
 		return
 	}
-	writeJSON(w, http.StatusOK, tripResponse(record))
+	response := tripResponse(record)
+	response["can_edit"] = s.canEditTrip(r.Context(), record.ID)
+	writeJSON(w, http.StatusOK, response)
 }
 func (s *Server) exportTrip(w http.ResponseWriter, r *http.Request) {
 	record, err := s.trips.Get(r.Context(), r.PathValue("id"))
@@ -521,6 +553,9 @@ func readBody(r *http.Request, max int64) ([]byte, error) {
 	return data, nil
 }
 func writeDomainError(w http.ResponseWriter, err error) {
+	if writePermissionError(w, err) {
+		return
+	}
 	var validation application.ValidationError
 	if errors.As(err, &validation) {
 		writeError(w, http.StatusBadRequest, "validation_error", err.Error(), map[string]any{"issues": validation.Issues})

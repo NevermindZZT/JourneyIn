@@ -68,7 +68,9 @@ Linux rootful Docker 和常见 Docker Desktop 环境可直接使用。rootless D
 
 如果省略 `-data` 和 `JOURNEYIN_DATA_DIR`，Windows 默认保存到 `%AppData%/JourneyIn/journeyin.db`；Linux/macOS 使用用户配置目录。构建 Go 二进制不会清理数据库。建议验收时固定使用绝对数据路径。
 
-Docker 部署必须设置 `JOURNEYIN_AUTH_USERNAME` 和 `JOURNEYIN_AUTH_PASSWORD`；浏览器访问 REST API 时会显示账号密码登录面板，登录成功后使用 24 小时 HttpOnly 会话 Cookie。监听非 localhost 地址时还必须设置 `JOURNEYIN_MCP_TOKEN` 保护 `/mcp`。`JOURNEYIN_API_TOKEN` 仍作为兼容旧客户端的可选 Bearer Token。
+`JOURNEYIN_AUTH_USERNAME` 和 `JOURNEYIN_AUTH_PASSWORD` 仅在数据库尚无用户时引导创建首位管理员，密码以 PBKDF2 哈希保存；之后数据库用户为权威来源，修改这两个环境变量不会重置用户密码。仅监听 localhost 且尚无账户时，可用本地管理员界面创建首个管理员；监听非 localhost 地址必须启用 API 认证。登录使用 24 小时 HttpOnly 会话 Cookie。
+
+管理员可在「设置 → 用户管理」新增、修改、删除用户并配置权限：只读（可查看所有行程）、指定行程可编辑（其他行程只读）和所有行程可编辑；只有管理员能管理用户、服务设置和分享。管理员也可为用户签发 90 天有效的 MCP/API 令牌，令牌原文仅显示一次，服务端只存哈希。远程 `/mcp` 可使用管理员令牌，或使用该用户自己的令牌以遵循对应行程权限。用户账户启用后，`mcp stdio` 也必须设置 `JOURNEYIN_STDIO_API_TOKEN`；日常 Agent 建议使用用户级令牌。仅尚未启用账户认证的本地 stdio 保留系统管理员模式。环境变量 `JOURNEYIN_API_TOKEN` 和 `JOURNEYIN_MCP_TOKEN` 是高权限兼容/服务令牌，应妥善保管。
 
 ## 本地开发：前后端分离
 

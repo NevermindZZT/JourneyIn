@@ -105,6 +105,9 @@ func (s *Server) updatePlanningPoint(w http.ResponseWriter, r *http.Request) {
 }
 
 func writePlanningPointError(w http.ResponseWriter, err error) {
+	if writePermissionError(w, err) {
+		return
+	}
 	if errors.Is(err, store.ErrRevisionConflict) {
 		writeError(w, http.StatusConflict, "revision_conflict", err.Error(), nil)
 		return

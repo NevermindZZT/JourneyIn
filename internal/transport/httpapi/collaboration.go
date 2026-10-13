@@ -146,6 +146,9 @@ func collaborationRequestBucket(path string) (string, int) {
 	return ":api", 120
 }
 func (s *Server) createCollaborationShare(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdminPrincipal(w, r); !ok {
+		return
+	}
 	if s.collaborationService == nil {
 		writeError(w, http.StatusServiceUnavailable, "collaboration_unavailable", "collaboration sharing is not configured", nil)
 		return
@@ -191,6 +194,9 @@ func (s *Server) createCollaborationShare(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) listCollaborationShares(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdminPrincipal(w, r); !ok {
+		return
+	}
 	if s.collaborationService == nil {
 		writeError(w, http.StatusServiceUnavailable, "collaboration_unavailable", "collaboration sharing is not configured", nil)
 		return
@@ -235,6 +241,9 @@ func (s *Server) listCollaborationShares(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) revokeCollaborationShare(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdminPrincipal(w, r); !ok {
+		return
+	}
 	if s.collaborationService == nil {
 		writeError(w, http.StatusServiceUnavailable, "collaboration_unavailable", "collaboration sharing is not configured", nil)
 		return

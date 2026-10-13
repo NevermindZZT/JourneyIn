@@ -35,6 +35,9 @@ type createShareBody struct {
 }
 
 func (s *Server) createShare(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdminPrincipal(w, r); !ok {
+		return
+	}
 	if s.shareService == nil {
 		writeError(w, http.StatusServiceUnavailable, "sharing_unavailable", "share service is not configured", nil)
 		return
@@ -187,6 +190,9 @@ func (s *Server) shareBaseURL(r *http.Request) string {
 }
 
 func (s *Server) revokeShare(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdminPrincipal(w, r); !ok {
+		return
+	}
 	if s.shareService == nil {
 		writeError(w, http.StatusServiceUnavailable, "sharing_unavailable", "share service is not configured", nil)
 		return

@@ -58,6 +58,9 @@ func (s *Server) resolveMapProvider(ctx context.Context, requested journeymaps.P
 }
 
 func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdminPrincipal(w, r); !ok {
+		return
+	}
 	if s.settingsStore == nil {
 		writeError(w, http.StatusServiceUnavailable, "settings_unavailable", "settings store is not configured", nil)
 		return
@@ -194,6 +197,9 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) updateMapKeys(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdminPrincipal(w, r); !ok {
+		return
+	}
 	if s.settingsStore == nil {
 		writeError(w, http.StatusServiceUnavailable, "settings_unavailable", "settings store is not configured", nil)
 		return
@@ -272,6 +278,9 @@ func (s *Server) updateMapKeys(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) updateMapPreferences(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdminPrincipal(w, r); !ok {
+		return
+	}
 	if s.settingsStore == nil {
 		writeError(w, http.StatusServiceUnavailable, "settings_unavailable", "settings store is not configured", nil)
 		return
@@ -299,6 +308,9 @@ type poiPreferencesBody struct {
 }
 
 func (s *Server) updatePOIPreferences(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdminPrincipal(w, r); !ok {
+		return
+	}
 	if s.settingsStore == nil {
 		writeError(w, http.StatusServiceUnavailable, "settings_unavailable", "settings store is not configured", nil)
 		return
@@ -320,6 +332,9 @@ func (s *Server) updatePOIPreferences(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"saved": true, "provider_priority": priority})
 }
 func (s *Server) clearPlaceDirectory(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdminPrincipal(w, r); !ok {
+		return
+	}
 	if s.settingsStore == nil {
 		writeError(w, http.StatusServiceUnavailable, "settings_unavailable", "settings store is not configured", nil)
 		return
@@ -330,11 +345,15 @@ func (s *Server) clearPlaceDirectory(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"cleared": true})
 }
+
 type photosSettingsBody struct {
 	RootDir *string `json:"root_dir"`
 }
 
 func (s *Server) updatePhotosSettings(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdminPrincipal(w, r); !ok {
+		return
+	}
 	if s.settingsStore == nil {
 		writeError(w, http.StatusServiceUnavailable, "settings_unavailable", "settings store is not configured", nil)
 		return
@@ -387,6 +406,9 @@ type weatherSettingsBody struct {
 }
 
 func (s *Server) updateWeatherSettings(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdminPrincipal(w, r); !ok {
+		return
+	}
 	if s.settingsStore == nil {
 		writeError(w, http.StatusServiceUnavailable, "settings_unavailable", "settings store is not configured", nil)
 		return
@@ -457,4 +479,3 @@ func (s *Server) updateWeatherSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"saved": true})
 }
-

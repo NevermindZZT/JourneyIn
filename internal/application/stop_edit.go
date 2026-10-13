@@ -47,6 +47,9 @@ var ErrPlanningPointUpdateEmpty = errors.New("planning point update must include
 // route; a location change also clears weather tied to the old location.
 func (s *TripService) UpdatePlanningPoint(ctx context.Context, tripID string, expectedRevision int, dayID, stopID string, input UpdatePlanningPointInput, source string) (store.TripRecord, UpdatePlanningPointChanges, error) {
 	changes := UpdatePlanningPointChanges{}
+	if err := s.requireTripEdit(ctx, tripID); err != nil {
+		return store.TripRecord{}, changes, err
+	}
 	if err := validatePlanningPointUpdate(input); err != nil {
 		return store.TripRecord{}, changes, err
 	}

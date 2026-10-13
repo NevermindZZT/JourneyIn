@@ -126,6 +126,9 @@ func tripHistoryResponse(version store.SavedTripVersion, includeDocument bool) m
 }
 
 func writeTripHistoryError(w http.ResponseWriter, err error) {
+	if writePermissionError(w, err) {
+		return
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "not_found", "trip not found", nil)
 		return

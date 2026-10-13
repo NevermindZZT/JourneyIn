@@ -1,11 +1,14 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"journeyin/internal/security"
 )
 
 func TestAuthenticatorLoginAndSession(t *testing.T) {
@@ -84,5 +87,19 @@ func TestPhotoFileEndpointRequiresAuthenticationWhenEnabled(t *testing.T) {
 	// 404 proves the request passed auth and reached the endpoint handler.
 	if authenticatedResponse.Code != http.StatusNotFound {
 		t.Fatalf("authenticated photo file status=%d, want endpoint 404", authenticatedResponse.Code)
+	}
+}
+
+func TestPrincipalForBearerMapsLegacyAPITokenToSystemAdmin(t *testing.T) {
+	auth := NewAuthenticator("", "", "legacy-api-token")
+	principal, err := auth.PrincipalForBearer(context.Background(), "legacy-api-token")
+	if err != nil || !principal.IsAdmin() || !principal.System {
+		t.Fatalf("legacy API token principal=%+v err=%v", principal, err)
+	}
+	if _, err := auth.PrincipalForBearer(context.Background(), "wrong-token"); err == nil {
+		t.Fatal("accepted an invalid bearer token")
+	}
+	if security.AccessAllTripsEdit != principal.AccessMode {
+		t.Fatalf("legacy API token access mode=%s", principal.AccessMode)
 	}
 }

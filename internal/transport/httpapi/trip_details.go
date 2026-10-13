@@ -44,6 +44,9 @@ func (s *Server) updateTripDetails(w http.ResponseWriter, r *http.Request) {
 }
 
 func writeTripDetailsError(w http.ResponseWriter, err error) {
+	if writePermissionError(w, err) {
+		return
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "not_found", "trip not found", nil)
 		return

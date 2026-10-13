@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
@@ -9,6 +10,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"journeyin/internal/application"
+	"journeyin/internal/security"
 )
 
 const (
@@ -24,8 +28,10 @@ type Authenticator struct {
 	password string
 	apiToken string
 
-	mu       sync.RWMutex
-	sessions map[string]time.Time
+	mu              sync.RWMutex
+	sessions        map[string]time.Time
+	userService     *application.UserService
+	userModeEnabled bool
 }
 
 func NewAuthenticator(username, password, apiToken string) *Authenticator {
@@ -37,8 +43,52 @@ func NewAuthenticator(username, password, apiToken string) *Authenticator {
 	}
 }
 
+func (a *Authenticator) SetUserService(users *application.UserService) {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	a.userService = users
+	a.mu.Unlock()
+	a.RefreshUserModeEnabled()
+}
+
+func (a *Authenticator) RefreshUserModeEnabled() {
+	if a == nil {
+		return
+	}
+	a.mu.RLock()
+	users := a.userService
+	a.mu.RUnlock()
+	if users == nil {
+		return
+	}
+	enabled, err := users.HasUsers(context.Background())
+	if err != nil {
+		return
+	}
+	a.mu.Lock()
+	a.userModeEnabled = enabled
+	a.mu.Unlock()
+}
+
+func (a *Authenticator) userAuth() (*application.UserService, bool) {
+	if a == nil {
+		return nil, false
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.userService, a.userModeEnabled
+}
+
 func (a *Authenticator) Enabled() bool {
-	return a != nil && (a.apiToken != "" || a.UsernamePasswordEnabled())
+	if a == nil {
+		return false
+	}
+	a.mu.RLock()
+	userModeEnabled := a.userModeEnabled
+	a.mu.RUnlock()
+	return a.apiToken != "" || a.UsernamePasswordEnabled() || userModeEnabled
 }
 
 func (a *Authenticator) UsernamePasswordEnabled() bool {
@@ -46,6 +96,15 @@ func (a *Authenticator) UsernamePasswordEnabled() bool {
 }
 
 func (a *Authenticator) Login(username, password string) (string, error) {
+	users, userMode := a.userAuth()
+	if userMode && users != nil {
+		principal, err := users.Authenticate(context.Background(), username, password)
+		if err != nil {
+			return "", ErrInvalidCredentials
+		}
+		token, _, err := users.CreateSession(context.Background(), principal.UserID)
+		return token, err
+	}
 	if !a.UsernamePasswordEnabled() {
 		return "", ErrAuthNotConfigured
 	}
@@ -65,30 +124,66 @@ func (a *Authenticator) Login(username, password string) (string, error) {
 	return token, nil
 }
 
-func (a *Authenticator) Authorized(r *http.Request) bool {
+func systemPrincipal() security.Principal {
+	return security.Principal{UserID: "system", Username: "System", Role: security.RoleAdmin, AccessMode: security.AccessAllTripsEdit, System: true}
+}
+
+func (a *Authenticator) PrincipalForRequest(r *http.Request) (security.Principal, bool) {
 	if a == nil || !a.Enabled() {
-		return true
+		return systemPrincipal(), true
 	}
-	if a.apiToken != "" && subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+a.apiToken)) == 1 {
-		return true
+	authorization := r.Header.Get("Authorization")
+	if a.apiToken != "" && subtle.ConstantTimeCompare([]byte(authorization), []byte("Bearer "+a.apiToken)) == 1 {
+		return systemPrincipal(), true
+	}
+	users, userMode := a.userAuth()
+	if userMode && users != nil && strings.HasPrefix(authorization, "Bearer ") {
+		raw := strings.TrimSpace(strings.TrimPrefix(authorization, "Bearer "))
+		if principal, err := users.PrincipalForAPIToken(r.Context(), raw); err == nil {
+			return principal, true
+		}
 	}
 	cookie, err := r.Cookie(authSessionCookie)
 	if err != nil || cookie.Value == "" {
-		return false
+		return security.Principal{}, false
+	}
+	if userMode && users != nil {
+		principal, err := users.PrincipalForSession(r.Context(), cookie.Value)
+		return principal, err == nil
 	}
 	a.mu.RLock()
 	expiresAt, ok := a.sessions[cookie.Value]
+	username := a.username
 	a.mu.RUnlock()
 	if !ok {
-		return false
+		return security.Principal{}, false
 	}
 	if time.Now().After(expiresAt) {
 		a.mu.Lock()
 		delete(a.sessions, cookie.Value)
 		a.mu.Unlock()
-		return false
+		return security.Principal{}, false
 	}
-	return true
+	return security.Principal{UserID: "legacy-admin", Username: username, Role: security.RoleAdmin, AccessMode: security.AccessAllTripsEdit}, true
+}
+
+func (a *Authenticator) PrincipalForBearer(ctx context.Context, raw string) (security.Principal, error) {
+	if a == nil || raw == "" {
+		return security.Principal{}, ErrInvalidCredentials
+	}
+	if a.apiToken != "" && subtle.ConstantTimeCompare([]byte(raw), []byte(a.apiToken)) == 1 {
+		return systemPrincipal(), nil
+	}
+	users, userMode := a.userAuth()
+	if userMode && users != nil {
+		return users.PrincipalForAPIToken(ctx, raw)
+	}
+	return security.Principal{}, ErrInvalidCredentials
+}
+
+func (a *Authenticator) Authorized(r *http.Request) bool {
+	_, ok := a.PrincipalForRequest(r)
+	return ok
 }
 
 func (a *Authenticator) SetSessionCookie(w http.ResponseWriter, token string, secure bool) {
@@ -108,6 +203,10 @@ func (a *Authenticator) ClearSession(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()
 		delete(a.sessions, cookie.Value)
 		a.mu.Unlock()
+		users, userMode := a.userAuth()
+		if userMode && users != nil {
+			_ = users.RevokeSession(r.Context(), cookie.Value)
+		}
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     authSessionCookie,
@@ -124,21 +223,27 @@ func RequireAPIAuth(next http.Handler, token string) http.Handler {
 }
 
 func RequireAPIAuthWithAuthenticator(next http.Handler, authenticator *Authenticator) http.Handler {
-	if authenticator == nil || !authenticator.Enabled() {
-		return next
-	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Navigation is stateless. The collaboration namespace is excluded here only
-		// because every registered route has its own hashed-token capability guard.
+		if _, ok := security.PrincipalFromContext(r.Context()); ok {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if !strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/api/v1/health" || r.URL.Path == "/api/v1/auth/login" || r.URL.Path == "/api/v1/maps/navigation" || strings.HasPrefix(r.URL.Path, "/api/v1/collaboration/") {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if !authenticator.Authorized(r) {
+		if authenticator == nil || !authenticator.Enabled() {
+			r = r.WithContext(security.WithPrincipal(r.Context(), systemPrincipal()))
+			next.ServeHTTP(w, r)
+			return
+		}
+		principal, ok := authenticator.PrincipalForRequest(r)
+		if !ok {
 			w.Header().Set("WWW-Authenticate", "Bearer")
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		r = r.WithContext(security.WithPrincipal(r.Context(), principal))
 		next.ServeHTTP(w, r)
 	})
 }

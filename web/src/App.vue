@@ -30,7 +30,11 @@ type Day = { id: string; date: string; title?: string; notes_markdown?: string; 
 type TripMutationDelta = { days: Array<{ id: string; stops: Stop[]; legs_cleared?: boolean }> }
 type TripDocument = { title: string; show_in_atlas?: boolean; date_range?: { start: string; end: string }; timezone: string; description_markdown?: string; links?: LinkData[]; map?: { preferred_provider?: 'baidu' | 'amap'; enabled_providers?: Array<'baidu' | 'amap'>; default_mode?: TravelMode }; days: Day[] }
 type SharedBootstrap = { trip: TripDocument & { id?: string; status?: string }; browser_key?: string; amap_browser_key?: string; amap_security_proxy_path?: string; amap_security_js_code_configured?: boolean; default_map_provider?: 'baidu' | 'amap'; revision?: number }
-type TripSummary = { id: string; title: string; status: string; start_date: string; end_date: string; timezone: string; revision: number; days?: number; stops?: number; show_in_atlas?: boolean; updated_at?: string }
+type TripSummary = { id: string; title: string; status: string; start_date: string; end_date: string; timezone: string; revision: number; days?: number; stops?: number; show_in_atlas?: boolean; can_edit?: boolean; updated_at?: string }
+type UserAccessMode = 'read_only' | 'selected_trip_edit' | 'all_trips_edit'
+type CurrentUser = { id: string; username: string; role: 'admin' | 'user'; access_mode: UserAccessMode; is_admin: boolean }
+type AdminUser = CurrentUser & { enabled: boolean; editable_trip_ids: string[]; created_at: string; updated_at: string }
+type AdminUserToken = { id: string; name: string; created_at: string; last_used_at?: string; expires_at?: string }
 type TripHistoryEntry = { id: string; history_id?: string; trip_id: string; source_revision: number; title: string; start_date: string; end_date: string; label?: string; content_hash: string; created_at: string; read_only?: boolean }
 type CollaborationShareSummary = { id: string; trip_id: string; permission: 'editor'; status: 'active' | 'expired' | 'revoked'; created_at: string; expires_at: string; revoked_at?: string }
 type TripSortMode = 'updated' | 'date'
@@ -426,7 +430,9 @@ const collaborationToken = ref(collaborationMode ? collaborationTokenFromHash(wi
 const collaborationTripID = ref('')
 const collaborationReady = ref(false)
 const collaborationFailure = ref('')
-const readOnlyView = computed(() => shareMode || Boolean(historyView.value) || (collaborationMode && !collaborationReady.value))
+const currentUser = ref<CurrentUser | null>(null)
+const isAdmin = computed(() => currentUser.value?.is_admin === true)
+const readOnlyView = computed(() => shareMode || Boolean(historyView.value) || (collaborationMode && !collaborationReady.value) || (!collaborationMode && selected.value !== null && !isAdmin.value && selected.value.can_edit !== true))
 const ownerWorkspace = computed(() => !shareMode && !collaborationMode && !historyView.value)
 const historyTitle = computed(() => historyView.value?.title || selected.value?.title || tripDocument.value?.title || '行程地图')
 const historyDateRange = computed(() => historyView.value ? formatDateRange(historyView.value.start_date, historyView.value.end_date) : selected.value ? formatDateRange(selected.value.start_date, selected.value.end_date) : tripDateRangeFor(tripDocument.value).start ? formatDateRange(tripDateRangeFor(tripDocument.value).start, tripDateRangeFor(tripDocument.value).end) : '')
@@ -493,15 +499,44 @@ const shareGenerating = ref(false)
 const posterModalOpen = ref(false)
 const actionLoading = ref(false)
 const settingsOpen = ref(false)
-type SettingsSection = 'appearance' | 'connection' | 'maps' | 'weather' | 'photos' | 'search' | 'sharing' | 'mcp' | 'about'
+type SettingsSection = 'appearance' | 'connection' | 'maps' | 'weather' | 'photos' | 'search' | 'sharing' | 'mcp' | 'users' | 'about'
 type MarkdownEditorMode = 'edit' | 'preview'
 const settingsSection = ref<SettingsSection>('appearance')
+const managedUsers = ref<AdminUser[]>([])
+const managedUsersLoading = ref(false)
+const managedUsersSaving = ref(false)
+const managedUsersMessage = ref('')
+const managedUsersError = ref('')
+const editingManagedUserID = ref('')
+const managedUserFormOpen = ref(false)
+const managedUsernameDraft = ref('')
+const managedPasswordDraft = ref('')
+const managedNewPasswordDraft = ref('')
+const managedRoleDraft = ref<'admin' | 'user'>('user')
+const managedAccessModeDraft = ref<UserAccessMode>('read_only')
+const managedEnabledDraft = ref(true)
+const managedEditableTripIDsDraft = ref<string[]>([])
+const managedTripSearchDraft = ref('')
+const managedEditableTripOptions = computed(() => {
+  const query = managedTripSearchDraft.value.trim().toLocaleLowerCase()
+  if (!query) return trips.value
+  return trips.value.filter(trip => `${trip.title} ${trip.id} ${trip.start_date} ${trip.end_date}`.toLocaleLowerCase().includes(query))
+})
+const managedSelectedEditableTrips = computed(() => {
+  const selected = new Set(managedEditableTripIDsDraft.value)
+  return trips.value.filter(trip => selected.has(trip.id))
+})
+const tokenUserID = ref('')
+const userAPITokens = ref<AdminUserToken[]>([])
+const userAPITokenNameDraft = ref('MCP Agent')
+const newlyCreatedUserToken = ref('')
 const newTripOpen = ref(false)
 const authOpen = ref(false)
 const loginUsername = ref('')
 const loginPassword = ref('')
 const loginMessage = ref('')
 const loginLoading = ref(false)
+const canCreateTrips = computed(() => currentUser.value?.is_admin === true || currentUser.value?.access_mode === 'all_trips_edit')
 const authTokenInput = ref(localStorage.getItem('journeyin.apiToken') || '')
 const serverURL = ref(window.location.origin)
 const theme = ref<Theme>((localStorage.getItem('journeyin.theme') as Theme) || 'system')
@@ -661,7 +696,7 @@ const visibleDays = computed(() => {
   return selectedDay.value === 'all' ? tripDocument.value.days : tripDocument.value.days.filter((_, index) => index + 1 === selectedDay.value)
 })
 const tripMapPhotoMatches = computed(() => {
-  if (!tripMapShowPhotos.value || !ownerWorkspace.value || !photoStatus.value?.enabled || !tripDocument.value) return []
+  if (!tripMapShowPhotos.value || !isAdmin.value || !ownerWorkspace.value || !photoStatus.value?.enabled || !tripDocument.value) return []
   const days = visibleDays.value
   if (!days.length) return []
   return atlasPhotos.value.filter(photo => {
@@ -1255,6 +1290,8 @@ function handleGlobalKeyDown(event: KeyboardEvent) {
   if (mapPickOpen.value || mapPickMode.value) { cancelMapPick(); event.preventDefault(); return }
   if (newTripOpen.value) { newTripOpen.value = false; event.preventDefault(); return }
   if (shareModalOpen.value) { shareModalOpen.value = false; event.preventDefault(); return }
+  if (managedUserFormOpen.value) { resetManagedUserForm(); event.preventDefault(); return }
+  if (tokenUserID.value) { closeUserTokenDialog(); event.preventDefault(); return }
   if (settingsOpen.value) { settingsOpen.value = false; event.preventDefault(); return }
   if (authOpen.value) { authOpen.value = false; event.preventDefault(); return }
   if (mobileMapToolsOpen.value) { mobileMapToolsOpen.value = false; event.preventDefault(); return }
@@ -1727,18 +1764,240 @@ function toggleTripMenu(tripID: string) {
   tripMenuID.value = tripMenuID.value === tripID ? '' : tripID
 }
 
+function clearAdminOnlyData() {
+  managedUsers.value = []
+  managedUserFormOpen.value = false
+  managedUsersError.value = ''
+  managedUsersMessage.value = ''
+  settingsData.value = null
+  photoStatus.value = null
+  atlasPhotos.value = []
+  selectedPhotoCluster.value = null
+  previewPhotoList.value = []
+  previewPhotoIndex.value = -1
+  shareURL.value = ''; shareID.value = ''; shareExpiresAt.value = ''; shareCopyMessage.value = ''; shareNoticeVisible.value = false
+  collaborationShares.value = []; collaborationShareURLs.value = {}; userAPITokens.value = []; tokenUserID.value = ''; newlyCreatedUserToken.value = ''
+}
+
+async function loadCurrentUser() {
+  if (shareMode || collaborationMode) { currentUser.value = null; clearAdminOnlyData(); return }
+  try {
+    const response = await apiFetch('/api/v1/auth/me')
+    if (response.status === 401) { currentUser.value = null; clearAdminOnlyData(); return }
+    if (!response.ok) { currentUser.value = null; clearAdminOnlyData(); return }
+    currentUser.value = await response.json() as CurrentUser
+    if (!currentUser.value.is_admin) clearAdminOnlyData()
+  } catch { currentUser.value = null; clearAdminOnlyData() }
+}
+
+function openUserManagement() {
+  if (!isAdmin.value) return
+  settingsSection.value = 'users'
+  managedUsersMessage.value = ''
+  resetManagedUserForm()
+  void loadManagedUsers()
+}
+
+function openNewManagedUser() {
+  if (!isAdmin.value) return
+  resetManagedUserForm()
+  managedUserFormOpen.value = true
+}
+
+function closeUserTokenDialog() {
+  tokenUserID.value = ''
+  userAPITokens.value = []
+  newlyCreatedUserToken.value = ''
+}
+
+function onManagedRoleChange() {
+  if (managedRoleDraft.value === 'admin') { managedAccessModeDraft.value = 'all_trips_edit'; managedEditableTripIDsDraft.value = []; managedTripSearchDraft.value = '' }
+  else if (managedAccessModeDraft.value === 'all_trips_edit') managedAccessModeDraft.value = 'read_only'
+}
+
+function onManagedAccessModeChange() {
+  if (managedAccessModeDraft.value !== 'selected_trip_edit') { managedEditableTripIDsDraft.value = []; managedTripSearchDraft.value = '' }
+}
+
+function toggleManagedTripGrant(tripID: string) {
+  const selected = new Set(managedEditableTripIDsDraft.value)
+  if (selected.has(tripID)) selected.delete(tripID)
+  else selected.add(tripID)
+  managedEditableTripIDsDraft.value = [...selected]
+}
+
+function removeManagedTripGrant(tripID: string) {
+  managedEditableTripIDsDraft.value = managedEditableTripIDsDraft.value.filter(id => id !== tripID)
+}
+
+function selectFilteredManagedTrips() {
+  const selected = new Set(managedEditableTripIDsDraft.value)
+  for (const trip of managedEditableTripOptions.value) selected.add(trip.id)
+  managedEditableTripIDsDraft.value = [...selected]
+}
+
+function clearManagedTripGrants() { managedEditableTripIDsDraft.value = [] }
+
+function resetManagedUserForm() {
+  managedUserFormOpen.value = false
+  editingManagedUserID.value = ''
+  managedUsernameDraft.value = ''
+  managedPasswordDraft.value = ''
+  managedNewPasswordDraft.value = ''
+  managedRoleDraft.value = currentUser.value?.id === 'system' ? 'admin' : 'user'
+  managedAccessModeDraft.value = managedRoleDraft.value === 'admin' ? 'all_trips_edit' : 'read_only'
+  managedEnabledDraft.value = true
+  managedEditableTripIDsDraft.value = []
+  managedTripSearchDraft.value = ''
+  managedUsersError.value = ''
+  managedUsersMessage.value = ''
+  tokenUserID.value = ''
+  userAPITokens.value = []
+  newlyCreatedUserToken.value = ''
+}
+
+function editManagedUser(user: AdminUser) {
+  managedUserFormOpen.value = true
+  editingManagedUserID.value = user.id
+  managedUsernameDraft.value = user.username
+  managedPasswordDraft.value = ''
+  managedNewPasswordDraft.value = ''
+  managedRoleDraft.value = user.role
+  managedAccessModeDraft.value = user.access_mode
+  managedEnabledDraft.value = user.enabled
+  managedEditableTripIDsDraft.value = [...user.editable_trip_ids]
+  managedTripSearchDraft.value = ''
+  managedUsersError.value = ''
+  managedUsersMessage.value = ''
+  tokenUserID.value = ''
+  userAPITokens.value = []
+  newlyCreatedUserToken.value = ''
+}
+
+async function loadManagedUsers() {
+  if (!isAdmin.value) return
+  managedUsersLoading.value = true
+  managedUsersError.value = ''
+  try {
+    const response = await apiFetch('/api/v1/admin/users')
+    const payload = await response.json() as { items?: AdminUser[]; error?: { message?: string } }
+    if (!response.ok) throw new Error(payload.error?.message || '无法读取用户列表')
+    managedUsers.value = payload.items || []
+  } catch (cause) {
+    managedUsersError.value = cause instanceof Error ? cause.message : '无法读取用户列表'
+  } finally { managedUsersLoading.value = false }
+}
+
+async function saveManagedUser() {
+  if (!isAdmin.value || managedUsersSaving.value) return
+  managedUsersSaving.value = true
+  managedUsersError.value = ''
+  const wasBootstrap = !editingManagedUserID.value && currentUser.value?.id === 'system'
+  try {
+    const isEditing = Boolean(editingManagedUserID.value)
+    const url = isEditing ? '/api/v1/admin/users/' + encodeURIComponent(editingManagedUserID.value) : '/api/v1/admin/users'
+    const body = isEditing
+      ? { username: managedUsernameDraft.value, role: managedRoleDraft.value, access_mode: managedAccessModeDraft.value, enabled: managedEnabledDraft.value, editable_trip_ids: managedEditableTripIDsDraft.value, new_password: managedNewPasswordDraft.value || undefined }
+      : { username: managedUsernameDraft.value, password: managedPasswordDraft.value, role: managedRoleDraft.value, access_mode: managedAccessModeDraft.value, editable_trip_ids: managedEditableTripIDsDraft.value }
+    const response = await apiFetch(url, { method: isEditing ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    const payload = await response.json() as { error?: { message?: string }; username?: string }
+    if (!response.ok) throw new Error(payload.error?.message || '保存用户失败')
+    const successMessage = isEditing ? '用户权限已更新' : '用户已创建'
+    const createdUsername = managedUsernameDraft.value
+    resetManagedUserForm()
+    managedUsersMessage.value = successMessage
+    if (wasBootstrap && !authTokenInput.value.trim()) {
+      settingsOpen.value = false
+      currentUser.value = null
+      loginUsername.value = createdUsername
+      loginMessage.value = '首个管理员已创建，请登录继续。'
+      authOpen.value = true
+      return
+    }
+    await loadCurrentUser()
+    await loadManagedUsers()
+  } catch (cause) {
+    managedUsersError.value = cause instanceof Error ? cause.message : '保存用户失败'
+  } finally { managedUsersSaving.value = false }
+}
+
+async function deleteManagedUser(user: AdminUser) {
+  if (!isAdmin.value || user.id === currentUser.value?.id) return
+  if (!window.confirm('删除账号「' + user.username + '」？该账号将立即失去登录、行程和 MCP 令牌访问。')) return
+  try {
+    const response = await apiFetch('/api/v1/admin/users/' + encodeURIComponent(user.id), { method: 'DELETE' })
+    const payload = response.status === 204 ? {} : await response.json() as { error?: { message?: string } }
+    if (!response.ok) throw new Error(payload.error?.message || '删除用户失败')
+    managedUsersMessage.value = '用户已删除'
+    if (tokenUserID.value === user.id) { tokenUserID.value = ''; userAPITokens.value = [] }
+    await loadManagedUsers()
+  } catch (cause) {
+    managedUsersError.value = cause instanceof Error ? cause.message : '删除用户失败'
+  }
+}
+
+async function loadUserAPITokens(user: AdminUser) {
+  if (!isAdmin.value) return
+  const changedUser = tokenUserID.value !== user.id
+  tokenUserID.value = user.id
+  if (changedUser) newlyCreatedUserToken.value = ''
+  userAPITokens.value = []
+  try {
+    const response = await apiFetch('/api/v1/admin/users/' + encodeURIComponent(user.id) + '/tokens')
+    const payload = await response.json() as { items?: AdminUserToken[]; error?: { message?: string } }
+    if (!response.ok) throw new Error(payload.error?.message || '无法读取 MCP 令牌')
+    userAPITokens.value = payload.items || []
+  } catch (cause) {
+    managedUsersError.value = cause instanceof Error ? cause.message : '无法读取 MCP 令牌'
+  }
+}
+
+async function createUserAPIToken() {
+  if (!isAdmin.value || !tokenUserID.value || !userAPITokenNameDraft.value.trim()) return
+  try {
+    const response = await apiFetch('/api/v1/admin/users/' + encodeURIComponent(tokenUserID.value) + '/tokens', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: userAPITokenNameDraft.value.trim() }) })
+    const payload = await response.json() as { token?: string; error?: { message?: string } }
+    if (!response.ok || !payload.token) throw new Error(payload.error?.message || '无法创建 MCP 令牌')
+    newlyCreatedUserToken.value = payload.token
+    managedUsersMessage.value = '令牌仅显示这一次，请立即复制并安全保存。'
+    const user = managedUsers.value.find(item => item.id === tokenUserID.value)
+    if (user) await loadUserAPITokens(user)
+  } catch (cause) {
+    managedUsersError.value = cause instanceof Error ? cause.message : '无法创建 MCP 令牌'
+  }
+}
+
+async function revokeUserAPIToken(token: AdminUserToken) {
+  if (!isAdmin.value || !tokenUserID.value) return
+  if (!window.confirm('撤销令牌「' + token.name + '」？使用该令牌的 MCP 客户端将立即失去访问。')) return
+  try {
+    const response = await apiFetch('/api/v1/admin/users/' + encodeURIComponent(tokenUserID.value) + '/tokens/' + encodeURIComponent(token.id), { method: 'DELETE' })
+    const payload = response.status === 204 ? {} : await response.json() as { error?: { message?: string } }
+    if (!response.ok) throw new Error(payload.error?.message || '撤销令牌失败')
+    userAPITokens.value = userAPITokens.value.filter(item => item.id !== token.id)
+  } catch (cause) {
+    managedUsersError.value = cause instanceof Error ? cause.message : '撤销令牌失败'
+  }
+}
+
+async function copyNewUserToken() {
+  if (!newlyCreatedUserToken.value) return
+  try { await navigator.clipboard.writeText(newlyCreatedUserToken.value); managedUsersMessage.value = 'MCP 令牌已复制' }
+  catch { managedUsersError.value = '无法访问剪贴板，请手动复制令牌' }
+}
+
 async function loadTrips() {
   loading.value = true
   error.value = ''
   try {
-    const [tripResponse, capabilityResponse, settingsResponse] = await Promise.all([apiFetch('/api/v1/trips'), apiFetch('/api/v1/capabilities'), apiFetch('/api/v1/settings')])
+    const [tripResponse, capabilityResponse, settingsResponse] = await Promise.all([apiFetch('/api/v1/trips'), apiFetch('/api/v1/capabilities'), isAdmin.value ? apiFetch('/api/v1/settings') : Promise.resolve(null)])
     if (tripResponse.status === 401) return
     if (!tripResponse.ok) throw new Error('无法读取旅行规划')
     trips.value = ((await tripResponse.json()) as { items?: TripSummary[] }).items || []
     capabilities.value = capabilityResponse.ok ? await capabilityResponse.json() as Capabilities : null
     let configuredDefault = defaultMapProvider.value
     if (capabilities.value?.default_map_provider === 'baidu' || capabilities.value?.default_map_provider === 'amap') configuredDefault = capabilities.value.default_map_provider
-    if (settingsResponse.ok) {
+    if (settingsResponse?.ok) {
       const settings = await settingsResponse.json() as KeySettings
       settingsData.value = settings
       if (settings.map?.default_provider === 'baidu' || settings.map?.default_provider === 'amap') configuredDefault = settings.map.default_provider
@@ -1828,6 +2087,7 @@ async function loadCollaborativeTrip() {
 }
 function selectTrip(trip: TripSummary) { navigateToTrip(trip) }
 async function deleteTrip(trip: TripSummary) {
+  if (!isAdmin.value && trip.can_edit !== true) return
   if (!window.confirm('确认删除“' + trip.title + '”吗？该行程及其规划点、路线和天气快照都会删除。')) return
   actionLoading.value = true; error.value = ''
   try { const response = await apiFetch('/api/v1/trips/' + encodeURIComponent(trip.id), { method: 'DELETE', headers: { 'If-Match': 'revision-' + trip.revision } }); if (!response.ok) { const payload = await response.json() as { error?: { message?: string } }; throw new Error(payload.error?.message || '删除行程失败') }; if (selected.value?.id === trip.id) { selected.value = null; tripDocument.value = null; tripView.value = 'list' }; await loadTrips() } catch (cause) { error.value = cause instanceof Error ? cause.message : '删除行程失败' } finally { actionLoading.value = false }
@@ -1867,7 +2127,7 @@ async function loadDetail(trip: TripSummary) {
     tripDocument.value = payload.document || null
     syncProviderFromDocument(tripDocument.value)
     selectedDay.value = 'all'
-    if (ownerWorkspace.value) void ensureTripMapPhotoData()
+    if (isAdmin.value && ownerWorkspace.value) void ensureTripMapPhotoData()
     await nextTick()
     void renderMap()
   } catch (cause) {
@@ -2046,6 +2306,7 @@ function dateAfter(value: string, offset: number) {
 }
 
 async function createTrip() {
+  if (!canCreateTrips.value) { error.value = '当前权限不允许创建行程'; return }
   if (!newTitle.value.trim()) { error.value = '请填写旅行规划名称'; return }
   const start = newStartDate.value
   const end = newEndDate.value < start ? start : newEndDate.value
@@ -2087,6 +2348,7 @@ async function createTrip() {
         days: payload.days ?? total,
         stops: payload.stops ?? 0,
         show_in_atlas: payload.show_in_atlas ?? true,
+        can_edit: payload.can_edit ?? (isAdmin.value || currentUser.value?.access_mode === 'all_trips_edit'),
         updated_at: payload.updated_at
       }
       navigateToTrip(summaryItem, 'push')
@@ -2396,6 +2658,7 @@ function tripDetailsConflictMessage(days: Array<{ day_id?: string; date?: string
   return '不能缩短日期范围：' + detail + '仍有规划点，请先移动规划点或恢复结束日期。'
 }
 async function toggleTripAtlasFromList(trip: TripSummary) {
+  if (!isAdmin.value && trip.can_edit !== true) return
   tripMenuID.value = ''
   const nextVal = trip.show_in_atlas === false
   actionLoading.value = true
@@ -2428,6 +2691,7 @@ async function toggleTripAtlasFromList(trip: TripSummary) {
   }
 }
 async function editTripDetailsFromList(trip: TripSummary) {
+  if (!isAdmin.value && trip.can_edit !== true) return
   tripMenuID.value = ''
   if (selected.value?.id === trip.id && tripDocument.value) {
     beginEditTripDetails()
@@ -3328,7 +3592,7 @@ async function loadAtlasPhotos() {
 }
 
 async function ensureTripMapPhotoData() {
-  if (!ownerWorkspace.value) return
+  if (!isAdmin.value || !ownerWorkspace.value) return
   if (!photoStatus.value) await loadPhotoStatus()
   if (tripMapShowPhotos.value && photoStatus.value?.enabled) await loadAtlasPhotos()
   renderTripPhotoMarkers()
@@ -3457,7 +3721,7 @@ function renderAtlasPhotoMarkers() {
   renderPhotoMarkers(atlasPhotos.value, atlasShowPhotos.value)
 }
 function renderTripPhotoMarkers() {
-  renderPhotoMarkers(tripMapPhotoMatches.value, tripMapShowPhotos.value && ownerWorkspace.value)
+  renderPhotoMarkers(tripMapPhotoMatches.value, tripMapShowPhotos.value && isAdmin.value && ownerWorkspace.value)
 }
 
 function handlePhotoClusterClick(cluster: PhotoCluster) {
@@ -3635,7 +3899,7 @@ function toggleAtlasPhotos(val?: boolean) {
 }
 
 async function toggleTripMapPhotos(show: boolean) {
-  if (!ownerWorkspace.value || readOnlyView.value) return
+  if (!isAdmin.value || !ownerWorkspace.value || readOnlyView.value) return
   tripMapShowPhotos.value = show
   if (!show) selectedPhotoCluster.value = null
   localStorage.setItem('journeyin.tripMapShowPhotos', show ? 'true' : 'false')
@@ -3664,9 +3928,10 @@ function navigateToAtlas() {
   tripMenuID.value = ''
   detailMoreOpen.value = false
   resetMapSDK()
-  void Promise.all([loadAtlasData(), loadPhotoStatus().then(() => loadAtlasPhotos())]).then(() => {
-    void nextTick().then(() => renderAtlasMap())
-  })
+  const atlasTasks: Promise<unknown>[] = [loadAtlasData()]
+  if (isAdmin.value) atlasTasks.push(loadPhotoStatus().then(() => loadAtlasPhotos()))
+  else atlasPhotos.value = []
+  void Promise.all(atlasTasks).then(() => { void nextTick().then(() => renderAtlasMap()) })
 }
 
 function selectAtlasTrip(item: AtlasTripItem) {
@@ -4257,7 +4522,7 @@ function setMapProvider(provider: 'baidu' | 'amap') {
   mapError.value = ''
   mapWarning.value = ''
   void nextTick().then(async () => {
-    if (ownerWorkspace.value && photoStatus.value?.enabled && (tripView.value === 'atlas' ? atlasShowPhotos.value : tripMapShowPhotos.value)) await loadAtlasPhotos()
+    if (isAdmin.value && ownerWorkspace.value && photoStatus.value?.enabled && (tripView.value === 'atlas' ? atlasShowPhotos.value : tripMapShowPhotos.value)) await loadAtlasPhotos()
     await renderMap()
   })
 }
@@ -5039,13 +5304,14 @@ async function planRoutes() {
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '路线生成失败' } finally { planningLoading.value = false }
 }
 
-function openImportPicker() { fileInput.value?.click() }
+function openImportPicker() { if (canCreateTrips.value) fileInput.value?.click() }
 function importErrorMessage(payload: { error?: { message?: string; details?: { issues?: Array<{ path?: string; message?: string }> } } }, fallback: string) {
   const issues = payload.error?.details?.issues || []
   const detail = issues.map(issue => [issue.path, issue.message].filter(Boolean).join(': ')).filter(Boolean).join('；')
   return detail ? fallback + '：' + detail : payload.error?.message || fallback
 }
 async function importTrip(event: Event) {
+  if (!canCreateTrips.value) { error.value = '当前权限不允许导入行程'; return }
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
   if (!file) return
@@ -5072,6 +5338,7 @@ async function importTrip(event: Event) {
         days: payload.days,
         stops: payload.stops,
         show_in_atlas: payload.show_in_atlas ?? true,
+        can_edit: payload.can_edit ?? (isAdmin.value || currentUser.value?.access_mode === 'all_trips_edit'),
         updated_at: payload.updated_at
       }
       navigateToTrip(summaryItem, 'push')
@@ -5091,6 +5358,7 @@ function shareStorageKey(tripID: string) { return 'journeyin.share.' + tripID }
 function shareTokenFromURL(url: string) { try { const parsed = new URL(url, window.location.origin); const match = parsed.pathname.match(/^\/s\/([^/]+)$/); return match?.[1] || '' } catch { return '' } }
 function saveShareState(tripID: string) { if (shareURL.value) localStorage.setItem(shareStorageKey(tripID), JSON.stringify({ id: shareID.value, url: shareURL.value, expires_at: shareExpiresAt.value, expiry_type: shareExpiryType.value, custom_days: shareCustomDays.value })) }
 async function loadCollaborationShares(tripID: string) {
+  if (!isAdmin.value) return
   collaborationSharingLoading.value = true
   collaborationShareMessage.value = ''
   try {
@@ -5107,7 +5375,7 @@ async function loadCollaborationShares(tripID: string) {
   }
 }
 async function createCollaborationShare() {
-  if (!ownerWorkspace.value || !selected.value || collaborationShareCreating.value) return
+  if (!isAdmin.value || !selected.value || collaborationShareCreating.value) return
   if (!window.confirm('共创链接默认有效 7 天，最长 90 天。任何持有此链接的人都可以查看并编辑当前行程，包括添加、修改、删除规划点、重新规划路线和刷新天气。请只发送给可信的人。确认创建？')) return
   const tripID = selected.value.id
   collaborationShareCreating.value = true
@@ -5141,7 +5409,7 @@ async function copyCollaborationShareURL(shareID: string) {
   } catch { collaborationShareMessage.value = '复制失败，请检查浏览器剪贴板权限后重试。' } finally { collaborationShareCopyingID.value = '' }
 }
 async function revokeCollaborationShare(share: CollaborationShareSummary) {
-  if (!ownerWorkspace.value || !selected.value) return
+  if (!isAdmin.value || !selected.value) return
   if (!window.confirm('撤销后，此共创链接的所有持有者将立即失去访问和编辑权限。确认撤销？')) return
   actionLoading.value = true
   collaborationShareMessage.value = ''
@@ -5156,6 +5424,7 @@ async function revokeCollaborationShare(share: CollaborationShareSummary) {
   } finally { actionLoading.value = false }
 }
 function restoreShareState(tripID: string) {
+  if (!isAdmin.value) { shareURL.value = ""; shareID.value = ""; shareExpiresAt.value = ""; shareNoticeVisible.value = false; return }
   shareURL.value = ''; shareID.value = ''; shareExpiresAt.value = ''; shareCopyMessage.value = ''; shareNoticeVisible.value = false; shareNoticeTitle.value = '只读分享已创建'
   try {
     const saved = JSON.parse(localStorage.getItem(shareStorageKey(tripID)) || 'null') as { id?: string; url?: string; expires_at?: string; expiry_type?: '1d' | '7d' | '30d' | '90d' | 'permanent' | 'custom'; custom_days?: number } | null
@@ -5170,7 +5439,7 @@ function restoreShareState(tripID: string) {
   } catch { localStorage.removeItem(shareStorageKey(tripID)) }
 }
 function openShareModal() {
-  if (!ownerWorkspace.value || !selected.value) return
+  if (!isAdmin.value || !selected.value) return
   shareCopyMessage.value = ''
   error.value = ''
   if (shareURL.value && !shareExpiresAt.value) {
@@ -5185,7 +5454,7 @@ function openTripPosterFromShare() {
   openTripPoster()
 }
 async function createShare(options?: { expiryType?: '1d' | '7d' | '30d' | '90d' | 'permanent' | 'custom'; customDays?: number; refreshExisting?: boolean }) {
-  if (!ownerWorkspace.value || !selected.value) return
+  if (!isAdmin.value || !selected.value) return
   const tripID = selected.value.id
   const type = options?.expiryType || shareExpiryType.value
   let ttlSeconds: number | undefined = undefined
@@ -5330,7 +5599,7 @@ async function openPosterForTrip(trip: TripSummary) {
   posterModalOpen.value = true
 }
 async function revokeShare() {
-  if (!shareID.value || !window.confirm('确认撤销当前在线分享吗？撤销后链接将无法访问。')) return
+  if (!isAdmin.value || !shareID.value || !window.confirm('确认撤销当前在线分享吗？撤销后链接将无法访问。')) return
   actionLoading.value = true
   try {
     const response = await apiFetch('/api/v1/shares/' + encodeURIComponent(shareID.value) + '/revoke', { method: 'POST' })
@@ -5645,7 +5914,7 @@ async function deletePlanningPoint(stop: Stop | SubStop) {
   }
 }
 async function openSettings() {
-  if (!ownerWorkspace.value) return
+  if (!ownerWorkspace.value || !isAdmin.value) return
   settingsOpen.value = true
   try {
     const response = await apiFetch('/api/v1/settings')
@@ -5863,11 +6132,12 @@ async function login() {
     const response = await fetch('/api/v1/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ username: loginUsername.value, password: loginPassword.value }) })
     const payload = await response.json() as { error?: { message?: string } }
     if (!response.ok) throw new Error(payload.error?.message || '登录失败')
-    authOpen.value = false; loginPassword.value = ''; loginMessage.value = ''; settingsMessage.value = '登录成功'; await loadTrips()
+    authTokenInput.value = ''; localStorage.removeItem('journeyin.apiToken')
+    authOpen.value = false; loginPassword.value = ''; loginMessage.value = ''; settingsMessage.value = '登录成功'; await loadCurrentUser(); await loadTrips()
   } catch (cause) { loginMessage.value = cause instanceof Error ? cause.message : '登录失败' } finally { loginLoading.value = false }
 }
-function saveAuth() { authTokenInput.value = authTokenInput.value.trim(); if (authTokenInput.value) localStorage.setItem('journeyin.apiToken', authTokenInput.value); else localStorage.removeItem('journeyin.apiToken'); authOpen.value = false; settingsMessage.value = '兼容 API Token 已保存'; loadTrips() }
-async function logout() { authTokenInput.value = ''; localStorage.removeItem('journeyin.apiToken'); await fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => undefined); authOpen.value = false; settingsMessage.value = '已退出登录'; await loadTrips() }
+function saveAuth() { authTokenInput.value = authTokenInput.value.trim(); if (authTokenInput.value) localStorage.setItem('journeyin.apiToken', authTokenInput.value); else localStorage.removeItem('journeyin.apiToken'); authOpen.value = false; settingsMessage.value = '兼容 API Token 已保存'; void loadCurrentUser().then(() => loadTrips()) }
+async function logout() { authTokenInput.value = ''; localStorage.removeItem('journeyin.apiToken'); await fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => undefined); currentUser.value = null; authOpen.value = false; settingsMessage.value = '已退出登录'; await loadCurrentUser(); await loadTrips() }
 function applyTheme() { const actual = theme.value === 'system' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : theme.value; document.documentElement.dataset.theme = actual; localStorage.setItem('journeyin.theme', theme.value) }
 function setTheme(value: Theme) { theme.value = value; applyTheme() }
 function systemThemeChanged() { if (theme.value === 'system') applyTheme() }
@@ -5883,7 +6153,7 @@ onMounted(() => {
   window.addEventListener('pointermove', handleTouchPointerMove, true)
   window.addEventListener('pointerup', finishTouchPointer, true)
   window.addEventListener('pointercancel', finishTouchPointer, true)
-  applyTheme(); mediaQuery = window.matchMedia('(prefers-color-scheme: dark)'); mediaQuery.addEventListener?.('change', systemThemeChanged); if (shareMode) void loadSharedTrip(); else if (collaborationMode) void loadCollaborativeTrip(); else void loadTrips()
+  applyTheme(); mediaQuery = window.matchMedia('(prefers-color-scheme: dark)'); mediaQuery.addEventListener?.('change', systemThemeChanged); if (shareMode) void loadSharedTrip(); else if (collaborationMode) void loadCollaborativeTrip(); else void loadCurrentUser().then(() => loadTrips())
 })
 onUnmounted(() => {
   clearWeatherLabelExpiryTimer()
@@ -5920,7 +6190,7 @@ onUnmounted(() => {
             </nav>
             <div class="rail-spacer"></div>
             <a v-if="ownerWorkspace" class="rail-nav-item rail-link" :href="GITHUB_URL" target="_blank" rel="noopener noreferrer"><IonIcon :icon="linkOutline" /><span>项目</span></a>
-            <button v-if="ownerWorkspace" class="rail-nav-item" type="button" @click="openSettings()"><IonIcon :icon="settingsOutline" /><span>设置</span></button>
+            <button v-if="ownerWorkspace && isAdmin" class="rail-nav-item" type="button" @click="openSettings()"><IonIcon :icon="settingsOutline" /><span>设置</span></button><button v-if="ownerWorkspace && currentUser && !isAdmin" class="rail-nav-item" type="button" @click="logout"><IonIcon :icon="logInOutline" /><span>退出</span></button>
           </aside>
 
           <section v-if="tripView === 'list' && ownerWorkspace" class="trip-list-view" aria-labelledby="trip-list-title">
@@ -5933,8 +6203,8 @@ onUnmounted(() => {
               </div>
               <div class="list-page-actions">
                 <button class="secondary-action" type="button" @click="navigateToAtlas()"><IonIcon :icon="footstepsOutline" /> 足迹漫游</button>
-                <button class="secondary-action" type="button" @click="openImportPicker"><IonIcon :icon="linkOutline" /> 导入 Trip</button>
-                <button class="primary-action" type="button" @click="newTripOpen = true"><IonIcon :icon="addOutline" /> 新建行程</button>
+                <button v-if="canCreateTrips" class="secondary-action" type="button" @click="openImportPicker"><IonIcon :icon="linkOutline" /> 导入 Trip</button>
+                <button v-if="canCreateTrips" class="primary-action" type="button" @click="newTripOpen = true"><IonIcon :icon="addOutline" /> 新建行程</button>
               </div>
             </header>
 
@@ -5945,7 +6215,7 @@ onUnmounted(() => {
 
             <div v-if="error" class="inline-error"><IonIcon :icon="cloudOfflineOutline" /><span>{{ error }}</span><button type="button" aria-label="关闭错误" @click="error = ''">×</button></div>
             <div v-if="loading" class="list-loading"><span class="loading-dot"></span><span>正在加载行程…</span></div>
-            <div v-else-if="!trips.length" class="list-empty-state"><div class="empty-mark"><IonIcon :icon="mapOutline" /></div><h2>还没有旅行规划</h2><p>创建一条行程，开始把地点和路线整理到地图上。</p><div class="empty-actions"><button class="primary-action" type="button" @click="newTripOpen = true"><IonIcon :icon="addOutline" /> 新建规划</button><button class="secondary-action" type="button" @click="openImportPicker">导入 Trip JSON</button></div></div>
+            <div v-else-if="!trips.length" class="list-empty-state"><div class="empty-mark"><IonIcon :icon="mapOutline" /></div><h2>还没有旅行规划</h2><p>创建一条行程，开始把地点和路线整理到地图上。</p><div class="empty-actions"><button v-if="canCreateTrips" class="primary-action" type="button" @click="newTripOpen = true"><IonIcon :icon="addOutline" /> 新建规划</button><button v-if="canCreateTrips" class="secondary-action" type="button" @click="openImportPicker">导入 Trip JSON</button></div></div>
             <div v-else class="trip-list-grid">
               <article v-for="(trip, index) in sortedTrips" :key="trip.id" class="trip-list-card" :class="{ active: selected?.id === trip.id }">
                 <button class="trip-card-main" type="button" @click="selectTrip(trip)">
@@ -5957,7 +6227,7 @@ onUnmounted(() => {
                   <span class="trip-card-arrow">›</span>
                 </button>
                 <button class="trip-card-menu-button" type="button" :aria-expanded="tripMenuID === trip.id" :aria-label="'打开 ' + trip.title + ' 更多操作'" @click.stop="toggleTripMenu(trip.id)">⋯</button>
-                <div v-if="tripMenuID === trip.id" class="trip-card-menu" role="menu"><button type="button" role="menuitem" @click="openPosterForTrip(trip)"><IonIcon :icon="imageOutline" /> 分享行程海报</button><button type="button" role="menuitem" @click="toggleTripAtlasFromList(trip)"><IonIcon :icon="footstepsOutline" /> {{ trip.show_in_atlas === false ? '加入足迹漫游' : '从足迹中隐藏' }}</button><button type="button" role="menuitem" @click="editTripDetailsFromList(trip)"><IonIcon :icon="createOutline" /> 编辑行程信息</button><button type="button" role="menuitem" @click="openTripHistoryFromList(trip)"><span aria-hidden="true">↶</span> 版本历史</button><button type="button" role="menuitem" class="danger-menu-item" @click="tripMenuID = ''; deleteTrip(trip)"><IonIcon :icon="closeOutline" /> 删除行程</button></div>
+                <div v-if="tripMenuID === trip.id" class="trip-card-menu" role="menu"><button type="button" role="menuitem" @click="openPosterForTrip(trip)"><IonIcon :icon="imageOutline" /> 分享行程海报</button><button v-if="trip.can_edit || isAdmin" type="button" role="menuitem" @click="toggleTripAtlasFromList(trip)"><IonIcon :icon="footstepsOutline" /> {{ trip.show_in_atlas === false ? '加入足迹漫游' : '从足迹中隐藏' }}</button><button v-if="trip.can_edit || isAdmin" type="button" role="menuitem" @click="editTripDetailsFromList(trip)"><IonIcon :icon="createOutline" /> 编辑行程信息</button><button type="button" role="menuitem" @click="openTripHistoryFromList(trip)"><span aria-hidden="true">↶</span> 版本历史</button><button v-if="trip.can_edit || isAdmin" type="button" role="menuitem" class="danger-menu-item" @click="tripMenuID = ''; deleteTrip(trip)"><IonIcon :icon="closeOutline" /> 删除行程</button></div>
               </article>
             </div>
             </div>
@@ -5998,7 +6268,7 @@ onUnmounted(() => {
                 <strong>{{ mapError || (mapProviderLabel + '未配置') }}</strong>
                 <span>配置 {{ mapProviderLabel }} 浏览器端 Key 后即可呈现所有历史行程路线与足迹网络。</span>
                 <button v-if="mapError" type="button" class="secondary-action compact-action" @click="retryMap">重新尝试加载</button>
-                <button v-else-if="ownerWorkspace" type="button" class="primary-action compact-action" @click="openSettings()">前往设置配置 Key</button>
+                <button v-else-if="isAdmin" type="button" class="primary-action compact-action" @click="openSettings()">前往设置配置 Key</button>
               </div>
 
               <div v-if="mapWarning" class="map-warning"><span>{{ mapWarning }}</span><button type="button" @click="retryMap">重新加载</button></div>
@@ -6013,7 +6283,7 @@ onUnmounted(() => {
                 <button class="workspace-tool-trigger" type="button" :aria-expanded="mobileMapToolsOpen" aria-label="打开地图选项" @click="toggleMobileMapTools">
                   <IonIcon :icon="mapOutline" /><span>地图选项</span>
                 </button>
-                <button v-if="ownerWorkspace" class="workspace-more" type="button" aria-label="打开更多操作" @click="openSettings">
+                <button v-if="isAdmin" class="workspace-more" type="button" aria-label="打开更多操作" @click="openSettings">
                   <span>⋯</span>
                 </button>
               </div>
@@ -6026,7 +6296,7 @@ onUnmounted(() => {
               <div class="map-tool-row"><span>图层</span><div class="provider-segment layer-segment" role="group" aria-label="地图图层"><button type="button" :class="{ active: mapType === 'normal' }" :aria-pressed="mapType === 'normal'" @click="setMapType('normal')">标准图</button><button type="button" :class="{ active: mapType === 'satellite' }" :aria-pressed="mapType === 'satellite'" @click="setMapType('satellite')">卫星图</button></div></div>
               <div class="map-tool-row"><span>地图标签</span><div class="provider-segment label-segment" role="group" aria-label="地图标签显示模式"><button type="button" :class="{ active: mapLabelMode === 'auto' }" @click="setMapLabelMode('auto')">自动</button><button type="button" :class="{ active: mapLabelMode === 'always' }" @click="setMapLabelMode('always')">全部</button><button type="button" :class="{ active: mapLabelMode === 'none' }" @click="setMapLabelMode('none')">隐藏</button></div></div>
               <p class="map-tool-hint">{{ mapLabelMode === 'auto' ? '自动：有空间时显示，密集时自动防重叠' : mapLabelMode === 'always' ? '全部：始终展开全部地名与路线标签' : '隐藏：仅保留图钉，隐藏浮动文字' }}</p>
-              <div v-if="photoStatus?.enabled" class="map-tool-row">
+              <div v-if="isAdmin && photoStatus?.enabled" class="map-tool-row">
                 <span>足迹相片</span>
                 <div class="provider-segment">
                   <button type="button" :class="{ active: atlasShowPhotos }" @click="toggleAtlasPhotos(true)">显示 ({{ atlasPhotos.length }})</button>
@@ -6243,7 +6513,7 @@ onUnmounted(() => {
                 <strong>{{ mapError || (mapProviderLabel + '未配置') }}</strong>
                 <span>{{ mapError ? '请确认浏览器端 Key、域名白名单和网络连接。当前页面：' + serverURL : '配置' + mapProviderLabel + '浏览器端 Key 后显示真实地图；已保存的行程数据仍然可查看。' }}</span>
                 <button v-if="mapError" type="button" class="secondary-action compact-action" @click="retryMap">重新尝试加载</button>
-                <button v-else-if="ownerWorkspace" type="button" class="primary-action compact-action" @click="openSettings()">前往设置配置 Key</button>
+                <button v-else-if="isAdmin" type="button" class="primary-action compact-action" @click="openSettings()">前往设置配置 Key</button>
               </div>
 
               <div v-if="mapWarning" class="map-warning"><span>{{ mapWarning }}</span><button type="button" @click="retryMap">重新加载</button></div>
@@ -6292,7 +6562,7 @@ onUnmounted(() => {
                   <div v-if="visibleStops.length" class="redesign-stop-list"><article v-for="stop in visibleStops" :key="stop.id" class="redesign-stop-row" :class="{ selected: selectedStopId === stop.id, 'reorder-active': reorderMode, 'location-missing': !pointFor(stop), 'route-excluded': stop.exclude_from_route }"><button class="redesign-stop-main" type="button" @click="selectPlanningPointFromList(stop)"><span class="stop-number">{{ stop.sequence }}</span><span><strong>{{ stop.title }}</strong><small>{{ stopDate(stop) }} · {{ stop.address || '地址待补充' }}</small><small v-if="planningPointWeatherPreview(stop)" class="stop-weather-preview"><span aria-hidden="true">{{ iconForWeatherLabel(planningPointWeatherPreview(stop)) }}</span><span class="stop-weather-text">{{ planningPointWeatherPreview(stop) }}</span></small><small v-if="planningPointDescriptionPreview(stop)" class="stop-description-preview">{{ planningPointDescriptionPreview(stop) }}</small><span class="planning-point-badge-row"><em class="planning-point-kind-badge" :style="{ '--kind-color': planningPointCategoryColor(stop.kind) }">{{ planningPointCategoryLabel(stop.kind) }}</em><em class="stop-location-badge" :class="{ missing: !pointFor(stop) }">{{ locationStatus(stop) }}</em><em v-if="stop.exclude_from_route" class="stop-route-excluded-badge">已排除路线</em></span></span><span class="row-chevron">›</span></button><div v-if="reorderMode && !readOnlyView" class="reorder-actions" @click.stop><button class="reorder-move-button" type="button" :disabled="actionLoading || !canMovePlanningPoint(stop, -1)" :aria-label="'上移规划点 ' + stop.title" @click="movePlanningPoint(stop, -1)"><IonIcon :icon="chevronUpOutline" /></button><button class="reorder-move-button" type="button" :disabled="actionLoading || !canMovePlanningPoint(stop, 1)" :aria-label="'下移规划点 ' + stop.title" @click="movePlanningPoint(stop, 1)"><IonIcon :icon="chevronDownOutline" /></button></div><button v-if="!readOnlyView" class="stop-delete-button" type="button" :aria-label="'删除规划点 ' + stop.title" @click.stop="deletePlanningPoint(stop)">×</button></article></div><p v-else class="muted compact-empty">当前日期还没有规划点。</p>
                   <button v-if="!readOnlyView" class="add-place-action" type="button" @click="openJourneySearch()"><IonIcon :icon="searchOutline" /> 搜索并添加规划点</button>
                 </div>
-                <div v-if="ownerWorkspace" class="panel-data-actions"><button type="button" @click="openImportPicker">导入</button><button type="button" :disabled="actionLoading" @click="downloadTrip">导出 JSON</button><button type="button" :disabled="actionLoading" @click="openShareModal">{{ shareURL ? '分享管理' : '在线分享' }}</button><button type="button" @click="openTripPoster">生成海报</button></div><div v-else class="panel-data-actions"><button type="button" @click="openTripPoster">保存为图片</button></div>
+                <div v-if="ownerWorkspace" class="panel-data-actions"><button v-if="canCreateTrips" type="button" @click="openImportPicker">导入</button><button type="button" :disabled="actionLoading" @click="downloadTrip">导出 JSON</button><button v-if="isAdmin" type="button" :disabled="actionLoading" @click="openShareModal">{{ shareURL ? '分享管理' : '在线分享' }}</button><button type="button" @click="openTripPoster">生成海报</button></div><div v-else class="panel-data-actions"><button type="button" @click="openTripPoster">保存为图片</button></div>
               </div>
             </aside>
 
@@ -6335,7 +6605,7 @@ onUnmounted(() => {
               <div class="workspace-title"><strong>{{ historyTitle }}</strong><span>{{ historyDateRange || '地图工作区' }}</span></div>
               <div class="workspace-top-actions">
                 <button class="workspace-tool-trigger" type="button" :aria-expanded="mobileMapToolsOpen" aria-label="打开地图选项" @click="toggleMobileMapTools"><IonIcon :icon="mapOutline" /><span>地图选项</span></button>
-                <button v-if="ownerWorkspace" class="workspace-more" type="button" aria-label="打开更多操作" @click="openSettings"><span>⋯</span></button>
+                <button v-if="isAdmin" class="workspace-more" type="button" aria-label="打开更多操作" @click="openSettings"><span>⋯</span></button>
               </div>
             </header>
 
@@ -6348,8 +6618,8 @@ onUnmounted(() => {
               <div class="map-tool-row"><span>图层</span><div class="provider-segment layer-segment" role="group" aria-label="地图图层"><button type="button" :class="{ active: mapType === 'normal' }" :aria-pressed="mapType === 'normal'" @click="setMapType('normal')">标准图</button><button type="button" :class="{ active: mapType === 'satellite' }" :aria-pressed="mapType === 'satellite'" @click="setMapType('satellite')">卫星图</button></div></div>
               <div class="map-tool-row"><span>地图标签</span><div class="provider-segment label-segment" role="group" aria-label="地图标签显示模式"><button type="button" :class="{ active: mapLabelMode === 'auto' }" @click="setMapLabelMode('auto')">自动</button><button type="button" :class="{ active: mapLabelMode === 'always' }" @click="setMapLabelMode('always')">全部</button><button type="button" :class="{ active: mapLabelMode === 'none' }" @click="setMapLabelMode('none')">隐藏</button></div></div>
               <p class="map-tool-hint">{{ mapLabelMode === 'auto' ? '自动：有空间时显示，密集时自动防重叠' : mapLabelMode === 'always' ? '全部：始终展开全部地名与路线标签' : '隐藏：仅保留图钉，隐藏浮动文字' }}</p>
-              <div v-if="ownerWorkspace && photoStatus?.enabled" class="map-tool-row"><span>行程照片</span><div class="provider-segment"><button type="button" :class="{ active: tripMapShowPhotos }" :aria-pressed="tripMapShowPhotos" @click="toggleTripMapPhotos(true)">显示 ({{ tripMapPhotoMatches.length }})</button><button type="button" :class="{ active: !tripMapShowPhotos }" :aria-pressed="!tripMapShowPhotos" @click="toggleTripMapPhotos(false)">隐藏</button></div></div>
-              <p v-if="tripMapShowPhotos && ownerWorkspace" class="map-tool-hint">按行程时区匹配日期前后 1 天的定位照片。</p>
+              <div v-if="isAdmin && photoStatus?.enabled" class="map-tool-row"><span>行程照片</span><div class="provider-segment"><button type="button" :class="{ active: tripMapShowPhotos }" :aria-pressed="tripMapShowPhotos" @click="toggleTripMapPhotos(true)">显示 ({{ tripMapPhotoMatches.length }})</button><button type="button" :class="{ active: !tripMapShowPhotos }" :aria-pressed="!tripMapShowPhotos" @click="toggleTripMapPhotos(false)">隐藏</button></div></div>
+              <p v-if="tripMapShowPhotos && isAdmin" class="map-tool-hint">按行程时区匹配日期前后 1 天的定位照片。</p>
               <div v-if="tripDocument" class="map-category-legend" aria-label="规划点标签颜色图例"><span v-for="category in planningPointCategoryOptions" :key="category.value" :style="{ '--kind-color': planningPointCategoryColor(category.value) }"><i aria-hidden="true"></i>{{ category.label }}</span></div>
                <button v-if="!readOnlyView" class="map-pick-action" type="button" :disabled="!mapReady || !tripDocument" @click="toggleMapPick"><IonIcon :icon="mapOutline" /> {{ mapPickMode ? mapPickTargetID ? '取消更新选点' : '取消地图选点' : '地图选点' }}</button>
             </div>
@@ -6358,7 +6628,7 @@ onUnmounted(() => {
               <div v-if="historyView" class="history-readonly-banner"><span><strong>历史版本 · 只读</strong><small>{{ historyView.label || '保存于 ' + formatDateTime(historyView.created_at) }} · 工作版本 {{ historyView.source_revision }}</small></span><button type="button" @click="exitTripHistory">返回当前版本</button></div>
               <div v-if="error" class="global-error"><IonIcon :icon="cloudOfflineOutline" /><span>{{ error }}</span><button type="button" class="notice-close-btn" aria-label="关闭错误提示" @click="closeError">×</button></div>
               <div v-if="tripDetailsNotice" class="global-notice"><IonIcon :icon="createOutline" /><span>{{ tripDetailsNotice }}</span><button type="button" class="notice-close-btn" aria-label="关闭提示" @click="closeNotice">×</button></div>
-              <div v-if="shareNoticeVisible && shareURL" class="share-banner"><span><strong>{{ shareNoticeTitle }}</strong><a :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><small v-if="shareExpiresAt">有效期至 {{ formatDateTime(shareExpiresAt) }}</small><small v-else class="permanent-badge">永久有效</small><small v-if="shareCopyMessage" class="share-copy-feedback">{{ shareCopyMessage }}</small></span><div class="share-actions"><button type="button" @click="copyShareURL">复制链接</button><button type="button" @click="openShareModal">分享设置</button><button type="button" @click="openTripPoster">生成海报</button><button v-if="shareID" type="button" @click="revokeShare">撤销</button><button type="button" class="notice-close-btn" aria-label="关闭分享提示" @click="dismissShareNotice">×</button></div></div>
+              <div v-if="shareNoticeVisible && shareURL && isAdmin" class="share-banner"><span><strong>{{ shareNoticeTitle }}</strong><a :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><small v-if="shareExpiresAt">有效期至 {{ formatDateTime(shareExpiresAt) }}</small><small v-else class="permanent-badge">永久有效</small><small v-if="shareCopyMessage" class="share-copy-feedback">{{ shareCopyMessage }}</small></span><div class="share-actions"><button type="button" @click="copyShareURL">复制链接</button><button type="button" @click="openShareModal">分享设置</button><button type="button" @click="openTripPoster">生成海报</button><button v-if="shareID" type="button" @click="revokeShare">撤销</button><button type="button" class="notice-close-btn" aria-label="关闭分享提示" @click="dismissShareNotice">×</button></div></div>
             </section>
           </section>
         </main>
@@ -6483,14 +6753,14 @@ onUnmounted(() => {
           </div>
         </section>
       </div>
-      <div v-if="newTripOpen" class="new-trip-backdrop" @click.self="newTripOpen = false">
+      <div v-if="newTripOpen && canCreateTrips" class="new-trip-backdrop" @click.self="newTripOpen = false">
         <section class="new-trip-window" role="dialog" aria-modal="true" aria-labelledby="new-trip-title">
           <aside class="new-trip-hero"><span class="new-trip-mark">✦</span><p class="eyebrow">START A JOURNEY</p><h2>把下一段路，<br />放到地图上。</h2><p>先建立一个轻量的行程容器，之后再逐日添加地点、说明和路线。</p><div class="new-trip-hero-orbit"></div></aside>
           <div class="new-trip-form-area"><header class="new-trip-header"><div><p class="eyebrow">NEW JOURNEY</p><h2 id="new-trip-title">新建旅行规划</h2><p>创建后会先保存为草稿，你可以稍后继续完善。</p></div><button class="settings-close" type="button" aria-label="关闭新建行程" @click="newTripOpen = false">×</button></header><div class="new-trip-steps"><span class="active"><b>01</b> 基本信息</span><span><b>02</b> 规划地点</span><span><b>03</b> 生成路线</span></div><form class="new-trip-form" @submit.prevent="createTrip"><label>规划名称<input v-model="newTitle" maxlength="120" required placeholder="例如：甘南自驾" /></label><div class="new-trip-date-grid"><label>开始日期<input v-model="newStartDate" type="date" required /></label><label>结束日期<input v-model="newEndDate" type="date" required /></label></div><label>时区<input v-model="newTimezone" placeholder="Asia/Shanghai" required /></label><label>总体说明 <span class="optional-label">可选 · 支持 Markdown</span><textarea v-model="newDescription" rows="5" placeholder="写下这次旅行的背景、节奏和注意事项"></textarea></label><div class="new-trip-actions"><button class="secondary-action" type="button" @click="newTripOpen = false">取消</button><button class="primary-action" type="submit" :disabled="actionLoading"><IonIcon :icon="addOutline" /> {{ actionLoading ? '创建中…' : '创建草稿' }}</button></div></form></div>
         </section>
       </div>
       <div v-if="false && newTripOpen" class="modal-backdrop" @click.self="newTripOpen = false"><section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="new-trip-title"><button class="modal-close" aria-label="关闭" @click="newTripOpen = false">×</button><p class="eyebrow">NEW JOURNEY</p><h2 id="new-trip-title">新建旅行规划</h2><form @submit.prevent="createTrip"><label>规划名称<input v-model="newTitle" maxlength="120" required /></label><div class="form-grid"><label>开始日期<input v-model="newStartDate" type="date" required /></label><label>结束日期<input v-model="newEndDate" type="date" required /></label></div><label>时区<input v-model="newTimezone" placeholder="Asia/Shanghai" required /></label><label>总体说明（Markdown）<textarea v-model="newDescription" rows="5" placeholder="写下这次旅行的总体说明"></textarea></label><div class="modal-actions"><button type="button" @click="newTripOpen = false">取消</button><button class="primary" type="submit" :disabled="actionLoading">创建草稿</button></div></form></section></div>
-      <div v-if="settingsOpen && ownerWorkspace" class="settings-backdrop" @click.self="settingsOpen = false">
+      <div v-if="settingsOpen && ownerWorkspace && isAdmin" class="settings-backdrop" @click.self="settingsOpen = false">
         <section class="settings-window" role="dialog" aria-modal="true" aria-labelledby="settings-title">
           <header class="settings-header">
             <div><p class="eyebrow">JOURNEYIN / SETTINGS</p><h2 id="settings-title">设置</h2><p>把服务连接、地图能力和外观偏好集中到一个设置工作区。</p></div>
@@ -6505,6 +6775,7 @@ onUnmounted(() => {
               <button type="button" :class="{ active: settingsSection === 'photos' }" @click="settingsSection = 'photos'"><span class="settings-nav-icon"><IonIcon :icon="imageOutline" /></span><span>足迹相册</span><small>相册扫描目录</small></button>
               <button type="button" :class="{ active: settingsSection === 'search' }" @click="settingsSection = 'search'"><span class="settings-nav-icon">⌕</span><span>地点检索</span><small>搜索优先级</small></button>
               <button type="button" :class="{ active: settingsSection === 'sharing' }" @click="settingsSection = 'sharing'"><span class="settings-nav-icon">↗</span><span>分享</span><small>链接与权限</small></button>
+              <button v-if="isAdmin" type="button" :class="{ active: settingsSection === 'users' }" @click="openUserManagement"><span class="settings-nav-icon">♙</span><span>用户管理</span><small>账号与行程权限</small></button>
               <button type="button" :class="{ active: settingsSection === 'mcp' }" @click="settingsSection = 'mcp'"><span class="settings-nav-icon">◇</span><span>MCP</span><small>Agent 连接</small></button>
               <button type="button" :class="{ active: settingsSection === 'about' }" @click="settingsSection = 'about'"><span class="settings-nav-icon">ⓘ</span><span>关于</span><small>版本与项目</small></button>
             </nav>
@@ -6703,6 +6974,25 @@ onUnmounted(() => {
                 <div class="settings-note"><span class="settings-note-mark">i</span><span>分享链接是只读快照，默认有效期为 7 天。撤销后，持有链接的人将无法继续查看。</span></div>
               </section>
 
+              <section v-else-if="settingsSection === 'users'" class="settings-page-section settings-users-section">
+                <div class="settings-section-heading"><span class="eyebrow">ACCOUNT ACCESS</span><h3>用户与行程权限</h3><p>只读用户可查看所有行程；指定行程编辑者只能修改被授予的行程；全行程编辑者可修改和创建所有行程。管理员额外拥有系统设置和用户管理权限。</p></div>
+                <p v-if="managedUsersMessage" class="settings-feedback" role="status">{{ managedUsersMessage }}</p>
+                <p v-if="managedUsersError" class="settings-feedback settings-error" role="alert">{{ managedUsersError }}</p>
+                <div class="settings-user-grid">
+                  <section class="settings-card settings-user-list-card">
+                    <div class="settings-card-heading"><div><strong>账户</strong><small>{{ managedUsers.length }} 个用户</small></div><div class="settings-user-list-toolbar"><button class="secondary-action compact-action" type="button" :disabled="managedUsersLoading" @click="loadManagedUsers">刷新</button><button class="primary-action compact-action" type="button" @click="openNewManagedUser">新增用户</button></div></div>
+                    <p v-if="managedUsersLoading" class="settings-help">正在读取用户列表…</p>
+                    <p v-else-if="!managedUsers.length" class="settings-help">尚无用户。请先创建管理员账户。</p>
+                    <article v-for="user in managedUsers" :key="user.id" class="settings-user-row">
+                      <div class="settings-user-row-info"><strong>{{ user.username }}<span v-if="user.id === currentUser?.id" class="settings-user-self">当前用户</span></strong><small>{{ user.role === 'admin' ? '管理员' : user.access_mode === 'read_only' ? '只读' : user.access_mode === 'selected_trip_edit' ? '指定行程可编辑' : '所有行程可编辑' }} · {{ user.enabled ? '启用' : '已停用' }}</small><small v-if="user.access_mode === 'selected_trip_edit'">可编辑 {{ user.editable_trip_ids.length }} 条行程</small></div>
+                      <div class="settings-user-row-actions"><button type="button" class="text-action" @click="editManagedUser(user)">修改</button><button type="button" class="text-action" @click="void loadUserAPITokens(user)">令牌</button><button v-if="user.id !== currentUser?.id" type="button" class="text-action danger-menu-item" @click="deleteManagedUser(user)">删除</button></div>
+                    </article>
+                  </section>
+
+                </div>
+
+              </section>
+
               <section v-else-if="settingsSection === 'about'" class="settings-page-section settings-about-section">
                 <div class="settings-section-heading"><span class="eyebrow">ABOUT JOURNEYIN</span><h3>关于 JourneyIn</h3><p>了解当前版本、项目作者和 JourneyIn 的开源项目信息。</p></div>
                 <div class="settings-card settings-about-hero"><BrandLogo :size="52" variant="mark" shape="squircle" class="settings-about-logo" /><div><strong>JourneyIn</strong><p>{{ APP_SLOGAN }}</p><a :href="GITHUB_URL" target="_blank" rel="noopener noreferrer">访问项目主页 ↗</a></div></div>
@@ -6814,10 +7104,48 @@ onUnmounted(() => {
           </div>
         </section>
       </div>
+      <div v-if="managedUserFormOpen && isAdmin" class="modal-backdrop settings-user-dialog-backdrop" @click.self="resetManagedUserForm">
+        <section class="modal-panel settings-user-dialog" role="dialog" aria-modal="true" aria-labelledby="managed-user-dialog-title">
+          <header class="settings-user-dialog-header"><div><p class="eyebrow">ACCOUNT ACCESS</p><h2 id="managed-user-dialog-title">{{ editingManagedUserID ? '修改用户' : '新增用户' }}</h2><p>密码以哈希保存；已保存密码不会回显。</p></div><button type="button" class="modal-close" aria-label="关闭用户表单" @click="resetManagedUserForm">×</button></header>
+          <div class="settings-user-dialog-body">
+            <p v-if="managedUsersError" class="settings-feedback settings-error" role="alert">{{ managedUsersError }}</p>
+            <form class="settings-user-form" @submit.prevent="saveManagedUser">
+              <label>用户名<input v-model="managedUsernameDraft" maxlength="80" required autocomplete="off" /></label>
+              <label v-if="!editingManagedUserID">初始密码<input v-model="managedPasswordDraft" type="password" required minlength="12" autocomplete="new-password" placeholder="至少 12 个字符" /></label>
+              <label v-else>重置密码 <span class="optional-label">留空保持不变</span><input v-model="managedNewPasswordDraft" type="password" minlength="12" autocomplete="new-password" placeholder="至少 12 个字符" /></label>
+              <label>账户角色<select v-model="managedRoleDraft" @change="onManagedRoleChange"><option value="user">普通用户</option><option value="admin">管理员</option></select></label>
+              <label>行程权限<select v-model="managedAccessModeDraft" :disabled="managedRoleDraft === 'admin'" @change="onManagedAccessModeChange"><option value="read_only">只读（查看所有行程）</option><option value="selected_trip_edit">指定行程可编辑（其他行程只读）</option><option value="all_trips_edit">所有行程可编辑</option></select></label>
+              <div v-if="managedRoleDraft === 'user' && managedAccessModeDraft === 'selected_trip_edit'" class="settings-user-trip-grants" role="group" aria-labelledby="managed-trip-grants-label">
+                <div class="settings-user-trip-grant-heading"><div><strong id="managed-trip-grants-label">允许编辑的行程</strong><small>已选 {{ managedEditableTripIDsDraft.length }} 条 · 可查看全部 {{ trips.length }} 条</small></div><div class="settings-user-trip-grant-actions"><button type="button" class="text-action" :disabled="!managedEditableTripOptions.length" @click="selectFilteredManagedTrips">选择当前结果</button><button type="button" class="text-action" :disabled="!managedEditableTripIDsDraft.length" @click="clearManagedTripGrants">清空</button></div></div>
+                <label class="settings-user-trip-search"><span class="visually-hidden">搜索行程</span><input v-model="managedTripSearchDraft" type="search" placeholder="搜索行程名称或日期" aria-label="搜索可编辑行程" /><span>{{ managedEditableTripOptions.length }} 条结果</span></label>
+                <div class="settings-user-trip-selected" aria-label="已选行程"><div v-if="managedSelectedEditableTrips.length" class="settings-user-trip-chips"><span v-for="trip in managedSelectedEditableTrips" :key="trip.id" class="settings-user-trip-chip"><span>{{ trip.title }}</span><button type="button" :aria-label="'移除 ' + trip.title" @click="removeManagedTripGrant(trip.id)">×</button></span></div><p v-else class="settings-user-trip-empty">尚未选择行程；该用户仍可查看所有行程，但暂时没有行程编辑权限。</p></div>
+                <div class="settings-user-trip-options" role="group" aria-label="行程编辑权限列表"><label v-for="trip in managedEditableTripOptions" :key="trip.id" class="settings-user-trip-option" :class="{ selected: managedEditableTripIDsDraft.includes(trip.id) }"><input type="checkbox" :checked="managedEditableTripIDsDraft.includes(trip.id)" @change="toggleManagedTripGrant(trip.id)" /><span><strong>{{ trip.title }}</strong><small>{{ formatDateRange(trip.start_date, trip.end_date) }}</small></span></label><p v-if="!managedEditableTripOptions.length" class="settings-user-trip-no-results">没有找到匹配的行程。</p></div>
+                <small class="settings-user-trip-hint">勾选或取消勾选即可授予或移除权限；也可在上方已选标签中逐条移除。</small>
+              </div>
+              <label v-if="editingManagedUserID" class="settings-user-enabled"><input v-model="managedEnabledDraft" type="checkbox" />允许登录</label>
+              <p class="settings-help">只读与指定行程编辑权限均可查看所有行程；只有管理员和所有行程编辑者能创建行程。</p>
+              <div class="settings-actions"><button type="button" class="secondary-action" @click="resetManagedUserForm">取消</button><button class="primary-action" type="submit" :disabled="managedUsersSaving">{{ managedUsersSaving ? '保存中…' : editingManagedUserID ? '保存用户' : '创建用户' }}</button></div>
+            </form>
+          </div>
+        </section>
+      </div>
+      <div v-if="tokenUserID && isAdmin" class="modal-backdrop settings-user-dialog-backdrop settings-user-token-dialog-backdrop" @click.self="closeUserTokenDialog">
+        <section class="modal-panel settings-user-dialog settings-user-token-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-user-token-title">
+          <div class="settings-user-dialog-body settings-user-token-dialog-body">
+                <section class="settings-card settings-user-token-card settings-user-token-dialog-content">
+                  <div class="settings-card-heading"><div><strong id="settings-user-token-title">MCP / API 令牌</strong><small>{{ managedUsers.find(user => user.id === tokenUserID)?.username }} · 每个令牌继承该用户的行程权限</small></div><button type="button" class="text-action" @click="closeUserTokenDialog">关闭</button></div>
+                  <form class="settings-user-token-create" @submit.prevent="createUserAPIToken"><label>令牌名称<input v-model="userAPITokenNameDraft" maxlength="80" required placeholder="例如：Claude Desktop" /></label><button class="primary-action" type="submit" :disabled="!managedUsers.find(user => user.id === tokenUserID)?.enabled">生成令牌</button></form>
+                  <div v-if="newlyCreatedUserToken" class="settings-user-token-once"><strong>请立即复制；关闭页面后将无法再次查看</strong><div><input :value="newlyCreatedUserToken" readonly aria-label="新创建的 MCP 令牌" /><button type="button" class="secondary-action" @click="copyNewUserToken">复制</button></div></div>
+                  <div v-if="userAPITokens.length" class="settings-user-token-list"><article v-for="token in userAPITokens" :key="token.id"><span><strong>{{ token.name }}</strong><small>创建于 {{ formatDateTime(token.created_at) }} · {{ token.last_used_at ? '最近使用 ' + formatDateTime(token.last_used_at) : '尚未使用' }} · {{ token.expires_at ? '有效期至 ' + formatDateTime(token.expires_at) : '永久' }}</small></span><button type="button" class="text-action danger-menu-item" @click="revokeUserAPIToken(token)">撤销</button></article></div>
+                  <p v-else-if="!newlyCreatedUserToken" class="settings-help">暂无活动令牌。生成后可在 MCP 客户端使用 Bearer 认证；服务端只保存令牌哈希。</p>
+                </section>
+          </div>
+        </section>
+      </div>
       <div v-if="false && settingsOpen" class="modal-backdrop" @click.self="settingsOpen = false"><section class="modal-panel settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title"><button class="modal-close" aria-label="关闭" @click="settingsOpen = false">×</button><p class="eyebrow">JOURNEYIN SETTINGS</p><h2 id="settings-title">设置</h2><p class="settings-intro">当前主题：{{ themeLabel }}。Key 配置保存到 SQLite，服务端 Key 不会回显。</p><section class="settings-section"><h3>外观</h3><p class="settings-label">主题：{{ themeLabel }}</p><div class="theme-options"><button type="button" :class="{ selected: theme === 'system' }" @click="setTheme('system')">跟随系统</button><button type="button" :class="{ selected: theme === 'light' }" @click="setTheme('light')">浅色</button><button type="button" :class="{ selected: theme === 'dark' }" @click="setTheme('dark')">深色</button></div></section><section class="settings-section"><h3>服务端连接</h3><label>当前服务地址<input v-model="serverURL" readonly /></label><label>兼容 REST API Token<input v-model="authTokenInput" type="password" placeholder="仅用于兼容旧客户端，可留空" autocomplete="off" /></label><div class="modal-actions"><button type="button" @click="logout">清除令牌</button><button type="button" class="primary" @click="saveAuth">保存令牌</button></div><p v-if="settingsMessage" class="settings-message">{{ settingsMessage }}</p></section><section class="settings-section"><h3>默认地图</h3><label>默认地图 Provider<select v-model="defaultMapProvider"><option value="baidu">百度地图</option><option value="amap">高德地图</option></select></label><p class="key-help">用于没有单独地图偏好的新行程和查看页面；单个行程已保存的地图 Provider 不会被覆盖。地图工具仍可临时切换 Provider。</p><div class="modal-actions"><button type="button" class="primary" :disabled="settingsSaving" @click="saveDefaultMapProvider">{{ settingsSaving ? '保存中…' : '保存默认地图' }}</button></div></section><section class="settings-section"><h3>百度地图</h3><p class="key-status">浏览器端 Key：<strong>{{ baiduKey ? '已配置' : '未配置' }}</strong> · 服务端 Key：<strong>{{ settingsData?.map?.baidu?.server_key_configured ? '已配置' : '未配置' }}</strong></p><label>百度浏览器端 Key<input v-model="baiduBrowserKeyInput" type="password" :placeholder="settingsData?.map?.baidu?.browser_key_configured ? '已配置，输入新 Key 可替换' : '用于 JSAPI 4.0/BMap 网页地图'" autocomplete="off" /></label><label>百度服务端 Key<input v-model="baiduServerKeyInput" type="password" placeholder="已配置时输入新 Key 可替换；留空保持当前值" autocomplete="off" /></label><p class="key-help">浏览器端 Key 用于地图底图；服务端 Key 用于 POI 搜索、地理编码、路线和天气。请确认当前访问 host 在百度控制台白名单内。</p><a href="https://lbsyun.baidu.com/apiconsole/key" target="_blank" rel="noopener noreferrer">申请/管理百度地图 Key ↗</a></section><section class="settings-section"><h3>高德地图</h3><p class="key-status">JS Key：<strong>{{ settingsData?.map?.amap?.js_key_configured ? '已配置' : '未配置' }}</strong> · 服务端 Key：<strong>{{ settingsData?.map?.amap?.server_key_configured ? '已配置' : '未配置' }}</strong> · 安全密钥：<strong>{{ settingsData?.map?.amap?.security_js_code_configured ? '已配置' : '未配置' }}</strong></p><label>高德 JS Key<input v-model="amapJSKeyInput" type="password" placeholder="用于高德 Web 地图" autocomplete="off" /></label><label>高德服务端 Key<input v-model="amapServerKeyInput" type="password" placeholder="已配置时输入新 Key 可替换；留空保持当前值" autocomplete="off" /></label><label>高德 JS 安全密钥<input v-model="amapSecurityJSCodeInput" type="password" placeholder="用于 JSAPI 安全代理；已配置时输入新密钥可替换" autocomplete="off" /></label><a href="https://console.amap.com/dev/key/app" target="_blank" rel="noopener noreferrer">申请/管理高德 Key ↗</a><p class="key-help">保存后，规划点会优先使用已经保存的坐标，不会因为重新绘制地图重复查询。</p><div class="modal-actions"><button type="button" class="primary" :disabled="settingsSaving" @click="saveMapKeys">{{ settingsSaving ? '保存中…' : '保存地图 Key 到数据库' }}</button></div></section><section class="settings-section"><h3>地点检索</h3><label>优先 Provider<select v-model="poiProviderPriority"><option value="amap">高德优先</option><option value="baidu">百度优先</option></select></label><p class="key-help">当前策略会先查询本地地点目录；未命中后使用所选 Provider，Provider 不可用时自动尝试另一家。新搜索结果只保留 7 天。</p><p class="key-status">本地地点记录：<strong>{{ localDirectoryCount }}</strong> 条</p><div class="modal-actions"><button type="button" @click="savePOIPreferences">保存检索优先级</button><button type="button" @click="clearLocalDirectory">清除本地记录</button></div></section><section class="settings-section"><h3>MCP</h3><p>MCP 地址：{{ capabilities?.mcp?.http_endpoint || '/mcp' }}</p><p class="key-help">Docker 远程部署时设置 JOURNEYIN_MCP_TOKEN；本地 localhost 调试可不设置。</p></section></section></div>
-      <div v-if="authOpen" class="modal-backdrop" @click.self="authOpen = false"><section class="modal-panel auth-panel" role="dialog" aria-modal="true" aria-labelledby="auth-title"><IonIcon class="auth-icon" :icon="logInOutline" /><h2 id="auth-title">登录 JourneyIn</h2><p>请输入 Docker 服务配置的账号和密码。登录成功后会在当前浏览器保存一个 HttpOnly 会话。</p><form class="auth-form" @submit.prevent="login"><label>账号<input v-model="loginUsername" type="text" autofocus autocomplete="username" /></label><label>密码<input v-model="loginPassword" type="password" autocomplete="current-password" /></label><p v-if="loginMessage" class="auth-error">{{ loginMessage }}</p><div class="modal-actions"><button type="button" @click="authOpen = false">稍后</button><button type="submit" class="primary" :disabled="loginLoading">{{ loginLoading ? '登录中…' : '登录' }}</button></div></form></section></div>
+      <div v-if="authOpen" class="modal-backdrop" @click.self="authOpen = false"><section class="modal-panel auth-panel" role="dialog" aria-modal="true" aria-labelledby="auth-title"><IonIcon class="auth-icon" :icon="logInOutline" /><h2 id="auth-title">登录 JourneyIn</h2><p>请输入管理员创建的 JourneyIn 账号和密码。登录成功后会在当前浏览器保存一个 HttpOnly 会话。</p><form class="auth-form" @submit.prevent="login"><label>账号<input v-model="loginUsername" type="text" autofocus autocomplete="username" /></label><label>密码<input v-model="loginPassword" type="password" autocomplete="current-password" /></label><p v-if="loginMessage" class="auth-error">{{ loginMessage }}</p><div class="modal-actions"><button type="button" @click="authOpen = false">稍后</button><button type="submit" class="primary" :disabled="loginLoading">{{ loginLoading ? '登录中…' : '登录' }}</button></div></form></section></div>
       <!-- 在线分享设置弹窗 -->
-      <div v-if="shareModalOpen && ownerWorkspace" class="modal-backdrop share-modal-backdrop" @click.self="shareModalOpen = false">
+      <div v-if="shareModalOpen && ownerWorkspace && isAdmin" class="modal-backdrop share-modal-backdrop" @click.self="shareModalOpen = false">
         <section class="modal-panel share-modal-panel" role="dialog" aria-modal="true" aria-labelledby="share-modal-title">
           <header class="share-modal-header">
             <div>
