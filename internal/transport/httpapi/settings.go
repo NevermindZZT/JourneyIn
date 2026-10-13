@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 
 	journeymaps "journeyin/internal/maps"
@@ -134,6 +136,7 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	if photosRootDir == "" && s.photosService != nil {
 		photosRootDir = s.photosService.RootDir()
 	}
+	matchMissingGPS, matchWindowMinutes := s.photoMatchSettings(r.Context())
 	defaultWeatherProvider := string(weather.ProviderAuto)
 	caiyunTokenConfigured := false
 	qweatherKeyConfigured := false
@@ -172,8 +175,10 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 			"local_directory_count": directoryCount,
 		},
 		"photos": map[string]any{
-			"root_dir":   photosRootDir,
-			"configured": photosRootDir != "",
+			"root_dir":             photosRootDir,
+			"configured":           photosRootDir != "",
+			"match_missing_gps":    matchMissingGPS,
+			"match_window_minutes": matchWindowMinutes,
 		},
 		"weather": map[string]any{
 			"default_provider": defaultWeatherProvider,
@@ -346,8 +351,40 @@ func (s *Server) clearPlaceDirectory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"cleared": true})
 }
 
+func normalizePhotoRootPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if absolute, err := filepath.Abs(path); err == nil {
+		return filepath.Clean(absolute)
+	}
+	return filepath.Clean(path)
+}
+
+func (s *Server) photoMatchSettings(ctx context.Context) (bool, int) {
+	window := photos.DefaultPhotoMatchWindowMinutes
+	if s.settingsStore == nil {
+		return false, window
+	}
+	enabled := false
+	if value, ok, err := s.settingsStore.GetSetting(ctx, "photos.match_missing_gps"); err == nil && ok {
+		if parsed, parseErr := strconv.ParseBool(strings.TrimSpace(value)); parseErr == nil {
+			enabled = parsed
+		}
+	}
+	if value, ok, err := s.settingsStore.GetSetting(ctx, "photos.match_window_minutes"); err == nil && ok {
+		if parsed, parseErr := strconv.Atoi(strings.TrimSpace(value)); parseErr == nil && photos.ValidPhotoMatchWindowMinutes(parsed) {
+			window = parsed
+		}
+	}
+	return enabled, window
+}
+
 type photosSettingsBody struct {
-	RootDir *string `json:"root_dir"`
+	RootDir            *string `json:"root_dir"`
+	MatchMissingGPS    *bool   `json:"match_missing_gps"`
+	MatchWindowMinutes *int    `json:"match_window_minutes"`
 }
 
 func (s *Server) updatePhotosSettings(w http.ResponseWriter, r *http.Request) {
@@ -363,38 +400,67 @@ func (s *Server) updatePhotosSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
 		return
 	}
-	var newDir string
-	if body.RootDir != nil {
-		newDir = strings.TrimSpace(*body.RootDir)
+	newDir := ""
+	if s.photosService != nil {
+		newDir = s.photosService.RootDir()
+	}
+	if value, ok, err := s.settingsStore.GetSetting(r.Context(), "photos.root_dir"); err == nil && ok && strings.TrimSpace(value) != "" {
+		newDir = strings.TrimSpace(value)
+	}
+	matchMissingGPS, matchWindowMinutes := s.photoMatchSettings(r.Context())
+	if body.MatchMissingGPS != nil {
+		matchMissingGPS = *body.MatchMissingGPS
+	}
+	if body.MatchWindowMinutes != nil {
+		if !photos.ValidPhotoMatchWindowMinutes(*body.MatchWindowMinutes) {
+			writeError(w, http.StatusBadRequest, "invalid_match_window", "photo match window must be 15, 30, 60, or 120 minutes", nil)
+			return
+		}
+		matchWindowMinutes = *body.MatchWindowMinutes
 	}
 	var err error
-	if newDir == "" {
-		err = s.settingsStore.DeleteSetting(r.Context(), "photos.root_dir")
-		fallbackDir := os.Getenv("JOURNEYIN_PHOTOS_DIR")
-		if s.photosService != nil {
-			s.photosService.SetRootDir(fallbackDir)
-			if fallbackDir != "" {
-				s.photosService.TriggerScan()
+	scanTriggered := false
+	if body.RootDir != nil {
+		requestedDir := strings.TrimSpace(*body.RootDir)
+		if requestedDir == "" {
+			err = s.settingsStore.DeleteSetting(r.Context(), "photos.root_dir")
+			newDir = os.Getenv("JOURNEYIN_PHOTOS_DIR")
+		} else {
+			newDir = requestedDir
+			err = s.settingsStore.SetSetting(r.Context(), "photos.root_dir", newDir, false)
+		}
+		if err == nil {
+			createdService := false
+			if s.photosService == nil && newDir != "" && s.settingsStore.DB() != nil {
+				s.photosService = photos.NewService(s.settingsStore.DB(), newDir, "", s.logger)
+				createdService = true
+			}
+			if s.photosService != nil && (createdService || normalizePhotoRootPath(s.photosService.RootDir()) != normalizePhotoRootPath(newDir)) {
+				s.photosService.SetRootDir(newDir)
+				if newDir != "" {
+					_ = s.photosService.TriggerScan()
+					scanTriggered = true
+				}
 			}
 		}
-	} else {
-		err = s.settingsStore.SetSetting(r.Context(), "photos.root_dir", newDir, false)
-		if s.photosService == nil && s.settingsStore != nil && s.settingsStore.DB() != nil {
-			s.photosService = photos.NewService(s.settingsStore.DB(), newDir, "", s.logger)
-		}
-		if s.photosService != nil {
-			s.photosService.SetRootDir(newDir)
-			s.photosService.TriggerScan()
-		}
+	}
+	if err == nil {
+		err = s.settingsStore.SetSetting(r.Context(), "photos.match_missing_gps", strconv.FormatBool(matchMissingGPS), false)
+	}
+	if err == nil {
+		err = s.settingsStore.SetSetting(r.Context(), "photos.match_window_minutes", strconv.Itoa(matchWindowMinutes), false)
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"saved":    true,
-		"root_dir": newDir,
-		"enabled":  s.photosService != nil && s.photosService.IsEnabled(),
+		"saved":                true,
+		"root_dir":             newDir,
+		"enabled":              s.photosService != nil && s.photosService.IsEnabled(),
+		"match_missing_gps":    matchMissingGPS,
+		"match_window_minutes": matchWindowMinutes,
+		"scan_triggered":       scanTriggered,
 	})
 }
 

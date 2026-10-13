@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS photo_index (
   file_size INTEGER NOT NULL,
   mod_time INTEGER NOT NULL,
   taken_at TEXT NOT NULL,
+  taken_at_source TEXT NOT NULL DEFAULT 'unknown',
+  taken_at_offset_known INTEGER NOT NULL DEFAULT 0,
   has_gps INTEGER NOT NULL DEFAULT 0,
   lat_wgs84 REAL,
   lng_wgs84 REAL,

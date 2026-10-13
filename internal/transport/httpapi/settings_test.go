@@ -199,6 +199,87 @@ func TestUpdatePhotosSettings(t *testing.T) {
 	clearResp.Body.Close()
 }
 
+func TestPhotoMatchingSettingsPersistAndValidate(t *testing.T) {
+	server := testPlanningServer(t)
+	defer server.Close()
+	type responseBody struct {
+		Photos struct {
+			MatchMissingGPS    bool `json:"match_missing_gps"`
+			MatchWindowMinutes int  `json:"match_window_minutes"`
+		} `json:"photos"`
+	}
+	readSettings := func() responseBody {
+		t.Helper()
+		response, err := http.Get(server.URL + "/api/v1/settings")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		var body responseBody
+		if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		return body
+	}
+	putSettings := func(value any) *http.Response {
+		t.Helper()
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request, err := http.NewRequest(http.MethodPut, server.URL+"/api/v1/settings/photos", strings.NewReader(string(encoded)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	initial := readSettings()
+	if initial.Photos.MatchMissingGPS || initial.Photos.MatchWindowMinutes != 30 {
+		t.Fatalf("unexpected photo match defaults: %+v", initial.Photos)
+	}
+	put := putSettings(map[string]any{"match_missing_gps": true, "match_window_minutes": 60})
+	if put.StatusCode != http.StatusOK {
+		t.Fatalf("save match settings status=%d", put.StatusCode)
+	}
+	var putResult struct {
+		ScanTriggered bool `json:"scan_triggered"`
+	}
+	if err := json.NewDecoder(put.Body).Decode(&putResult); err != nil {
+		put.Body.Close()
+		t.Fatal(err)
+	}
+	put.Body.Close()
+	if putResult.ScanTriggered {
+		t.Fatal("changing match settings should not rescan the photo directory")
+	}
+	saved := readSettings()
+	if !saved.Photos.MatchMissingGPS || saved.Photos.MatchWindowMinutes != 60 {
+		t.Fatalf("settings did not persist: %+v", saved.Photos)
+	}
+	invalid := putSettings(map[string]any{"match_window_minutes": 45})
+	if invalid.StatusCode != http.StatusBadRequest {
+		t.Fatalf("invalid window status=%d, expected 400", invalid.StatusCode)
+	}
+	invalid.Body.Close()
+	stillSaved := readSettings()
+	if !stillSaved.Photos.MatchMissingGPS || stillSaved.Photos.MatchWindowMinutes != 60 {
+		t.Fatalf("invalid update changed saved settings: %+v", stillSaved.Photos)
+	}
+	partial := putSettings(map[string]any{"match_window_minutes": 120})
+	if partial.StatusCode != http.StatusOK {
+		t.Fatalf("partial setting update status=%d", partial.StatusCode)
+	}
+	partial.Body.Close()
+	final := readSettings()
+	if !final.Photos.MatchMissingGPS || final.Photos.MatchWindowMinutes != 120 {
+		t.Fatalf("partial update did not preserve toggle: %+v", final.Photos)
+	}
+}
 func TestWeatherSettingsUpdateAndRead(t *testing.T) {
 	server := testPlanningServer(t)
 	defer server.Close()

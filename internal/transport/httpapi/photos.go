@@ -57,7 +57,8 @@ func (s *Server) getAtlasPhotos(w http.ResponseWriter, r *http.Request) {
 			crs = "gcj02"
 		}
 	}
-	items, err := s.photosService.GetAtlasPhotos(r.Context(), crs)
+	matchMissingGPS, matchWindowMinutes := s.photoMatchSettings(r.Context())
+	items, err := s.photosService.GetAtlasPhotosWithMatching(r.Context(), crs, matchMissingGPS, matchWindowMinutes)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "query_error", err.Error(), nil)
 		return

@@ -42,7 +42,7 @@ type TripHistoryEntry = { id: string; history_id?: string; trip_id: string; sour
 type CollaborationShareSummary = { id: string; trip_id: string; permission: 'editor'; status: 'active' | 'expired' | 'revoked'; created_at: string; expires_at: string; revoked_at?: string }
 type TripSortMode = 'updated' | 'date'
 type Capabilities = { version?: string; default_map_provider?: 'baidu' | 'amap'; map_providers?: { baidu?: { browser_key_configured?: boolean; browser_key?: string }; amap?: { browser_key_configured?: boolean; browser_key?: string; security_proxy_path?: string; security_js_code_configured?: boolean } }; features?: { planning_point_edit?: boolean; coordinate_repair?: boolean }; mcp?: { http_endpoint?: string; transports?: string[]; token_configured?: boolean } }
-type KeySettings = { map?: { default_provider?: 'baidu' | 'amap'; baidu?: { browser_key_configured?: boolean; server_key_configured?: boolean }; amap?: { js_key_configured?: boolean; server_key_configured?: boolean; security_js_code_configured?: boolean } }; poi?: { provider_priority?: 'amap' | 'baidu'; local_directory_count?: number }; photos?: { root_dir?: string; configured?: boolean }; weather?: { default_provider?: 'auto' | 'openmeteo' | 'qweather' | 'caiyun' | 'amap' | 'baidu'; openmeteo?: { available?: boolean }; qweather?: { key_configured?: boolean; host?: string }; caiyun?: { token_configured?: boolean } }; mcp?: { http_endpoint?: string; token_configured?: boolean; token?: string } }
+type KeySettings = { map?: { default_provider?: 'baidu' | 'amap'; baidu?: { browser_key_configured?: boolean; server_key_configured?: boolean }; amap?: { js_key_configured?: boolean; server_key_configured?: boolean; security_js_code_configured?: boolean } }; poi?: { provider_priority?: 'amap' | 'baidu'; local_directory_count?: number }; photos?: { root_dir?: string; configured?: boolean; match_missing_gps?: boolean; match_window_minutes?: number }; weather?: { default_provider?: 'auto' | 'openmeteo' | 'qweather' | 'caiyun' | 'amap' | 'baidu'; openmeteo?: { available?: boolean }; qweather?: { key_configured?: boolean; host?: string }; caiyun?: { token_configured?: boolean } }; mcp?: { http_endpoint?: string; token_configured?: boolean; token?: string } }
 type PlaceCandidate = { id?: string; name: string; address?: string; location: Coord & { crs?: string }; provider?: string; citycode?: string; adcode?: string; typecode?: string }
 type TravelMode = 'driving' | 'walking' | 'cycling' | 'transit'
 
@@ -94,6 +94,12 @@ const weatherProviderOptions = [
   { value: 'caiyun', label: '彩云天气 (3~15天 · Caiyun)', description: "支持实时天气与短期预报" },
   { value: 'baidu', label: '百度天气 (7天)', description: "支持当天及未来7天国内预报" },
   { value: 'amap', label: '高德天气 (3天)', description: "支持当天及未来3天国内预报" },
+]
+const photoMatchWindowOptions = [
+  { value: '15', label: '15 分钟' },
+  { value: '30', label: '30 分钟（推荐）' },
+  { value: '60', label: '1 小时' },
+  { value: '120', label: '2 小时' },
 ]
 const travelModeOptions = [
   { value: 'walking', label: '步行' },
@@ -306,6 +312,9 @@ interface PhotoAtlasItem {
   thumb_url: string
   preview_url: string
   cache_version: number
+  location_source?: 'gps' | 'time_match'
+  matched_photo_id?: string
+  match_delta_seconds?: number
   capture?: PhotoCapture | null
 }
 
@@ -335,6 +344,15 @@ function formatPhotoShutter(value?: number) {
   if (value >= 1) return formatPhotoNumber(value, value >= 10 ? 0 : 1) + ' s'
   const denominator = Math.round(1 / value)
   return denominator > 0 ? '1/' + denominator + ' s' : ''
+}
+function formatPhotoMatchDelta(seconds?: number) {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return '时间未知'
+  if (seconds < 60) return Math.round(seconds) + ' 秒'
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return minutes + ' 分钟'
+  const hours = Math.floor(minutes / 60)
+  const remainder = minutes % 60
+  return hours + ' 小时' + (remainder ? remainder + ' 分钟' : '')
 }
 function photoCaptureCore(capture?: PhotoCapture | null) {
   if (!capture) return ''
@@ -398,6 +416,9 @@ const previewPhoto = computed(() => {
       thumbnail_url: photoThumbnailURL(p),
       preview_url: photoPreviewURL(p, previewEdge),
       original_url: photoOriginalURL(p),
+      location_source: p.location_source,
+      matched_photo_id: p.matched_photo_id,
+      match_delta_seconds: p.match_delta_seconds,
       capture: p.capture || null,
     }
   }
@@ -563,6 +584,8 @@ const amapServerKeyInput = ref('')
 const amapSecurityJSCodeInput = ref('')
 const poiProviderPriority = ref<'amap' | 'baidu'>('amap')
 const photosRootDirInput = ref('')
+const photoMatchMissingGPS = ref(false)
+const photoMatchWindowMinutes = ref('30')
 const defaultWeatherProvider = ref<'auto' | 'openmeteo' | 'qweather' | 'caiyun' | 'amap' | 'baidu'>('auto')
 const qweatherKeyInput = ref('')
 const qweatherHostInput = ref('')
@@ -3695,10 +3718,14 @@ function renderPhotoMarkers(photos: PhotoAtlasItem[], enabled: boolean) {
 
   clusters.forEach(cluster => {
     const badgeHTML = cluster.count > 1 ? '<span class="photo-cluster-badge">' + cluster.count + '</span>' : ''
-    const markerHTML = '<div class="photo-atlas-pin" data-cluster-id="' + cluster.id + '">' +
+    const estimatedCount = cluster.photos.filter(photo => photo.location_source === 'time_match').length
+    const estimatedBadgeHTML = estimatedCount ? '<span class="photo-atlas-estimate-badge" title="含时间匹配估算位置">估' + (cluster.count > 1 ? estimatedCount : '') + '</span>' : ''
+    const pinClass = estimatedCount ? 'photo-atlas-pin has-estimated-photo' : 'photo-atlas-pin'
+    const markerHTML = '<div class="' + pinClass + '" data-cluster-id="' + cluster.id + '">' +
       '<div class="photo-atlas-pin-box">' +
         '<img src="' + photoThumbnailURL(cluster.cover) + '" class="photo-atlas-pin-img" loading="lazy" />' +
       '</div>' +
+      estimatedBadgeHTML +
       badgeHTML +
       '<div class="photo-atlas-pin-triangle"></div>' +
     '</div>'
@@ -5943,6 +5970,8 @@ async function openSettings() {
     amapServerKeyInput.value = ''
     amapSecurityJSCodeInput.value = ''
     photosRootDirInput.value = settingsData.value.photos?.root_dir || photoStatus.value?.root_dir || ''
+    photoMatchMissingGPS.value = settingsData.value.photos?.match_missing_gps === true
+    photoMatchWindowMinutes.value = ['15', '30', '60', '120'].includes(String(settingsData.value.photos?.match_window_minutes || 30)) ? String(settingsData.value.photos?.match_window_minutes || 30) : '30'
     if (settingsData.value.weather?.default_provider) {
       defaultWeatherProvider.value = settingsData.value.weather.default_provider
     } else {
@@ -6058,21 +6087,28 @@ async function clearCaiyunToken() {
 async function savePhotosRootDir() {
   settingsSaving.value = true
   try {
-    const resp = await apiFetch('/api/v1/settings/photos', {
+    const response = await apiFetch('/api/v1/settings/photos', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ root_dir: photosRootDirInput.value.trim() })
+      body: JSON.stringify({
+        root_dir: photosRootDirInput.value.trim(),
+        match_missing_gps: photoMatchMissingGPS.value,
+        match_window_minutes: Number(photoMatchWindowMinutes.value)
+      })
     })
-    const payload = await resp.json() as { error?: { message?: string } }
-    if (!resp.ok) throw new Error(payload.error?.message || '保存相册目录失败')
+    const payload = await response.json() as { root_dir?: string; enabled?: boolean; match_missing_gps?: boolean; match_window_minutes?: number; scan_triggered?: boolean; error?: { message?: string } }
+    if (!response.ok) throw new Error(payload.error?.message || '保存照片设置失败')
+    photoMatchMissingGPS.value = payload.match_missing_gps === true
+    photoMatchWindowMinutes.value = String(payload.match_window_minutes || 30)
     await loadPhotoStatus()
     if (photoStatus.value?.enabled) {
       await loadAtlasPhotos()
-      if (tripView.value === 'atlas') void renderAtlasMap(true)
+      if (tripView.value === 'atlas') renderAtlasPhotoMarkers()
+      else renderTripPhotoMarkers()
     }
-    settingsMessage.value = '相册扫描目录已保存，后台正在同步照片数据'
+    settingsMessage.value = payload.scan_triggered ? '照片设置已保存；扫描目录正在后台更新' : '照片匹配设置已保存并立即生效'
   } catch (cause) {
-    settingsMessage.value = cause instanceof Error ? cause.message : '保存相册目录失败'
+    settingsMessage.value = cause instanceof Error ? cause.message : '保存照片设置失败'
   } finally {
     settingsSaving.value = false
   }
@@ -6840,6 +6876,12 @@ onUnmounted(() => {
                   <p class="settings-help">
                     若留空保存将清除配置；若宿主机配置了环境变量 <code>JOURNEYIN_PHOTOS_DIR</code>，将在未保存设置时自动生效。保存新目录后，系统将自动开始增量扫描并清理已失效点位。
                   </p>
+                  <label class="photo-match-toggle">
+                    <span><strong>按拍摄时间估算缺少 GPS 的位置</strong><small>只对同目录、同机型且有可靠 EXIF 拍摄时间的照片尝试匹配；不会修改原图。</small></span>
+                    <input v-model="photoMatchMissingGPS" type="checkbox" />
+                  </label>
+                  <label class="select-field photo-match-window">最大匹配时间差<UiSelect v-model="photoMatchWindowMinutes" aria-label="照片最大匹配时间差" :options="photoMatchWindowOptions" :disabled="!photoMatchMissingGPS" /></label>
+                  <p class="settings-help">仅使用原本带 GPS 的照片作为参考；若拍摄时间前后的位置差异较大，则不推断。估算点会在地图与照片详情中明确标注。</p>
                   <div v-if="photoStatus?.enabled" class="settings-cache-row">
                     <span>已索引照片</span>
                     <strong>{{ photoStatus?.total_photos || 0 }} 张 (含 GPS：{{ photoStatus?.gps_photos || 0 }} 处)</strong>
@@ -6850,7 +6892,7 @@ onUnmounted(() => {
                   </div>
                   <div class="settings-actions">
                     <button class="primary-action" type="button" :disabled="settingsSaving" @click="savePhotosRootDir">
-                      {{ settingsSaving ? '保存中…' : '保存相册目录' }}
+                      {{ settingsSaving ? '保存中…' : '保存照片设置' }}
                     </button>
                     <button
                       v-if="photoStatus?.enabled"
@@ -7422,6 +7464,7 @@ onUnmounted(() => {
                 <small v-if="previewPhotoList.length > 1" class="photo-lightbox-counter">{{ previewPhotoIndex + 1 }} / {{ previewPhotoList.length }}</small>
               </div>
               <p v-if="photoCaptureCore(previewPhoto.capture)" class="photo-capture-core">{{ photoCaptureCore(previewPhoto.capture) }}</p>
+              <p v-if="previewPhoto.location_source === 'time_match'" class="photo-location-match-note">位置估算 · 参考带 GPS 照片，时间差 {{ formatPhotoMatchDelta(previewPhoto.match_delta_seconds) }}</p>
               <details v-if="photoCaptureDetailsAvailable(previewPhoto.capture)" class="photo-capture-details">
                 <summary>拍摄参数</summary>
                 <div>

@@ -11,10 +11,12 @@ import (
 
 // PhotoMetadata 包含从照片中提取的拍摄时间、GPS 坐标与非敏感拍摄参数。
 type PhotoMetadata struct {
-	TakenAt   time.Time
-	HasGPS    bool
-	Latitude  float64 // WGS-84 原始纬度
-	Longitude float64 // WGS-84 原始经度
+	TakenAt            time.Time
+	TakenAtSource      string
+	TakenAtOffsetKnown bool
+	HasGPS             bool
+	Latitude           float64 // WGS-84 原始纬度
+	Longitude          float64 // WGS-84 原始经度
 
 	CameraMake     string
 	CameraModel    string
@@ -140,6 +142,8 @@ func parseTiffMetadata(tiff []byte, meta *PhotoMetadata) {
 
 	var exifOffset int
 	var gpsOffset int
+	var dateTime, dateTimeOriginal, dateTimeDigitized string
+	var offsetTime, offsetTimeOriginal, offsetTimeDigitized string
 
 	// 解析 IFD0
 	parseIFD(tiff, ifd0Offset, bo, func(tag uint16, tagType uint16, count uint32, valBuf []byte) {
@@ -149,9 +153,7 @@ func parseTiffMetadata(tiff []byte, meta *PhotoMetadata) {
 		case 0x0110: // Model
 			meta.CameraModel = strings.TrimSpace(readAscii(tiff, valBuf, count))
 		case 0x0132: // DateTime
-			if meta.TakenAt.IsZero() {
-				meta.TakenAt = parseExifTime(readAscii(tiff, valBuf, count))
-			}
+			dateTime = strings.TrimSpace(readAscii(tiff, valBuf, count))
 		case 0x8769: // Exif IFD Pointer
 			exifOffset = int(bo.Uint32(valBuf[:4]))
 		case 0x8825: // GPS IFD Pointer
@@ -170,14 +172,15 @@ func parseTiffMetadata(tiff []byte, meta *PhotoMetadata) {
 			case 0x8827: // PhotographicSensitivity / ISO
 				meta.ISO = readUnsignedShort(valBuf, bo)
 			case 0x9003: // DateTimeOriginal
-				t := parseExifTime(readAscii(tiff, valBuf, count))
-				if !t.IsZero() {
-					meta.TakenAt = t
-				}
+				dateTimeOriginal = strings.TrimSpace(readAscii(tiff, valBuf, count))
 			case 0x9004: // DateTimeDigitized
-				if meta.TakenAt.IsZero() {
-					meta.TakenAt = parseExifTime(readAscii(tiff, valBuf, count))
-				}
+				dateTimeDigitized = strings.TrimSpace(readAscii(tiff, valBuf, count))
+			case 0x9010: // OffsetTime
+				offsetTime = strings.TrimSpace(readAscii(tiff, valBuf, count))
+			case 0x9011: // OffsetTimeOriginal
+				offsetTimeOriginal = strings.TrimSpace(readAscii(tiff, valBuf, count))
+			case 0x9012: // OffsetTimeDigitized
+				offsetTimeDigitized = strings.TrimSpace(readAscii(tiff, valBuf, count))
 			case 0x9204: // ExposureBiasValue
 				meta.ExposureBiasEV = readSignedRational(tiff, valBuf, bo)
 			case 0x920A: // FocalLength
@@ -186,6 +189,25 @@ func parseTiffMetadata(tiff []byte, meta *PhotoMetadata) {
 				meta.LensModel = strings.TrimSpace(readAscii(tiff, valBuf, count))
 			}
 		})
+	}
+
+	if dateTimeOriginal != "" {
+		meta.TakenAt, meta.TakenAtOffsetKnown = parseExifTimeWithOffset(dateTimeOriginal, offsetTimeOriginal)
+		if !meta.TakenAt.IsZero() {
+			meta.TakenAtSource = "exif_original"
+		}
+	}
+	if meta.TakenAt.IsZero() && dateTimeDigitized != "" {
+		meta.TakenAt, meta.TakenAtOffsetKnown = parseExifTimeWithOffset(dateTimeDigitized, offsetTimeDigitized)
+		if !meta.TakenAt.IsZero() {
+			meta.TakenAtSource = "exif_digitized"
+		}
+	}
+	if meta.TakenAt.IsZero() && dateTime != "" {
+		meta.TakenAt, meta.TakenAtOffsetKnown = parseExifTimeWithOffset(dateTime, offsetTime)
+		if !meta.TakenAt.IsZero() {
+			meta.TakenAtSource = "exif_datetime"
+		}
 	}
 
 	// 解析 GPS 子 IFD
@@ -350,4 +372,38 @@ func parseExifTime(s string) time.Time {
 		}
 	}
 	return time.Time{}
+}
+
+func parseExifTimeWithOffset(value, offset string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	offset = strings.TrimSpace(offset)
+	if value == "" {
+		return time.Time{}, false
+	}
+	if offset == "" {
+		if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+			return parsed, true
+		}
+		return parseExifTime(value), false
+	}
+	if offset != "Z" && len(offset) == 5 && (offset[0] == '+' || offset[0] == '-') {
+		offset = offset[:3] + ":" + offset[3:]
+	}
+	if offset == "Z" {
+		for _, layout := range []string{"2006:01:02 15:04:05Z07:00", "2006-01-02 15:04:05Z07:00", "2006:01:02T15:04:05Z07:00"} {
+			if parsed, err := time.Parse(layout, value+"Z"); err == nil {
+				return parsed, true
+			}
+		}
+		return parseExifTime(value), false
+	}
+	if _, err := time.Parse("-07:00", offset); err != nil {
+		return parseExifTime(value), false
+	}
+	for _, layout := range []string{"2006:01:02 15:04:05-07:00", "2006-01-02 15:04:05-07:00", "2006:01:02T15:04:05-07:00"} {
+		if parsed, err := time.Parse(layout, value+offset); err == nil {
+			return parsed, true
+		}
+	}
+	return parseExifTime(value), false
 }
