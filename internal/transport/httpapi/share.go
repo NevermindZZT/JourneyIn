@@ -214,6 +214,25 @@ func (s *Server) publicShare(w http.ResponseWriter, r *http.Request) {
 		s.publicShareJSONToken(r.Context(), w, strings.TrimSuffix(token, ".json"))
 		return
 	}
+	if s.bundleService != nil {
+		bundle, err := s.bundleService.Resolve(token)
+		if err == nil {
+			content, renderErr := s.renderShareBundlePage(bundle, token)
+			if renderErr != nil {
+				writeError(w, http.StatusNotFound, "not_found", "share not found", nil)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			setShareHeaders(w)
+			w.Header().Set("Referrer-Policy", "no-referrer")
+			_, _ = w.Write(content)
+			return
+		}
+		if !errors.Is(err, journeyshare.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "share not found", nil)
+			return
+		}
+	}
 	record, ok := s.resolveShare(r.Context(), w, token)
 	if !ok {
 		return
@@ -243,6 +262,22 @@ func (s *Server) publicShareJSON(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) publicShareJSONToken(ctx context.Context, w http.ResponseWriter, token string) {
+	setShareJSONCORS(w)
+	if s.bundleService != nil {
+		bundle, err := s.bundleService.Resolve(token)
+		if err == nil {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.Header().Set("Content-Disposition", "attachment; filename=journeyin-share-bundle.json")
+			setShareHeaders(w)
+			setShareJSONCORS(w)
+			_, _ = w.Write(bundle.Snapshot)
+			return
+		}
+		if !errors.Is(err, journeyshare.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "share not found", nil)
+			return
+		}
+	}
 	record, ok := s.resolveShare(ctx, w, token)
 	if !ok {
 		return
@@ -250,6 +285,7 @@ func (s *Server) publicShareJSONToken(ctx context.Context, w http.ResponseWriter
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Content-Disposition", "attachment; filename=journeyin-share.json")
 	setShareHeaders(w)
+	setShareJSONCORS(w)
 	_, _ = w.Write(record.Content)
 }
 

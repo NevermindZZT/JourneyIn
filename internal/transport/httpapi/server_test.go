@@ -46,6 +46,7 @@ func testHTTPServer(t *testing.T) *httptest.Server {
 	api.SetMapService(mapService)
 	api.trips.SetMapService(mapService)
 	api.SetShareService(journeyshare.NewService(journeyshare.NewSQLiteStore(database)), "http://example.test")
+	api.SetBundleService(journeyshare.NewBundleService(journeyshare.NewSQLiteBundleStore(database)))
 	api.SetCollaborationService(collaboration.NewService(collaboration.NewSQLiteStore(database)))
 	api.SetSyncStore(database)
 	api.SetSettingsStore(database)

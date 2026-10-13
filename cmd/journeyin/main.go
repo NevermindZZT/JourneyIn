@@ -117,6 +117,7 @@ func main() {
 	api.SetSettingsStore(database)
 	publicURL := envOr("JOURNEYIN_PUBLIC_URL", "http://"+listen)
 	api.SetShareService(journeyshare.NewService(journeyshare.NewSQLiteStore(database)), publicURL)
+	api.SetBundleService(journeyshare.NewBundleService(journeyshare.NewSQLiteBundleStore(database)))
 	api.SetCollaborationService(collaboration.NewService(collaboration.NewSQLiteStore(database)))
 	api.SetSyncStore(database)
 

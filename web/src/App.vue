@@ -14,6 +14,9 @@ import MarkdownEditor from './MarkdownEditor.vue'
 import TripPosterModal from './TripPosterModal.vue'
 import BrandLogo from './BrandLogo.vue'
 import MapLoadingState from './MapLoadingState.vue'
+import ShareBundleDialog from './ShareBundleDialog.vue'
+import ShareTransferDialog from './ShareTransferDialog.vue'
+import ShareImportDialog from './ShareImportDialog.vue'
 import { formatDayWeatherBadge, iconForWeatherLabel, visibleWeatherLabelIDs } from './weatherMapLabel'
 import { isCalendarDateWithinDays, isPastTripDate, localDateInTimezone } from './tripDate.mjs'
 import { shortMarkdownPreview } from './planningPointPreview'
@@ -483,6 +486,9 @@ const shareCopyMessage = ref('')
 const shareNoticeVisible = ref(false)
 const shareNoticeTitle = ref('只读分享已创建')
 const shareModalOpen = ref(false)
+const shareTransferDialogOpen = ref(false)
+const shareBundleDialogOpen = ref(false)
+const shareImportDialogOpen = ref(false)
 const shareKind = ref<'readonly' | 'collaboration'>('readonly')
 const collaborationExpiryDays = ref(7)
 const collaborationShares = ref<CollaborationShareSummary[]>([])
@@ -537,6 +543,8 @@ const loginPassword = ref('')
 const loginMessage = ref('')
 const loginLoading = ref(false)
 const canCreateTrips = computed(() => currentUser.value?.is_admin === true || currentUser.value?.access_mode === 'all_trips_edit')
+const shareableTrips = computed(() => trips.value.filter(trip => isAdmin.value || trip.can_edit === true))
+const canShareBundles = computed(() => shareableTrips.value.length > 0)
 const authTokenInput = ref(localStorage.getItem('journeyin.apiToken') || '')
 const serverURL = ref(window.location.origin)
 const theme = ref<Theme>((localStorage.getItem('journeyin.theme') as Theme) || 'system')
@@ -1289,6 +1297,9 @@ function handleGlobalKeyDown(event: KeyboardEvent) {
   if (historyView.value) { void exitTripHistory(); event.preventDefault(); return }
   if (mapPickOpen.value || mapPickMode.value) { cancelMapPick(); event.preventDefault(); return }
   if (newTripOpen.value) { newTripOpen.value = false; event.preventDefault(); return }
+  if (shareTransferDialogOpen.value) { shareTransferDialogOpen.value = false; event.preventDefault(); return }
+  if (shareBundleDialogOpen.value) { shareBundleDialogOpen.value = false; event.preventDefault(); return }
+  if (shareImportDialogOpen.value) { shareImportDialogOpen.value = false; event.preventDefault(); return }
   if (shareModalOpen.value) { shareModalOpen.value = false; event.preventDefault(); return }
   if (managedUserFormOpen.value) { resetManagedUserForm(); event.preventDefault(); return }
   if (tokenUserID.value) { closeUserTokenDialog(); event.preventDefault(); return }
@@ -6206,7 +6217,7 @@ onUnmounted(() => {
               </div>
               <div class="list-page-actions">
                 <button class="secondary-action" type="button" @click="navigateToAtlas()"><IonIcon :icon="footstepsOutline" /> 足迹漫游</button>
-                <button v-if="canCreateTrips" class="secondary-action" type="button" @click="openImportPicker"><IonIcon :icon="linkOutline" /> 导入 Trip</button>
+                <button v-if="canCreateTrips || canShareBundles" class="secondary-action" type="button" @click="shareTransferDialogOpen = true"><IonIcon :icon="linkOutline" /> 导入与分享</button>
                 <button v-if="canCreateTrips" class="primary-action" type="button" @click="newTripOpen = true"><IonIcon :icon="addOutline" /> 新建行程</button>
               </div>
             </header>
@@ -6218,7 +6229,7 @@ onUnmounted(() => {
 
             <div v-if="error" class="inline-error"><IonIcon :icon="cloudOfflineOutline" /><span>{{ error }}</span><button type="button" aria-label="关闭错误" @click="error = ''">×</button></div>
             <div v-if="loading" class="list-loading"><span class="loading-dot"></span><span>正在加载行程…</span></div>
-            <div v-else-if="!trips.length" class="list-empty-state"><div class="empty-mark"><IonIcon :icon="mapOutline" /></div><h2>还没有旅行规划</h2><p>创建一条行程，开始把地点和路线整理到地图上。</p><div class="empty-actions"><button v-if="canCreateTrips" class="primary-action" type="button" @click="newTripOpen = true"><IonIcon :icon="addOutline" /> 新建规划</button><button v-if="canCreateTrips" class="secondary-action" type="button" @click="openImportPicker">导入 Trip JSON</button></div></div>
+            <div v-else-if="!trips.length" class="list-empty-state"><div class="empty-mark"><IonIcon :icon="mapOutline" /></div><h2>还没有旅行规划</h2><p>创建一条行程，开始把地点和路线整理到地图上。</p><div class="empty-actions"><button v-if="canCreateTrips" class="primary-action" type="button" @click="newTripOpen = true"><IonIcon :icon="addOutline" /> 新建规划</button><button v-if="canCreateTrips" class="secondary-action" type="button" @click="shareTransferDialogOpen = true">导入与分享</button></div></div>
             <div v-else class="trip-list-grid">
               <article v-for="(trip, index) in sortedTrips" :key="trip.id" class="trip-list-card" :class="{ active: selected?.id === trip.id }">
                 <button class="trip-card-main" type="button" @click="selectTrip(trip)">
@@ -7428,6 +7439,27 @@ onUnmounted(() => {
         </div>
       </div>
 
+      <ShareTransferDialog
+        :open="shareTransferDialogOpen"
+        :can-create-trips="canCreateTrips"
+        :can-share-bundles="canShareBundles"
+        @close="shareTransferDialogOpen = false"
+        @import-file="openImportPicker"
+        @import-share="shareImportDialogOpen = true"
+        @share-bundle="shareBundleDialogOpen = true"
+      />
+      <ShareBundleDialog
+        :open="shareBundleDialogOpen"
+        :trips="shareableTrips"
+        :api-fetch="apiFetch"
+        @close="shareBundleDialogOpen = false"
+      />
+      <ShareImportDialog
+        :open="shareImportDialogOpen"
+        :api-fetch="apiFetch"
+        @close="shareImportDialogOpen = false"
+        @imported="loadTrips"
+      />
       <TripPosterModal
         :is-open="posterModalOpen"
         :trip="tripDocument"

@@ -18,16 +18,17 @@ import (
 )
 
 type TripService struct {
-	store              *store.Store
-	userService        *UserService
-	mapService         *MapService
-	weatherService     *weather.Service
-	mu                 sync.Mutex
-	defaultProviderMu  sync.RWMutex
-	defaultMapProvider journeymaps.ProviderID
-	previews           map[string]preview
-	planMu             sync.Mutex
-	planLocks          map[string]chan struct{}
+	store               *store.Store
+	userService         *UserService
+	mapService          *MapService
+	weatherService      *weather.Service
+	mu                  sync.Mutex
+	defaultProviderMu   sync.RWMutex
+	defaultMapProvider  journeymaps.ProviderID
+	previews            map[string]preview
+	shareImportPreviews map[string]shareImportPreview
+	planMu              sync.Mutex
+	planLocks           map[string]chan struct{}
 }
 
 type preview struct {
@@ -66,7 +67,7 @@ type CommitResult struct {
 }
 
 func NewTripService(s *store.Store) *TripService {
-	return &TripService{store: s, previews: make(map[string]preview), planLocks: make(map[string]chan struct{}), defaultMapProvider: journeymaps.ProviderAMap}
+	return &TripService{store: s, previews: make(map[string]preview), shareImportPreviews: make(map[string]shareImportPreview), planLocks: make(map[string]chan struct{}), defaultMapProvider: journeymaps.ProviderAMap}
 }
 func (s *TripService) SetUserService(service *UserService) { s.userService = service }
 

@@ -15,6 +15,7 @@ import (
 	journeyin "journeyin"
 	"journeyin/internal/application"
 	"journeyin/internal/security"
+	journeyshare "journeyin/internal/share"
 	"journeyin/internal/store"
 )
 
@@ -50,6 +51,7 @@ func newUserManagementTestServer(t *testing.T, configureAuth bool) (*httptest.Se
 	api := NewServer(app, webFS, schemaFS, "test", nil)
 	api.SetUserService(users)
 	api.SetAuthenticator(auth)
+	api.SetBundleService(journeyshare.NewBundleService(journeyshare.NewSQLiteBundleStore(database)))
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -230,5 +232,69 @@ func TestDatabaseUsersAdminAPIAndTripPermissions(t *testing.T) {
 	createForbidden, createBody := doUserJSON(t, userClient, http.MethodPost, server.URL+"/api/v1/trips", userTestTrip("not allowed"), userToken, "")
 	if createForbidden.StatusCode != http.StatusForbidden {
 		t.Fatalf("selected editor create status=%d body=%s", createForbidden.StatusCode, createBody)
+	}
+}
+
+func TestSelectedEditorCanShareOnlyGrantedTrips(t *testing.T) {
+	server, adminClient, _, _ := newUserManagementTestServer(t, true)
+	defer server.Close()
+	login, loginBody := doUserJSON(t, adminClient, http.MethodPost, server.URL+"/api/v1/auth/login", map[string]string{"username": "root", "password": "bootstrap-password"}, "", "")
+	if login.StatusCode != http.StatusOK {
+		t.Fatalf("admin login status=%d body=%s", login.StatusCode, loginBody)
+	}
+	firstResponse, firstBody := doUserJSON(t, adminClient, http.MethodPost, server.URL+"/api/v1/trips", userTestTrip("shareable"), "", "")
+	secondResponse, secondBody := doUserJSON(t, adminClient, http.MethodPost, server.URL+"/api/v1/trips", userTestTrip("not assigned"), "", "")
+	if firstResponse.StatusCode != http.StatusCreated || secondResponse.StatusCode != http.StatusCreated {
+		t.Fatalf("trip create statuses=%d/%d bodies=%s/%s", firstResponse.StatusCode, secondResponse.StatusCode, firstBody, secondBody)
+	}
+	var first, second map[string]any
+	if err := json.Unmarshal(firstBody, &first); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(secondBody, &second); err != nil {
+		t.Fatal(err)
+	}
+	firstID, secondID := first["id"].(string), second["id"].(string)
+	userResponse, userBody := doUserJSON(t, adminClient, http.MethodPost, server.URL+"/api/v1/admin/users", map[string]any{"username": "bundle-editor", "password": "bundle-editor-long-password", "role": "user", "access_mode": "selected_trip_edit", "editable_trip_ids": []string{firstID}}, "", "")
+	if userResponse.StatusCode != http.StatusCreated {
+		t.Fatalf("editor create status=%d body=%s", userResponse.StatusCode, userBody)
+	}
+	var user map[string]any
+	if err := json.Unmarshal(userBody, &user); err != nil {
+		t.Fatal(err)
+	}
+	tokenResponse, tokenBody := doUserJSON(t, adminClient, http.MethodPost, server.URL+"/api/v1/admin/users/"+user["id"].(string)+"/tokens", map[string]string{"name": "bundle test"}, "", "")
+	if tokenResponse.StatusCode != http.StatusCreated {
+		t.Fatalf("issue editor token status=%d body=%s", tokenResponse.StatusCode, tokenBody)
+	}
+	var tokenData map[string]any
+	if err := json.Unmarshal(tokenBody, &tokenData); err != nil {
+		t.Fatal(err)
+	}
+	userToken := tokenData["token"].(string)
+	allowed, allowedBody := doUserJSON(t, &http.Client{}, http.MethodPost, server.URL+"/api/v1/share-bundles", map[string]any{"trip_ids": []string{firstID}, "ttl_seconds": 3600}, userToken, "")
+	if allowed.StatusCode != http.StatusCreated {
+		t.Fatalf("assigned editor share status=%d body=%s", allowed.StatusCode, allowedBody)
+	}
+	var share map[string]any
+	if err := json.Unmarshal(allowedBody, &share); err != nil {
+		t.Fatal(err)
+	}
+	listed, listBody := doUserJSON(t, &http.Client{}, http.MethodGet, server.URL+"/api/v1/share-bundles", nil, userToken, "")
+	var ownShares struct {
+		Items []struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(listBody, &ownShares); err != nil {
+		t.Fatal(err)
+	}
+	if listed.StatusCode != http.StatusOK || len(ownShares.Items) != 1 || ownShares.Items[0].ID != share["id"].(string) || strings.Contains(string(listBody), userToken) {
+		t.Fatalf("editor bundle list leaked or omitted own share: status=%d body=%s", listed.StatusCode, listBody)
+	}
+	forbidden, forbiddenBody := doUserJSON(t, &http.Client{}, http.MethodPost, server.URL+"/api/v1/share-bundles", map[string]any{"trip_ids": []string{firstID, secondID}, "ttl_seconds": 3600}, userToken, "")
+	if forbidden.StatusCode != http.StatusForbidden {
+		t.Fatalf("unassigned trip share status=%d body=%s", forbidden.StatusCode, forbiddenBody)
 	}
 }

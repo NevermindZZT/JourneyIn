@@ -72,7 +72,7 @@ Linux rootful Docker 和常见 Docker Desktop 环境可直接使用。rootless D
 
 未配置 `JOURNEYIN_MCP_TOKEN` 时不会阻止 localhost 单文件应用启动，本地 MCP 可免 token 使用。远程监听必须配置 `JOURNEYIN_MCP_TOKEN` 或 API 认证；若使用 API 认证，远程 `/mcp` 接受管理员或用户级 Bearer token。
 
-管理员可在「设置 → 用户管理」新增、修改、删除用户并配置权限：只读（可查看所有行程）、指定行程可编辑（其他行程只读）和所有行程可编辑；只有管理员能管理用户、服务设置和分享。管理员也可为用户签发 90 天有效的 MCP/API 令牌，令牌原文仅显示一次，服务端只存哈希。远程 `/mcp` 可使用管理员令牌，或使用该用户自己的令牌以遵循对应行程权限。未配置认证时，本地 `mcp stdio` 默认使用 System 管理员权限；启用认证后需设置 `JOURNEYIN_STDIO_API_TOKEN`，也可填入用户级令牌以限制 Agent 权限。日常 Agent 建议使用用户级令牌。环境变量 `JOURNEYIN_API_TOKEN` 和 `JOURNEYIN_MCP_TOKEN` 是高权限兼容/服务令牌，应妥善保管。
+管理员可在「设置 → 用户管理」新增、修改、删除用户并配置权限：只读（可查看所有行程）、指定行程可编辑（其他行程只读）和所有行程可编辑；用户管理和服务设置仅管理员可访问。多行程分享包允许管理员分享全部行程，也允许编辑者分享自己有编辑权的行程；只读用户不能创建分享包。传统单行程分享与共创管理仍限管理员。管理员也可为用户签发 90 天有效的 MCP/API 令牌，令牌原文仅显示一次，服务端只存哈希。远程 `/mcp` 可使用管理员令牌，或使用该用户自己的令牌以遵循对应行程权限。未配置认证时，本地 `mcp stdio` 默认使用 System 管理员权限；启用认证后需设置 `JOURNEYIN_STDIO_API_TOKEN`，也可填入用户级令牌以限制 Agent 权限。日常 Agent 建议使用用户级令牌。环境变量 `JOURNEYIN_API_TOKEN` 和 `JOURNEYIN_MCP_TOKEN` 是高权限兼容/服务令牌，应妥善保管。
 
 ## 本地开发：前后端分离
 
@@ -143,7 +143,7 @@ pwsh -File scripts/verify-local.ps1 -ServerUrl http://127.0.0.1:8080 -WebUrl htt
 8. 在规划点详情点击“获取天气/刷新天气”；天气快照写入该点，显示查询时间，6 小时内重复刷新优先使用 SQLite cache。
 9. 后续地图重绘直接使用已保存的规划点、子规划点和当前 Provider 路线快照，不重复搜索或地理编码。地图 HUD 可切换百度地图/高德地图；“卫星图/标准图”只切换当前 Provider 图层，不触发 POI/路线请求。
 10. 地图默认显示地点名和行程日期 Label；HUD 可切换“显示标签/隐藏标签”，设置保存在浏览器 localStorage。
-11. 行程面板先展示行程列表；点击某条行程后进入独立的选中行程详情，使用“‹ 行程列表”返回，不会把其他行程卡片插入当前行程信息中。行程总体说明和规划点说明都可以二次编辑；规划点说明编辑时可进入全屏输入模式。面板提供“导入 Trip”“导出 JSON”和“在线分享”入口；导入会先调用只读校验接口，在线分享生成可撤销的只读链接，访问时读取该行程最新数据，不需要为每次更新生成新链接。
+11. 行程面板先展示行程列表；点击某条行程后进入独立的选中行程详情，使用“‹ 行程列表”返回，不会把其他行程卡片插入当前行程信息中。行程总体说明和规划点说明都可以二次编辑；规划点说明编辑时可进入全屏输入模式。行程列表提供 Trip JSON 导入、从分享链接/分享包导入和批量分享入口。在线只读分享固定行程快照；跨实例分享包可一次包含多条行程，B 实例先校验并预览，再经用户确认导入为独立副本。
 
 规划 API：
 
@@ -282,6 +282,26 @@ GET  /api/v1/photos/{id}/thumbnail?size=120 # 获取正方形缩略图流 (支�
 GET  /api/v1/photos/{id}/file             # 获取照片原图 (支持 HTTP Range 断点续传，路径安全白名单保护)
 ~~~
 
+## 跨实例多行程分享与导入
+
+在 A 实例的行程列表点击「分享多个行程」，选择 1–50 条有权分享的行程并设置有效期（默认 30 天），即可生成一个只读分享包链接。分享包在创建时固定各行程快照；之后修改 A 的行程不会改变该包。链接持有者可以查看和下载包 JSON。
+
+在 B 实例选择「从分享导入」，粘贴 A 的 `/s/<token>` 链接，或选择从分享页下载的 JSON 文件。B 的浏览器只读取 A 的匿名只读 JSON 端点（不发送 B 的登录 Cookie/Bearer 凭据），随后 B 服务端校验内容、检查重复项并返回预览；用户明确确认后，B 在单个数据库事务中导入为独立副本，并为 Trip、Day、Stop、Link、Leg 重新生成 ID、更新路线段引用。相同来源和内容的快照会提示已导入并跳过。此功能不是同步或合并：撤销多行程分享包会删除 A 端的分享包记录与快照、阻止后续读取，但不会删除 B 已下载或导入的行程。
+
+公开分享链接是持有者可读的能力链接。跨实例在线读取要求 B 能访问 A；公网部署请使用 HTTPS，并通过 `JOURNEYIN_PUBLIC_URL` 配置 A 对外公开的基址（例如 `https://travel.example.com`），不要将 `localhost`、`0.0.0.0` 或仅本机可达地址发给远端实例。HTTPS 页面不能读取 HTTP 分享源；这种情况下可通过分享页下载 JSON 再在 B 上传。分享包最多 16 MiB，每条 Trip JSON 最多 4 MiB。
+
+导入 API 使用校验/预览/确认/幂等提交流程：
+
+~~~text
+GET  /api/v1/share-bundles
+POST /api/v1/share-bundles
+POST /api/v1/share-bundles/{id}/revoke
+GET  /s/{token}
+GET  /s/{token}.json
+POST /api/v1/share-import/previews
+POST /api/v1/share-import/commits
+~~~
+
 ## 地图与分享 API
 
 ~~~text
@@ -291,6 +311,11 @@ POST /api/v1/maps/route
 POST /api/v1/maps/weather
 POST /api/v1/maps/navigation
 POST /api/v1/shares
+GET  /api/v1/share-bundles
+POST /api/v1/share-bundles
+POST /api/v1/share-bundles/{id}/revoke
+POST /api/v1/share-import/previews
+POST /api/v1/share-import/commits
 GET  /s/<token>
 GET  /s/<token>.json
 GET  /api/v1/sync/pull

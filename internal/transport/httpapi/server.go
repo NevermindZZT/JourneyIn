@@ -36,6 +36,7 @@ type Server struct {
 	defaultMapProvider   string
 	defaultProviderMu    sync.RWMutex
 	shareService         *journeyshare.Service
+	bundleService        *journeyshare.BundleService
 	collaborationService *collaboration.Service
 	publicURL            string
 	syncStore            *store.Store
@@ -79,6 +80,7 @@ func (s *Server) SetShareService(service *journeyshare.Service, publicURL string
 	s.shareService = service
 	s.publicURL = strings.TrimRight(publicURL, "/")
 }
+func (s *Server) SetBundleService(service *journeyshare.BundleService) { s.bundleService = service }
 func (s *Server) SetCollaborationService(service *collaboration.Service) {
 	s.collaborationService = service
 }
@@ -158,6 +160,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/maps/navigation", s.navigation)
 	mux.HandleFunc("POST /api/v1/shares", s.createShare)
 	mux.HandleFunc("POST /api/v1/shares/{id}/revoke", s.revokeShare)
+	mux.HandleFunc("GET /api/v1/share-bundles", s.listShareBundles)
+	mux.HandleFunc("POST /api/v1/share-bundles", s.createShareBundle)
+	mux.HandleFunc("POST /api/v1/share-bundles/{id}/revoke", s.revokeShareBundle)
+	mux.HandleFunc("POST /api/v1/share-import/previews", s.previewShareImport)
+	mux.HandleFunc("POST /api/v1/share-import/commits", s.commitShareImport)
 	mux.HandleFunc("GET /s/{token}", s.publicShare)
 	mux.HandleFunc("POST /api/v1/trips/{id}/collaboration-shares", s.createCollaborationShare)
 	mux.HandleFunc("GET /api/v1/trips/{id}/collaboration-shares", s.listCollaborationShares)
