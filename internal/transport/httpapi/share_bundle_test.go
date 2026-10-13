@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"journeyin/internal/application"
+	"journeyin/internal/domain"
 	journeyshare "journeyin/internal/share"
 )
 
@@ -265,5 +266,189 @@ func TestShareBundlePublicReadAndAtomicImportFlow(t *testing.T) {
 	manageAfter.Body.Close()
 	if manageAfter.StatusCode != http.StatusOK || len(after.Items) != 0 {
 		t.Fatalf("revoked bundle should be hidden from management list: %+v", after)
+	}
+}
+
+func TestShareBundleImportWithCrossDayLegs(t *testing.T) {
+	server := testHTTPServer(t)
+	defer server.Close()
+	client := server.Client()
+	postJSON := func(path string, value any) *http.Response {
+		t.Helper()
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err := client.Post(server.URL+path, "application/json", bytes.NewReader(encoded))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+
+	// Construct a multi-day trip with cross-day route legs:
+	// Day 1: stop-1 -> stop-2
+	// Day 2: stop-2 -> stop-3 (cross-day boundary leg), stop-3 -> stop-4
+	// plus an orphaned leg referencing a non-existent stop that should be safely dropped
+	document := map[string]any{
+		"schema_version": 1,
+		"title":          "内蒙金秋环线多日行程",
+		"status":         "draft",
+		"timezone":       "Asia/Shanghai",
+		"date_range": map[string]string{
+			"start": "2025-09-27",
+			"end":   "2025-09-28",
+		},
+		"days": []any{
+			map[string]any{
+				"id":   "day-1",
+				"date": "2025-09-27",
+				"stops": []any{
+					map[string]any{"id": "stop-d1-1", "sequence": 1, "title": "海拉尔"},
+					map[string]any{"id": "stop-d1-2", "sequence": 2, "title": "额尔古纳"},
+				},
+				"legs": []any{
+					map[string]any{"id": "leg-d1-1", "from_stop_id": "stop-d1-1", "to_stop_id": "stop-d1-2"},
+				},
+			},
+			map[string]any{
+				"id":   "day-2",
+				"date": "2025-09-28",
+				"stops": []any{
+					map[string]any{"id": "stop-d2-1", "sequence": 1, "title": "黑山头"},
+					map[string]any{"id": "stop-d2-2", "sequence": 2, "title": "满洲里"},
+				},
+				"legs": []any{
+					// Cross-day boundary leg: from Day 1 stop-d1-2 to Day 2 stop-d2-1
+					map[string]any{"id": "leg-cross-day", "from_stop_id": "stop-d1-2", "to_stop_id": "stop-d2-1"},
+					// Same-day leg: from Day 2 stop-d2-1 to Day 2 stop-d2-2
+					map[string]any{"id": "leg-d2-1", "from_stop_id": "stop-d2-1", "to_stop_id": "stop-d2-2"},
+					// Orphaned leg referencing non-existent stop
+					map[string]any{"id": "leg-orphaned", "from_stop_id": "stop-d2-2", "to_stop_id": "non-existent-stop"},
+				},
+			},
+		},
+	}
+
+	resp := postJSON("/api/v1/trips", document)
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("create multi-day trip failed: %d %s", resp.StatusCode, body)
+	}
+	var created map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&created)
+	resp.Body.Close()
+	tripID := created["id"].(string)
+
+	bundleResp := postJSON("/api/v1/share-bundles", map[string]any{
+		"trip_ids":    []string{tripID},
+		"ttl_seconds": 3600,
+	})
+	if bundleResp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(bundleResp.Body)
+		bundleResp.Body.Close()
+		t.Fatalf("create share bundle failed: %d %s", bundleResp.StatusCode, body)
+	}
+	var bundleResult struct {
+		ID  string `json:"id"`
+		URL string `json:"url"`
+	}
+	_ = json.NewDecoder(bundleResp.Body).Decode(&bundleResult)
+	bundleResp.Body.Close()
+
+	shareURL, _ := url.Parse(bundleResult.URL)
+	jsonResp, err := client.Get(server.URL + shareURL.Path + ".json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawJSON, _ := io.ReadAll(jsonResp.Body)
+	jsonResp.Body.Close()
+	var bundle journeyshare.BundleDocument
+	if err := json.Unmarshal(rawJSON, &bundle); err != nil {
+		t.Fatal(err)
+	}
+
+	// Preview import
+	previewResp := postJSON("/api/v1/share-import/previews", map[string]any{
+		"source_origin": "https://source-instance.example",
+		"items":         bundle.Items,
+	})
+	if previewResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(previewResp.Body)
+		previewResp.Body.Close()
+		t.Fatalf("preview cross-day trip import failed: %d %s", previewResp.StatusCode, body)
+	}
+	var preview application.ShareImportPreviewResult
+	_ = json.NewDecoder(previewResp.Body).Decode(&preview)
+	previewResp.Body.Close()
+
+	if !preview.RequiresConfirmation || len(preview.Items) != 1 {
+		t.Fatalf("unexpected preview result: %+v", preview)
+	}
+
+	// Commit import
+	commitResp := postJSON("/api/v1/share-import/commits", map[string]any{
+		"preview_id":         preview.PreviewID,
+		"confirmation_token": preview.ConfirmationToken,
+		"idempotency_key":    "commit-cross-day-import-1",
+	})
+	if commitResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(commitResp.Body)
+		commitResp.Body.Close()
+		t.Fatalf("commit cross-day trip import failed: %d %s", commitResp.StatusCode, body)
+	}
+	var committed application.ShareImportCommitResult
+	_ = json.NewDecoder(commitResp.Body).Decode(&committed)
+	commitResp.Body.Close()
+
+	if committed.Status != "created" || len(committed.Items) != 1 {
+		t.Fatalf("unexpected commit: %+v", committed)
+	}
+	importedTripID := committed.Items[0].ID
+
+	// Fetch imported trip and verify IDs
+	importedGet, err := client.Get(server.URL + "/api/v1/trips/" + url.PathEscape(importedTripID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tripData struct {
+		Document domain.Trip `json:"document"`
+	}
+	_ = json.NewDecoder(importedGet.Body).Decode(&tripData)
+	importedGet.Body.Close()
+
+	imported := tripData.Document
+	if len(imported.Days) != 2 {
+		t.Fatalf("expected 2 days, got %d", len(imported.Days))
+	}
+
+	day1 := imported.Days[0]
+	day2 := imported.Days[1]
+	if len(day1.Stops) != 2 || len(day2.Stops) != 2 {
+		t.Fatalf("unexpected stops: day1=%d day2=%d", len(day1.Stops), len(day2.Stops))
+	}
+
+	// Verify day 1 leg
+	if len(day1.Legs) != 1 {
+		t.Fatalf("expected 1 leg on day 1, got %d", len(day1.Legs))
+	}
+	if day1.Legs[0].FromStopID != day1.Stops[0].ID || day1.Legs[0].ToStopID != day1.Stops[1].ID {
+		t.Fatalf("day 1 leg endpoints wrong: %+v", day1.Legs[0])
+	}
+
+	// Verify day 2 legs:
+	// leg 0 is cross-day connecting day1.Stops[1] -> day2.Stops[0]
+	// leg 1 connects day2.Stops[0] -> day2.Stops[1]
+	// orphaned leg was dropped, so day 2 has exactly 2 legs!
+	if len(day2.Legs) != 2 {
+		t.Fatalf("expected 2 legs on day 2 (including cross-day leg, excluding orphaned leg), got %d", len(day2.Legs))
+	}
+	if day2.Legs[0].FromStopID != day1.Stops[1].ID || day2.Legs[0].ToStopID != day2.Stops[0].ID {
+		t.Fatalf("cross-day leg endpoints wrong: from=%s (want %s) to=%s (want %s)",
+			day2.Legs[0].FromStopID, day1.Stops[1].ID, day2.Legs[0].ToStopID, day2.Stops[0].ID)
+	}
+	if day2.Legs[1].FromStopID != day2.Stops[0].ID || day2.Legs[1].ToStopID != day2.Stops[1].ID {
+		t.Fatalf("day 2 same-day leg endpoints wrong: %+v", day2.Legs[1])
 	}
 }

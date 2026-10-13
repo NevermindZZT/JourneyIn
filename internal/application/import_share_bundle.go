@@ -218,9 +218,9 @@ func remapImportedTripIDs(trip domain.Trip) ([]byte, error) {
 			return nil, err
 		}
 	}
+	stopIDs := make(map[string]string)
 	for dayIndex := range trip.Days {
 		day := &trip.Days[dayIndex]
-		stopIDs := make(map[string]string, len(day.Stops))
 		if day.ID, err = domain.NewID("day"); err != nil {
 			return nil, err
 		}
@@ -233,9 +233,11 @@ func remapImportedTripIDs(trip domain.Trip) ([]byte, error) {
 			stopIDs[oldID] = stop.ID
 			for childIndex := range stop.Children {
 				child := &stop.Children[childIndex]
+				oldChildID := child.ID
 				if child.ID, err = domain.NewID("stop"); err != nil {
 					return nil, err
 				}
+				stopIDs[oldChildID] = child.ID
 				for linkIndex := range child.Links {
 					if child.Links[linkIndex].ID, err = domain.NewID("link"); err != nil {
 						return nil, err
@@ -248,18 +250,24 @@ func remapImportedTripIDs(trip domain.Trip) ([]byte, error) {
 				}
 			}
 		}
+	}
+	for dayIndex := range trip.Days {
+		day := &trip.Days[dayIndex]
+		validLegs := make([]domain.RouteLeg, 0, len(day.Legs))
 		for legIndex := range day.Legs {
-			leg := &day.Legs[legIndex]
-			if leg.ID, err = domain.NewID("leg"); err != nil {
-				return nil, err
-			}
+			leg := day.Legs[legIndex]
 			fromID, fromOK := stopIDs[leg.FromStopID]
 			toID, toOK := stopIDs[leg.ToStopID]
 			if !fromOK || !toOK {
-				return nil, errors.New("route leg references a stop outside its day")
+				continue
+			}
+			if leg.ID, err = domain.NewID("leg"); err != nil {
+				return nil, err
 			}
 			leg.FromStopID, leg.ToStopID = fromID, toID
+			validLegs = append(validLegs, leg)
 		}
+		day.Legs = validLegs
 	}
 	return json.Marshal(trip)
 }
