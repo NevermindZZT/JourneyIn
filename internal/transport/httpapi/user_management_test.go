@@ -14,10 +14,11 @@ import (
 
 	journeyin "journeyin"
 	"journeyin/internal/application"
+	"journeyin/internal/security"
 	"journeyin/internal/store"
 )
 
-func newUserManagementTestServer(t *testing.T) (*httptest.Server, *http.Client) {
+func newUserManagementTestServer(t *testing.T, configureAuth bool) (*httptest.Server, *http.Client, *application.UserService, *Authenticator) {
 	t.Helper()
 	migrations, err := fs.Sub(journeyin.MigrationFS, "migrations")
 	if err != nil {
@@ -42,6 +43,9 @@ func newUserManagementTestServer(t *testing.T) (*httptest.Server, *http.Client) 
 		t.Fatalf("bootstrap admin: created=%v err=%v", created, err)
 	}
 	auth := NewAuthenticator("", "", "")
+	if configureAuth {
+		auth = NewAuthenticator("root", "bootstrap-password", "")
+	}
 	auth.SetUserService(users)
 	api := NewServer(app, webFS, schemaFS, "test", nil)
 	api.SetUserService(users)
@@ -52,7 +56,7 @@ func newUserManagementTestServer(t *testing.T) (*httptest.Server, *http.Client) 
 	}
 	server := httptest.NewServer(api.Handler())
 	t.Cleanup(server.Close)
-	return server, &http.Client{Jar: jar}
+	return server, &http.Client{Jar: jar}, users, auth
 }
 
 func doUserJSON(t *testing.T, client *http.Client, method, url string, body any, token, ifMatch string) (*http.Response, []byte) {
@@ -98,8 +102,36 @@ func userTestTrip(title string) map[string]any {
 	}
 }
 
+func TestNoAuthLocalModeAllowsDirectUseAndHonorsExplicitUserTokens(t *testing.T) {
+	server, client, users, auth := newUserManagementTestServer(t, false)
+	if auth.Enabled() {
+		t.Fatal("database accounts alone should not force authentication")
+	}
+	me, body := doUserJSON(t, client, http.MethodGet, server.URL+"/api/v1/auth/me", nil, "", "")
+	if me.StatusCode != http.StatusOK || !strings.Contains(string(body), "\"is_admin\":true") {
+		t.Fatalf("local no-auth current user status=%d body=%s", me.StatusCode, body)
+	}
+	viewer, err := users.CreateUser(context.Background(), security.SystemPrincipal(), "local-viewer", "local-viewer-password", "user", "read_only", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := users.CreateAPIToken(context.Background(), security.SystemPrincipal(), viewer.ID, "scoped client")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokenClient := &http.Client{}
+	me, body = doUserJSON(t, tokenClient, http.MethodGet, server.URL+"/api/v1/auth/me", nil, token, "")
+	if me.StatusCode != http.StatusOK || !strings.Contains(string(body), `"username":"local-viewer"`) || !strings.Contains(string(body), `"is_admin":false`) {
+		t.Fatalf("scoped token current user status=%d body=%s", me.StatusCode, body)
+	}
+	invalid, body := doUserJSON(t, tokenClient, http.MethodGet, server.URL+"/api/v1/auth/me", nil, "invalid-token", "")
+	if invalid.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("invalid explicit bearer should not fall back to anonymous local mode: status=%d body=%s", invalid.StatusCode, body)
+	}
+}
+
 func TestDatabaseUsersAdminAPIAndTripPermissions(t *testing.T) {
-	server, adminClient := newUserManagementTestServer(t)
+	server, adminClient, _, _ := newUserManagementTestServer(t, true)
 	login, data := doUserJSON(t, adminClient, http.MethodPost, server.URL+"/api/v1/auth/login", map[string]string{"username": "root", "password": "bootstrap-password"}, "", "")
 	if login.StatusCode != http.StatusOK {
 		t.Fatalf("admin login status=%d body=%s", login.StatusCode, data)

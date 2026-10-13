@@ -250,11 +250,26 @@ func RequireBearer(next http.Handler, token string) http.Handler {
 }
 
 func RequireBearerWithResolver(next http.Handler, token string, resolver BearerPrincipalResolver) http.Handler {
-	if strings.TrimSpace(token) == "" && resolver == nil {
+	return requireBearerWithResolver(next, token, resolver, false)
+}
+
+// RequireOptionalBearerWithResolver accepts anonymous local calls when no token is supplied,
+// while still resolving explicit global or user-scoped Bearer tokens.
+func RequireOptionalBearerWithResolver(next http.Handler, token string, resolver BearerPrincipalResolver) http.Handler {
+	return requireBearerWithResolver(next, token, resolver, true)
+}
+
+func requireBearerWithResolver(next http.Handler, token string, resolver BearerPrincipalResolver, allowAnonymous bool) http.Handler {
+	if !allowAnonymous && strings.TrimSpace(token) == "" && resolver == nil {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		value := strings.TrimSpace(r.Header.Get("Authorization"))
+		if value == "" && allowAnonymous {
+			r = r.WithContext(security.WithPrincipal(r.Context(), security.SystemPrincipal()))
+			next.ServeHTTP(w, r)
+			return
+		}
 		if !strings.HasPrefix(value, "Bearer ") {
 			w.Header().Set("WWW-Authenticate", "Bearer")
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -262,9 +277,9 @@ func RequireBearerWithResolver(next http.Handler, token string, resolver BearerP
 		}
 		raw := strings.TrimSpace(strings.TrimPrefix(value, "Bearer "))
 		var principal security.Principal
-		if token != "" && subtle.ConstantTimeCompare([]byte(raw), []byte(token)) == 1 {
+		if raw != "" && token != "" && subtle.ConstantTimeCompare([]byte(raw), []byte(token)) == 1 {
 			principal = security.SystemPrincipal()
-		} else if resolver != nil {
+		} else if raw != "" && resolver != nil {
 			resolved, err := resolver(r.Context(), raw)
 			if err == nil {
 				principal = resolved

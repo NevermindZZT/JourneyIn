@@ -50,11 +50,8 @@ func (s *UserService) BootstrapAdminIfEmpty(ctx context.Context, username, passw
 		return false, errors.New("user store is not configured")
 	}
 	username = strings.TrimSpace(username)
-	if username == "" && password == "" {
-		return false, nil
-	}
 	if username == "" || strings.TrimSpace(password) == "" {
-		return false, errors.New("both bootstrap username and a non-blank password are required")
+		return false, nil
 	}
 	count, err := s.store.UserCount(ctx)
 	if err != nil {

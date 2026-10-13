@@ -82,22 +82,19 @@ func (a *Authenticator) userAuth() (*application.UserService, bool) {
 }
 
 func (a *Authenticator) Enabled() bool {
-	if a == nil {
-		return false
-	}
-	a.mu.RLock()
-	userModeEnabled := a.userModeEnabled
-	a.mu.RUnlock()
-	return a.apiToken != "" || a.UsernamePasswordEnabled() || userModeEnabled
+	return a != nil && (a.apiToken != "" || a.UsernamePasswordEnabled())
 }
 
 func (a *Authenticator) UsernamePasswordEnabled() bool {
-	return a != nil && a.username != "" && a.password != ""
+	return a != nil && a.username != "" && strings.TrimSpace(a.password) != ""
 }
 
 func (a *Authenticator) Login(username, password string) (string, error) {
 	users, userMode := a.userAuth()
 	if userMode && users != nil {
+		if !a.Enabled() {
+			return "", ErrAuthNotConfigured
+		}
 		principal, err := users.Authenticate(context.Background(), username, password)
 		if err != nil {
 			return "", ErrInvalidCredentials
@@ -129,20 +126,30 @@ func systemPrincipal() security.Principal {
 }
 
 func (a *Authenticator) PrincipalForRequest(r *http.Request) (security.Principal, bool) {
-	if a == nil || !a.Enabled() {
+	if a == nil {
 		return systemPrincipal(), true
 	}
-	authorization := r.Header.Get("Authorization")
-	if a.apiToken != "" && subtle.ConstantTimeCompare([]byte(authorization), []byte("Bearer "+a.apiToken)) == 1 {
+	authorization := strings.TrimSpace(r.Header.Get("Authorization"))
+	if strings.HasPrefix(authorization, "Bearer ") {
+		raw := strings.TrimSpace(strings.TrimPrefix(authorization, "Bearer "))
+		if raw == "" {
+			return security.Principal{}, false
+		}
+		if a.apiToken != "" && subtle.ConstantTimeCompare([]byte(raw), []byte(a.apiToken)) == 1 {
+			return systemPrincipal(), true
+		}
+		users, userMode := a.userAuth()
+		if userMode && users != nil {
+			if principal, err := users.PrincipalForAPIToken(r.Context(), raw); err == nil {
+				return principal, true
+			}
+		}
+		return security.Principal{}, false
+	}
+	if !a.Enabled() {
 		return systemPrincipal(), true
 	}
 	users, userMode := a.userAuth()
-	if userMode && users != nil && strings.HasPrefix(authorization, "Bearer ") {
-		raw := strings.TrimSpace(strings.TrimPrefix(authorization, "Bearer "))
-		if principal, err := users.PrincipalForAPIToken(r.Context(), raw); err == nil {
-			return principal, true
-		}
-	}
 	cookie, err := r.Cookie(authSessionCookie)
 	if err != nil || cookie.Value == "" {
 		return security.Principal{}, false
@@ -229,11 +236,6 @@ func RequireAPIAuthWithAuthenticator(next http.Handler, authenticator *Authentic
 			return
 		}
 		if !strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/api/v1/health" || r.URL.Path == "/api/v1/auth/login" || r.URL.Path == "/api/v1/maps/navigation" || strings.HasPrefix(r.URL.Path, "/api/v1/collaboration/") {
-			next.ServeHTTP(w, r)
-			return
-		}
-		if authenticator == nil || !authenticator.Enabled() {
-			r = r.WithContext(security.WithPrincipal(r.Context(), systemPrincipal()))
 			next.ServeHTTP(w, r)
 			return
 		}

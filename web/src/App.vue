@@ -1907,12 +1907,15 @@ async function saveManagedUser() {
     resetManagedUserForm()
     managedUsersMessage.value = successMessage
     if (wasBootstrap && !authTokenInput.value.trim()) {
-      settingsOpen.value = false
-      currentUser.value = null
-      loginUsername.value = createdUsername
-      loginMessage.value = '首个管理员已创建，请登录继续。'
-      authOpen.value = true
-      return
+      await loadCurrentUser()
+      if (authOpen.value) {
+        settingsOpen.value = false
+        currentUser.value = null
+        loginUsername.value = createdUsername
+        loginMessage.value = '首个管理员已创建，请登录继续。'
+        authOpen.value = true
+        return
+      }
     }
     await loadCurrentUser()
     await loadManagedUsers()

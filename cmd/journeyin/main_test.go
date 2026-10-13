@@ -26,7 +26,7 @@ func TestIsLoopback(t *testing.T) {
 	}
 }
 
-func TestResolveStdioPrincipalRequiresScopedTokenForPersistentUsers(t *testing.T) {
+func TestResolveStdioPrincipalAllowsNoAuthAndHonorsScopedTokens(t *testing.T) {
 	ctx := context.Background()
 	localAuth := httpapi.NewAuthenticator("", "", "")
 	principal, err := resolveStdioPrincipal(ctx, localAuth, "", "")
@@ -66,6 +66,13 @@ func TestResolveStdioPrincipalRequiresScopedTokenForPersistentUsers(t *testing.T
 	}
 	auth := httpapi.NewAuthenticator("", "", "")
 	auth.SetUserService(users)
+	if auth.Enabled() {
+		t.Fatal("database users alone should not force authentication")
+	}
+	principal, err = resolveStdioPrincipal(ctx, auth, "", "")
+	if err != nil || !principal.IsAdmin() {
+		t.Fatalf("persistent users should not block local no-auth stdio: principal=%+v err=%v", principal, err)
+	}
 	principal, err = resolveStdioPrincipal(ctx, auth, "", token)
 	if err != nil || principal.UserID != viewer.ID || principal.AccessMode != security.AccessReadOnly {
 		t.Fatalf("scoped stdio principal=%+v err=%v", principal, err)

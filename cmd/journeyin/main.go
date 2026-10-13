@@ -85,7 +85,7 @@ func main() {
 	api.SetAuthenticator(authenticator)
 	api.SetUserService(userService)
 	if !isLoopback(listen) && !authenticator.Enabled() {
-		logger.Error("remote HTTP listener requires a bootstrap user or JOURNEYIN_API_TOKEN")
+		logger.Error("remote HTTP listener requires JOURNEYIN_AUTH_USERNAME/PASSWORD or JOURNEYIN_API_TOKEN")
 		os.Exit(2)
 	}
 	baiduServerAK := os.Getenv("JOURNEYIN_BAIDU_SERVER_AK")
@@ -186,7 +186,7 @@ func main() {
 
 	mcpToken := strings.TrimSpace(settingValue(ctx, database, "mcp.token", os.Getenv("JOURNEYIN_MCP_TOKEN")))
 	if !isLoopback(listen) && mcpToken == "" && !authenticator.Enabled() {
-		logger.Error("remote MCP requires an admin token or configured user accounts with scoped API tokens")
+		logger.Error("remote MCP requires an admin token or configured API authentication")
 		os.Exit(2)
 	}
 	api.SetMCPToken(mcpToken)
@@ -195,6 +195,8 @@ func main() {
 	mcpHandler := mcpServer.HTTPHandler()
 	if mcpToken != "" || authenticator.Enabled() {
 		mcpHandler = mcptransport.RequireBearerWithResolver(mcpHandler, mcpToken, authenticator.PrincipalForBearer)
+	} else {
+		mcpHandler = mcptransport.RequireOptionalBearerWithResolver(mcpHandler, "", authenticator.PrincipalForBearer)
 	}
 	mux.Handle("/mcp", mcpHandler)
 	mux.Handle("/", api.Handler())
