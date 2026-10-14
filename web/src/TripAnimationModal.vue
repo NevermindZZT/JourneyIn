@@ -326,17 +326,54 @@ const projectedData = computed(() => {
   }
 })
 
-// 路线总像素长度
+// 路线总像素长度与离散采样点缓存
+interface PathSample {
+  dist: number
+  x: number
+  y: number
+  angle: number
+}
 const totalPathLength = ref<number>(1000)
+const pathSamples = ref<PathSample[]>([])
 
 watch([() => projectedData.value?.pathD, hiddenPathRef], async () => {
   await nextTick()
   if (hiddenPathRef.value) {
     try {
       const len = hiddenPathRef.value.getTotalLength()
-      if (len > 0) totalPathLength.value = Math.round(len)
+      if (len > 0) {
+        totalPathLength.value = Math.round(len)
+        const totalL = totalPathLength.value
+        const step = 2 // 2px 极细微采样步长
+        const samples: PathSample[] = []
+        for (let d = 0; d < totalL; d += step) {
+          const pt = hiddenPathRef.value.getPointAtLength(d)
+          const nextPt = hiddenPathRef.value.getPointAtLength(Math.min(totalL, d + 2))
+          const dx = nextPt.x - pt.x
+          const dy = nextPt.y - pt.y
+          const angle = Math.atan2(dy, dx) * (180 / Math.PI)
+          samples.push({
+            dist: d,
+            x: Math.round(pt.x * 10) / 10,
+            y: Math.round(pt.y * 10) / 10,
+            angle: Number.isFinite(angle) ? Math.round(angle * 10) / 10 : 0,
+          })
+        }
+        const lastPt = hiddenPathRef.value.getPointAtLength(totalL)
+        const prevPt = hiddenPathRef.value.getPointAtLength(Math.max(0, totalL - 2))
+        const lastAngle = Math.atan2(lastPt.y - prevPt.y, lastPt.x - prevPt.x) * (180 / Math.PI)
+        samples.push({
+          dist: totalL,
+          x: Math.round(lastPt.x * 10) / 10,
+          y: Math.round(lastPt.y * 10) / 10,
+          angle: Number.isFinite(lastAngle) ? Math.round(lastAngle * 10) / 10 : 0,
+        })
+        pathSamples.value = samples
+        return
+      }
     } catch {
       totalPathLength.value = 1000
+      pathSamples.value = []
     }
   }
 }, { immediate: true })
@@ -354,25 +391,17 @@ const currentDashoffset = computed(() => {
 
 // 载具当前在路径上的位置与转向角度 (x, y, angle)
 const vehicleTransform = computed(() => {
-  if (!hiddenPathRef.value || totalPathLength.value <= 0) {
+  if (!pathSamples.value.length) {
     const firstStop = projectedData.value?.stops?.[0]
     return { x: firstStop?.x || 50, y: firstStop?.y || 50, angle: 0 }
   }
-  try {
-    const dist = progress.value * totalPathLength.value
-    const pt = hiddenPathRef.value.getPointAtLength(dist)
-    const nextDist = Math.min(totalPathLength.value, dist + 2)
-    const nextPt = hiddenPathRef.value.getPointAtLength(nextDist)
-    const dx = nextPt.x - pt.x
-    const dy = nextPt.y - pt.y
-    const angle = Math.atan2(dy, dx) * (180 / Math.PI)
-    return {
-      x: Math.round(pt.x * 10) / 10,
-      y: Math.round(pt.y * 10) / 10,
-      angle: Number.isFinite(angle) ? Math.round(angle * 10) / 10 : 0,
-    }
-  } catch {
-    return { x: 50, y: 50, angle: 0 }
+  const curDist = progress.value * totalPathLength.value
+  const idx = Math.min(pathSamples.value.length - 1, Math.max(0, Math.floor(curDist / 2)))
+  const sample = pathSamples.value[idx]
+  return {
+    x: sample.x,
+    y: sample.y,
+    angle: sample.angle,
   }
 })
 
@@ -653,10 +682,10 @@ async function copySVGCode() {
 
 // --- 导出功能 2: 纯浏览器端高清视频录制 (MP4 / WebM) ---
 async function exportVideo() {
-  if (isExportingVideo.value || !projectedData.value || !hiddenPathRef.value) return
+  if (isExportingVideo.value || !projectedData.value || !pathSamples.value.length) return
   isExportingVideo.value = true
   exportProgress.value = 0
-  toastMessage.value = '正在预加载卫星切片并逐帧录制高清视频…'
+  toastMessage.value = '正在预加载卫星切片并准备录制高清视频…'
 
   const wasPlaying = isPlaying.value
   stopLoop()
@@ -703,16 +732,29 @@ async function exportVideo() {
 
     recorder.start()
 
-    const fps = 30
-    const totalFrames = fps * duration.value
     const scaleFactorX = targetW / canvasWidth.value
     const scaleFactorY = targetH / canvasHeight.value
+    const totalDurationMs = duration.value * 1000
+    const startTime = performance.now()
 
-    for (let f = 0; f <= totalFrames; f++) {
-      const t = f / totalFrames
+    // 严密基于时钟时间推进帧，彻底保证视频总时长与动画速度 100% 匀速准确
+    while (isExportingVideo.value) {
+      const now = performance.now()
+      const elapsed = now - startTime
+      const t = Math.min(1, elapsed / totalDurationMs)
+
       renderCanvasFrame(ctx, targetW, targetH, t, scaleFactorX, scaleFactorY, preloadedSatelliteImgs)
-      exportProgress.value = Math.round((f / totalFrames) * 100)
-      await new Promise(r => setTimeout(r, 6))
+      exportProgress.value = Math.min(100, Math.round((elapsed / totalDurationMs) * 100))
+      const secLeft = Math.max(0, Math.ceil((totalDurationMs - elapsed) / 1000))
+      toastMessage.value = `正在录制高清视频… 剩余 ${secLeft} 秒 (${exportProgress.value}%)`
+
+      if (elapsed >= totalDurationMs) {
+        // 确保最后一帧 (t=1.0) 完整渲染并停留
+        renderCanvasFrame(ctx, targetW, targetH, 1.0, scaleFactorX, scaleFactorY, preloadedSatelliteImgs)
+        break
+      }
+
+      await new Promise(r => requestAnimationFrame(r))
     }
 
     recorder.stop()
@@ -728,7 +770,7 @@ async function exportVideo() {
     a.click()
     URL.revokeObjectURL(url)
 
-    toastMessage.value = `高清短视频已生成 (.${ext})！可直接分享小红书或朋友圈。`
+    toastMessage.value = `高清短视频已生成 (.${ext})！时长精确为 ${duration.value} 秒。`
   } catch (err) {
     console.error('Video record error:', err)
     toastMessage.value = '视频录制异常：' + (err instanceof Error ? err.message : String(err))
@@ -742,7 +784,7 @@ async function exportVideo() {
   }
 }
 
-// 离屏 Canvas 单帧渲染算法
+// 离屏 Canvas 单帧渲染算法 (零 DOM 依赖，基于预采样点超高速绘制)
 function renderCanvasFrame(
   ctx: CanvasRenderingContext2D,
   width: number,
@@ -752,7 +794,7 @@ function renderCanvasFrame(
   scaleY: number,
   satelliteImgs: HTMLImageElement[] = []
 ) {
-  if (!projectedData.value || !hiddenPathRef.value) return
+  if (!projectedData.value || !pathSamples.value.length) return
   ctx.clearRect(0, 0, width, height)
 
   // 1. 绘制底图背景
@@ -805,22 +847,26 @@ function renderCanvasFrame(
     ctx.fillText(`${props.trip.date_range.start} ~ ${props.trip.date_range.end}`, 48, 98)
   }
 
-  // 3. 绘制截至当前进展 t 的折线段 (严密锁死载具实时坐标，彻底消除延迟脱节)
+  // 3. 绘制截至当前进展 t 的折线段 (严密锁死载具实时坐标，零延迟贴合)
   const totalL = totalPathLength.value
   const currentDist = t * totalL
-  if (currentDist > 0 && hiddenPathRef.value) {
+  const curIdx = Math.min(pathSamples.value.length - 1, Math.max(0, Math.floor(currentDist / 2)))
+
+  if (curIdx > 0) {
+    // 外层高对比度轮廓边
     ctx.lineWidth = 14
     ctx.strokeStyle = isDark ? '#0f172a' : '#ffffff'
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
-    drawSubPath(ctx, hiddenPathRef.value, currentDist, totalL, scaleX, scaleY)
+    drawSampledSubPath(ctx, pathSamples.value, curIdx, scaleX, scaleY)
     ctx.stroke()
 
+    // 内层高亮核心线
     ctx.lineWidth = 8
     ctx.strokeStyle = trackColor.value
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
-    drawSubPath(ctx, hiddenPathRef.value, currentDist, totalL, scaleX, scaleY)
+    drawSampledSubPath(ctx, pathSamples.value, curIdx, scaleX, scaleY)
     ctx.stroke()
   }
 
@@ -863,17 +909,14 @@ function renderCanvasFrame(
     }
   }
 
-  // 5. 绘制载具图标
-  try {
-    const pt = hiddenPathRef.value.getPointAtLength(currentDist)
-    const nextPt = hiddenPathRef.value.getPointAtLength(Math.min(totalL, currentDist + 2))
-    const angle = Math.atan2(nextPt.y - pt.y, nextPt.x - pt.x)
-    const vx = pt.x * scaleX
-    const vy = pt.y * scaleY
-
+  // 5. 绘制载具图标 (坐标完全对齐 pathSamples[curIdx])
+  const curSample = pathSamples.value[curIdx]
+  if (curSample) {
+    const vx = curSample.x * scaleX
+    const vy = curSample.y * scaleY
     ctx.save()
     ctx.translate(vx, vy)
-    ctx.rotate(angle)
+    ctx.rotate((curSample.angle * Math.PI) / 180)
 
     ctx.fillStyle = '#ffffff'
     ctx.strokeStyle = '#0f172a'
@@ -887,32 +930,22 @@ function renderCanvasFrame(
     ctx.fillRect(-23, -10, 3, 5)
     ctx.fillRect(-23, 5, 3, 5)
     ctx.restore()
-  } catch {
-    // 容错处理
   }
 }
 
-function drawSubPath(
+function drawSampledSubPath(
   ctx: CanvasRenderingContext2D,
-  pathEl: SVGPathElement,
-  currentDist: number,
-  totalDist: number,
+  samples: PathSample[],
+  curIdx: number,
   scaleX: number,
   scaleY: number
 ) {
-  if (currentDist <= 0) return
+  if (curIdx <= 0 || !samples.length) return
   ctx.beginPath()
-  const p0 = pathEl.getPointAtLength(0)
-  ctx.moveTo(p0.x * scaleX, p0.y * scaleY)
-
-  const step = Math.max(3, Math.min(8, totalDist / 260))
-  for (let d = step; d < currentDist; d += step) {
-    const p = pathEl.getPointAtLength(d)
-    ctx.lineTo(p.x * scaleX, p.y * scaleY)
+  ctx.moveTo(samples[0].x * scaleX, samples[0].y * scaleY)
+  for (let i = 1; i <= curIdx; i++) {
+    ctx.lineTo(samples[i].x * scaleX, samples[i].y * scaleY)
   }
-  // 路线末端严格连接至当前载具真实中心点，保证绘制与车头零延迟贴合
-  const curP = pathEl.getPointAtLength(currentDist)
-  ctx.lineTo(curP.x * scaleX, curP.y * scaleY)
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
@@ -1088,15 +1121,7 @@ onUnmounted(() => {
                   :class="{ reached: progress >= s.ratio }"
                   :transform="`translate(${s.x}, ${s.y})`"
                 >
-                  <!-- 到达时的涟漪光圈 -->
-                  <circle
-                    v-if="Math.abs(progress - s.ratio) < 0.03"
-                    r="16"
-                    fill="none"
-                    :stroke="trackColor"
-                    stroke-width="1.5"
-                    class="radar-ripple"
-                  />
+
                   <!-- 图钉圆圈 -->
                   <circle
                     r="8"
@@ -1933,15 +1958,7 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-@keyframes radarPulse {
-  0% { transform: scale(0.6); opacity: 0.9; }
-  100% { transform: scale(2.2); opacity: 0; }
-}
 
-.radar-ripple {
-  transform-origin: center;
-  animation: radarPulse 1.2s cubic-bezier(0.2, 0, 0, 1) infinite;
-}
 
 .pin-popup {
   transition: opacity 0.2s ease;
