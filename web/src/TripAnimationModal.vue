@@ -162,23 +162,25 @@ interface SatelliteTileItem {
 }
 
 function calculateSatelliteTiles(
-  minLng: number,
-  maxLng: number,
-  minLat: number,
-  maxLat: number,
+  unprojectFn: ([px, py]: [number, number]) => [number, number],
   width: number,
   height: number,
   projectFn: ([lng, lat]: [number, number]) => [number, number]
 ): SatelliteTileItem[] {
+  // 1. 将可见屏幕画面的四个角点反投影回真实地理经纬度，确保瓦片覆盖整个视口，杜绝边缘黑边
+  const [screenMinLng, screenMaxLat] = unprojectFn([0, 0])
+  const [screenMaxLng, screenMinLat] = unprojectFn([width, height])
+
+  // 2. 计算匹配当前画面视口大小的最优 Zoom 级别
   let zoom = 6
   for (let z = 16; z >= 3; z--) {
-    const x1 = ((minLng + 180) / 360) * Math.pow(2, z)
-    const x2 = ((maxLng + 180) / 360) * Math.pow(2, z)
-    const y1 = ((1 - Math.log(Math.tan((maxLat * Math.PI) / 180) + 1 / Math.cos((maxLat * Math.PI) / 180)) / Math.PI) / 2) * Math.pow(2, z)
-    const y2 = ((1 - Math.log(Math.tan((minLat * Math.PI) / 180) + 1 / Math.cos((minLat * Math.PI) / 180)) / Math.PI) / 2) * Math.pow(2, z)
+    const x1 = ((screenMinLng + 180) / 360) * Math.pow(2, z)
+    const x2 = ((screenMaxLng + 180) / 360) * Math.pow(2, z)
+    const y1 = ((1 - Math.log(Math.tan((screenMaxLat * Math.PI) / 180) + 1 / Math.cos((screenMaxLat * Math.PI) / 180)) / Math.PI) / 2) * Math.pow(2, z)
+    const y2 = ((1 - Math.log(Math.tan((screenMinLat * Math.PI) / 180) + 1 / Math.cos((screenMinLat * Math.PI) / 180)) / Math.PI) / 2) * Math.pow(2, z)
     const pixelW = (x2 - x1) * 256
     const pixelH = (y2 - y1) * 256
-    if (pixelW <= width * 0.9 && pixelH <= height * 0.9) {
+    if (pixelW <= width * 1.5 && pixelH <= height * 1.5) {
       zoom = z
       break
     }
@@ -192,10 +194,11 @@ function calculateSatelliteTiles(
     return (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)))
   }
 
-  const minTX = Math.max(0, lng2tile(minLng, zoom) - 1)
-  const maxTX = Math.min(Math.pow(2, zoom) - 1, lng2tile(maxLng, zoom) + 1)
-  const minTY = Math.max(0, lat2tile(maxLat, zoom) - 1)
-  const maxTY = Math.min(Math.pow(2, zoom) - 1, lat2tile(minLat, zoom) + 1)
+  // 覆盖整个画面并在四周扩展 1 圈缓冲瓦片，彻底防止边缘缺漏
+  const minTX = Math.max(0, lng2tile(screenMinLng, zoom) - 1)
+  const maxTX = Math.min(Math.pow(2, zoom) - 1, lng2tile(screenMaxLng, zoom) + 1)
+  const minTY = Math.max(0, lat2tile(screenMaxLat, zoom) - 1)
+  const maxTY = Math.min(Math.pow(2, zoom) - 1, lat2tile(screenMinLat, zoom) + 1)
 
   const tiles: SatelliteTileItem[] = []
   for (let x = minTX; x <= maxTX; x++) {
@@ -204,22 +207,24 @@ function calculateSatelliteTiles(
       const br = [tile2lng(x + 1, zoom), tile2lat(y + 1, zoom)] as [number, number]
       const [px1, py1] = projectFn(tl)
       const [px2, py2] = projectFn(br)
+      // 关键：增加 +1.2px 边缘微重叠 (Bleed Overlap)，彻底消除抗锯齿和亚像素舍入产生的黑灰拼接缝！
+      const w = Math.max(1, (px2 - px1) + 1.2)
+      const h = Math.max(1, (py2 - py1) + 1.2)
       tiles.push({
         x,
         y,
         z: zoom,
         url: `https://webst0${(x % 4) + 1}.is.autonavi.com/appmaptile?style=6&x=${x}&y=${y}&z=${zoom}`,
-        px: Math.round(px1),
-        py: Math.round(py1),
-        w: Math.max(1, Math.round(px2 - px1)),
-        h: Math.max(1, Math.round(py2 - py1)),
+        px: Number(px1.toFixed(2)),
+        py: Number(py1.toFixed(2)),
+        w: Number(w.toFixed(2)),
+        h: Number(h.toFixed(2)),
       })
     }
   }
   return tiles
 }
 
-// 投影计算
 const projectedData = computed(() => {
   const width = canvasWidth.value
   const height = canvasHeight.value
@@ -262,9 +267,17 @@ const projectedData = computed(() => {
   const spanLat = maxLat - minLat
   const scale = Math.min(innerW / spanLng, innerH / spanLat)
 
+  const offsetX = padX + (innerW - spanLng * scale) / 2
+  const offsetY = padY + (innerH - spanLat * scale) / 2
+
   const project = ([lng, lat]: [number, number]): [number, number] => [
-    Math.round((padX + (innerW - spanLng * scale) / 2 + (lng - minLng) * cosLat * scale) * 10) / 10,
-    Math.round((padY + (innerH - spanLat * scale) / 2 + (maxLat - lat) * scale) * 10) / 10,
+    offsetX + (lng - minLng) * cosLat * scale,
+    offsetY + (maxLat - lat) * scale,
+  ]
+
+  const unproject = ([px, py]: [number, number]): [number, number] => [
+    minLng + (px - offsetX) / (cosLat * scale),
+    maxLat - (py - offsetY) / scale,
   ]
 
   // 1. 投影 Stop 点
@@ -312,8 +325,8 @@ const projectedData = computed(() => {
     }
   }
 
-  // 4. 计算真实卫星切片
-  const satelliteTiles = calculateSatelliteTiles(minLng, maxLng, minLat, maxLat, width, height, project)
+  // 4. 计算真实卫星切片 (基于反投影视口全画面无死角铺满)
+  const satelliteTiles = calculateSatelliteTiles(unproject, width, height, project)
 
   return {
     width,
@@ -828,7 +841,7 @@ function renderCanvasFrame(
         const tile = projectedData.value.satelliteTiles[i]
         const img = satelliteImgs[i]
         if (img && img.complete && img.naturalWidth > 0) {
-          ctx.drawImage(img, tile.px * scaleX, tile.py * scaleY, tile.w * scaleX, tile.h * scaleY)
+          ctx.drawImage(img, tile.px * scaleX, tile.py * scaleY, (tile.w * scaleX) + 1.5, (tile.h * scaleY) + 1.5)
         }
       }
       ctx.fillStyle = 'rgba(11, 19, 41, 0.2)'
