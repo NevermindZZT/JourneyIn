@@ -2986,4 +2986,53 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
   }
 }
 
+/* Route color theme options in map settings */
+.route-theme-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
 
+.route-theme-btn {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.route-theme-btn:hover {
+  border-color: var(--p);
+  background: var(--surface-container-high);
+}
+
+.route-theme-btn.selected {
+  border-color: var(--p);
+  background: color-mix(in srgb, var(--p) 12%, var(--surface));
+  color: var(--p);
+  box-shadow: 0 0 0 1.5px var(--p);
+}
+
+.route-theme-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  border: 1.5px solid rgba(255, 255, 255, 0.65);
+}
+
+.route-theme-label {
+  flex: 1;
+  white-space: nowrap;
+}

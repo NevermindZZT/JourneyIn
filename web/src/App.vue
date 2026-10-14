@@ -628,6 +628,110 @@ const sheetDragStyle = computed<Record<string, string> | undefined>(() => {
 const navigationApplying = ref(false)
 let navigationSequence = 0
 const mapType = ref<'normal' | 'satellite'>((localStorage.getItem('journeyin.mapType') as 'normal' | 'satellite') || 'normal')
+
+export type RouteColorTheme = 'teal' | 'orange' | 'blue' | 'magenta'
+export interface RouteColorPreset {
+  id: RouteColorTheme
+  label: string
+  normalColor: string
+  satelliteColor: string
+  desc: string
+}
+const ROUTE_COLOR_PRESETS: Record<RouteColorTheme, RouteColorPreset> = {
+  teal: {
+    id: 'teal',
+    label: '经典青绿',
+    normalColor: '#24695c',
+    satelliteColor: '#ff6b35',
+    desc: '系统默认。标准图下为优雅墨绿（#24695c）；开启自动高对比后，卫星图自动适配为高亮落日暖橙（#ff6b35），避免融入草原或森林。',
+  },
+  orange: {
+    id: 'orange',
+    label: '落日暖橙',
+    normalColor: '#ff6b35',
+    satelliteColor: '#ff5722',
+    desc: '全天候高对比度推荐。无论绿草、雪山还是暗色路网均一眼可见，户外与越野规划首选。',
+  },
+  blue: {
+    id: 'blue',
+    label: '极光天蓝',
+    normalColor: '#0284c7',
+    satelliteColor: '#00d2ff',
+    desc: '清爽冷光风格。标准图下为深天蓝（#0284c7），卫星图下呈现电光青蓝（#00d2ff）。',
+  },
+  magenta: {
+    id: 'magenta',
+    label: '探险洋红',
+    normalColor: '#e11d48',
+    satelliteColor: '#f43f5e',
+    desc: '运动轨迹经典配色（如 Strava 风格）。自然界极少存在大面积洋红色地貌，绝不与任何卫星底图撞色。',
+  },
+}
+const ROUTE_COLOR_PRESETS_LIST: RouteColorPreset[] = [
+  ROUTE_COLOR_PRESETS.teal,
+  ROUTE_COLOR_PRESETS.orange,
+  ROUTE_COLOR_PRESETS.blue,
+  ROUTE_COLOR_PRESETS.magenta,
+]
+const routeColorTheme = ref<RouteColorTheme>(
+  (localStorage.getItem('journeyin.routeColorTheme') as RouteColorTheme) || 'teal'
+)
+const routeSatelliteContrast = ref<boolean>(
+  localStorage.getItem('journeyin.routeSatelliteContrast') !== 'false'
+)
+const currentRouteThemeDesc = computed(() => {
+  const p = ROUTE_COLOR_PRESETS[routeColorTheme.value] || ROUTE_COLOR_PRESETS.teal
+  return p.desc
+})
+
+function setRouteColorTheme(theme: RouteColorTheme) {
+  if (routeColorTheme.value === theme) return
+  routeColorTheme.value = theme
+  localStorage.setItem('journeyin.routeColorTheme', theme)
+  if (tripView.value === 'atlas') {
+    void renderAtlasMap(true)
+  } else {
+    void renderMap({ preserveView: true })
+  }
+}
+
+function toggleRouteSatelliteContrast() {
+  routeSatelliteContrast.value = !routeSatelliteContrast.value
+  localStorage.setItem('journeyin.routeSatelliteContrast', String(routeSatelliteContrast.value))
+  if (tripView.value === 'atlas') {
+    void renderAtlasMap(true)
+  } else {
+    void renderMap({ preserveView: true })
+  }
+}
+
+function getRoutePolylineStyle(options?: { isSelected?: boolean; legId?: string }) {
+  const isSatellite = mapType.value === 'satellite'
+  const isSelected = Boolean(options?.isSelected || (options?.legId && selectedLegId.value === options.legId))
+  const preset = ROUTE_COLOR_PRESETS[routeColorTheme.value] || ROUTE_COLOR_PRESETS.teal
+
+  let coreColor = preset.normalColor
+  if (isSatellite && routeSatelliteContrast.value) {
+    coreColor = preset.satelliteColor
+  }
+
+  // 轮廓描边：卫星图使用深色底边（#0f172a）提供荧光反差；标准矢量图使用纯白微边（#ffffff）隔开路网
+  const outlineColor = isSatellite ? '#0f172a' : '#ffffff'
+  const outlineOpacity = isSatellite ? 0.88 : 0.95
+  const strokeOpacity = isSelected ? 1.0 : (isSatellite ? 0.95 : 0.85)
+  const strokeWeight = isSelected ? 6.5 : (isSatellite ? 5.5 : 5)
+  const borderWeight = isSelected ? 2.5 : 2
+
+  return {
+    strokeColor: coreColor,
+    strokeWeight,
+    strokeOpacity,
+    outlineColor,
+    outlineOpacity,
+    borderWeight,
+    hasOutline: true,
+  }
+}
 type MapLabelMode = 'auto' | 'always' | 'none'
 const mapLabelMode = ref<MapLabelMode>((localStorage.getItem('journeyin.mapLabelMode') as MapLabelMode) || (localStorage.getItem('journeyin.mapLabels') === 'false' ? 'none' : 'auto'))
 const showMapLabels = computed(() => mapLabelMode.value !== 'none')
@@ -2971,11 +3075,26 @@ async function renderBaiduMap(preserveView = false) {
       if (!snapshot || !snapshot.geometry) continue
       const line = snapshot.geometry.map(value => mapRoutePoint(value, snapshot.coordinate_system || 'bd09ll')).filter((point): point is Coord & { crs: string } => Boolean(point)).map(point => new mapAPI.Point(point.lng, point.lat))
       if (line.length > 1) {
-        const polyline = new mapAPI.Polyline(line, { strokeColor: '#24695c', strokeWeight: 5, strokeOpacity: .82 })
+        const style = getRoutePolylineStyle({ legId: leg.id })
+        if (style.hasOutline) {
+          const outlinePolyline = new mapAPI.Polyline(line, {
+            strokeColor: style.outlineColor,
+            strokeWeight: style.strokeWeight + style.borderWeight * 2,
+            strokeOpacity: style.outlineOpacity,
+          })
+          outlinePolyline.__journeyinLegId = leg.id
+          outlinePolyline.addEventListener?.('click', () => { selectedLegId.value = leg.id })
+          mapInstance.addOverlay(outlinePolyline)
+        }
+        const polyline = new mapAPI.Polyline(line, {
+          strokeColor: style.strokeColor,
+          strokeWeight: style.strokeWeight,
+          strokeOpacity: style.strokeOpacity,
+        })
         polyline.__journeyinLegId = leg.id
         polyline.addEventListener?.('click', () => { selectedLegId.value = leg.id })
         mapInstance.addOverlay(polyline)
-        attachRouteLabel(snapshot, leg.id)
+        attachRouteLabel(snapshot, leg.id, style.strokeColor)
       }
     }
     if (!preserveView) {
@@ -3183,7 +3302,7 @@ function attachAMapLabel(marker: any, title: string, dayBadge = '', isTarget = f
     marker.setTop(true)
   }
 }
-function attachAMapRouteLabel(snapshot: { geometry?: Array<[number, number]> | Array<Coord>; coordinate_system?: string; distance_m?: number; duration_s?: number }, legId = '') {
+function attachAMapRouteLabel(snapshot: { geometry?: Array<[number, number]> | Array<Coord>; coordinate_system?: string; distance_m?: number; duration_s?: number }, legId = '', routeColor = '#24695c') {
   if (!snapshot.geometry?.length || typeof mapAPI?.Text !== 'function') return
   const isLegSelected = Boolean(legId && selectedLegId.value === legId)
   if (!shouldShowRouteLabel(snapshot.distance_m, isLegSelected)) return
@@ -3198,7 +3317,7 @@ function attachAMapRouteLabel(snapshot: { geometry?: Array<[number, number]> | A
     allowCollision: false,
     zIndex: isLegSelected ? 120 : 60,
     style: {
-      backgroundColor: isLegSelected ? '#e56a4ded' : '#24695cdd',
+      backgroundColor: isLegSelected ? '#e56a4ded' : (routeColor.startsWith('#') && routeColor.length === 7 ? routeColor + 'dd' : '#24695cdd'),
       color: '#ffffff',
       border: '0',
       borderRadius: '999px',
@@ -3534,10 +3653,25 @@ async function renderAMapMap(preserveView = false) {
       if (!snapshot?.geometry?.length) continue
       const line = snapshot.geometry.map(value => mapRoutePointFor(value, snapshot.coordinate_system || 'gcj02', 'amap')).filter((point): point is Coord & { crs: string } => Boolean(point)).map(point => amapPointToArray(point))
       if (line.length < 2) continue
-      const polyline = addAMapOverlay(new mapAPI.Polyline({ path: line, strokeColor: '#24695c', strokeWeight: 5, strokeOpacity: .82, lineJoin: 'round', showDir: true, zIndex: 50 }))
+      const style = getRoutePolylineStyle({ legId: leg.id })
+      const polylineOptions: any = {
+        path: line,
+        strokeColor: style.strokeColor,
+        strokeWeight: style.strokeWeight,
+        strokeOpacity: style.strokeOpacity,
+        lineJoin: 'round',
+        showDir: true,
+        zIndex: 50,
+      }
+      if (style.hasOutline) {
+        polylineOptions.isOutline = true
+        polylineOptions.outlineColor = style.outlineColor
+        polylineOptions.borderWeight = style.borderWeight
+      }
+      const polyline = addAMapOverlay(new mapAPI.Polyline(polylineOptions))
       polyline.__journeyinLegId = leg.id
       polyline.on?.('click', () => { selectedLegId.value = leg.id })
-      attachAMapRouteLabel(snapshot, leg.id)
+      attachAMapRouteLabel(snapshot, leg.id, style.strokeColor)
     }
     if (!preserveView) {
       const focusTarget = selectedTarget.value
@@ -4288,6 +4422,8 @@ async function renderAtlasAMap(preserveView = false) {
         if (!hasSelection || isSelected) {
           line.forEach(p => allPoints.push(p))
         }
+        const isSatellite = mapType.value === 'satellite'
+        const outlineColor = isSatellite ? '#0f172a' : '#ffffff'
         const polyline = addAMapOverlay(new mapAPI.Polyline({
           path: line,
           strokeColor,
@@ -4295,6 +4431,9 @@ async function renderAtlasAMap(preserveView = false) {
           strokeOpacity,
           lineJoin: 'round',
           showDir: false,
+          isOutline: true,
+          outlineColor,
+          borderWeight: 1.5,
           zIndex,
         }))
         polyline.on?.('click', () => {
@@ -4445,6 +4584,14 @@ async function renderAtlasBaidu(preserveView = false) {
         if (!hasSelection || isSelected) {
           line.forEach(p => allPoints.push(p))
         }
+        const isSatellite = mapType.value === 'satellite'
+        const outlineColor = isSatellite ? '#0f172a' : '#ffffff'
+        const outlinePolyline = new mapAPI.Polyline(line, {
+          strokeColor: outlineColor,
+          strokeWeight: strokeWeight + 3,
+          strokeOpacity: strokeOpacity > 0.5 ? 0.75 : 0.2,
+        })
+        mapInstance.addOverlay(outlinePolyline)
         const polyline = new mapAPI.Polyline(line, {
           strokeColor,
           strokeWeight,
@@ -4607,6 +4754,11 @@ function setMapType(type: 'normal' | 'satellite') {
   mapType.value = type
   localStorage.setItem('journeyin.mapType', mapType.value)
   applyMapType()
+  if (tripView.value === 'atlas') {
+    void renderAtlasMap(true)
+  } else {
+    void renderMap({ preserveView: true })
+  }
 }
 function isMobileViewport(): boolean {
   return typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches
@@ -5205,7 +5357,7 @@ function attachMapLabel(marker: any, title: string, dayBadge = '', isTarget = fa
 }
 function formatDistance(meters?: number) { if (!meters || meters < 0) return ''; return meters < 1000 ? Math.round(meters) + ' m' : (Math.round(meters / 100) / 10).toFixed(1).replace(/\.0$/, '') + ' km' }
 function formatDuration(seconds?: number) { if (!seconds || seconds < 0) return ''; const minutes = Math.max(1, Math.round(seconds / 60)); return minutes < 60 ? minutes + ' 分钟' : Math.floor(minutes / 60) + ' 小时' + (minutes % 60 ? ' ' + minutes % 60 + ' 分钟' : '') }
-function attachRouteLabel(snapshot: { geometry?: Array<[number, number]> | Array<Coord>; distance_m?: number; duration_s?: number; coordinate_system?: string }, legId = '') {
+function attachRouteLabel(snapshot: { geometry?: Array<[number, number]> | Array<Coord>; distance_m?: number; duration_s?: number; coordinate_system?: string }, legId = '', routeColor = '#24695c') {
   if (!mapAPI?.Label || !mapAPI?.Size || !snapshot.geometry?.length) return
   const isLegSelected = Boolean(legId && selectedLegId.value === legId)
   if (!shouldShowRouteLabel(snapshot.distance_m, isLegSelected)) return
@@ -5214,7 +5366,7 @@ function attachRouteLabel(snapshot: { geometry?: Array<[number, number]> | Array
   const label = new mapAPI.Label(text, { offset: new mapAPI.Size(-24, -10) })
   label.setStyle?.({
     color: '#ffffff',
-    backgroundColor: isLegSelected ? '#e56a4ded' : '#24695cdd',
+    backgroundColor: isLegSelected ? '#e56a4ded' : (routeColor.startsWith('#') && routeColor.length === 7 ? routeColor + 'dd' : '#24695cdd'),
     border: '0',
     borderRadius: '999px',
     padding: '4px 8px',
@@ -6846,6 +6998,41 @@ onUnmounted(() => {
               <section v-else-if="settingsSection === 'maps'" class="settings-page-section">
                 <div class="settings-section-heading"><span class="eyebrow">MAP PROVIDERS</span><h3>地图与路线</h3><p>选择默认 Provider，并分别管理浏览器端和服务端能力。</p></div>
                 <div class="settings-card"><div class="settings-card-heading"><div><strong>默认地图 Provider</strong><small>用于没有单独地图偏好的新行程</small></div><span class="settings-status-dot"></span></div><label class="select-field">默认地图 Provider<UiSelect v-model="defaultMapProvider" aria-label="默认地图 Provider" :options="mapProviderOptions" /></label><p class="settings-help">单个行程已保存的地图偏好不会被覆盖；地图工作区仍可临时切换底图。</p><button class="primary-action" type="button" :disabled="settingsSaving" @click="saveDefaultMapProvider">{{ settingsSaving ? '保存中…' : '保存默认地图' }}</button></div>
+                <div class="settings-card">
+                  <div class="settings-card-heading">
+                    <div>
+                      <strong>轨迹线配色与高对比度</strong>
+                      <small>自定义路线在地图上的渲染颜色与卫星图对比策略</small>
+                    </div>
+                  </div>
+                  <div class="route-theme-options">
+                    <button
+                      v-for="preset in ROUTE_COLOR_PRESETS_LIST"
+                      :key="preset.id"
+                      type="button"
+                      class="route-theme-btn"
+                      :class="{ selected: routeColorTheme === preset.id }"
+                      @click="setRouteColorTheme(preset.id)"
+                    >
+                      <span class="route-theme-dot" :style="{ backgroundColor: preset.normalColor }"></span>
+                      <span class="route-theme-label">{{ preset.label }}</span>
+                    </button>
+                  </div>
+                  <p class="settings-help">
+                    {{ currentRouteThemeDesc }}
+                  </p>
+                  <label class="photo-match-toggle" style="margin-top: 14px;">
+                    <span>
+                      <strong>卫星图自动高对比度切换</strong>
+                      <small>处于卫星图时，自动采用高对比度互补色（如落日暖橙）并强化深色边缘描边，防止在草原或山林中融于地貌背景。</small>
+                    </span>
+                    <input
+                      type="checkbox"
+                      :checked="routeSatelliteContrast"
+                      @change="toggleRouteSatelliteContrast"
+                    />
+                  </label>
+                </div>
                 <div class="settings-provider-grid"><article class="settings-card provider-card"><div class="settings-card-heading"><div><strong>高德地图</strong><small>JS API 2.0 / Web Service</small></div><span class="provider-status">{{ settingsData?.map?.amap?.js_key_configured ? 'JS 已配置' : '待配置' }}</span></div><p class="settings-status-line">JS Key：<strong>{{ settingsData?.map?.amap?.js_key_configured ? '已配置' : '未配置' }}</strong><br />服务端 Key：<strong>{{ settingsData?.map?.amap?.server_key_configured ? '已配置' : '未配置' }}</strong><br />安全密钥：<strong>{{ settingsData?.map?.amap?.security_js_code_configured ? '已配置' : '未配置' }}</strong></p><label>JS Key<input v-model="amapJSKeyInput" type="password" placeholder="用于浏览器端地图" autocomplete="off" /></label><label>服务端 Key<input v-model="amapServerKeyInput" type="password" placeholder="留空保持当前值" autocomplete="off" /></label><label>JS 安全密钥<input v-model="amapSecurityJSCodeInput" type="password" placeholder="用于安全代理" autocomplete="off" /></label><a href="https://console.amap.com/dev/key/app" target="_blank" rel="noopener noreferrer">申请/管理高德 Key ↗</a></article><article class="settings-card provider-card"><div class="settings-card-heading"><div><strong>百度地图</strong><small>JSAPI 4.0 / Web Service</small></div><span class="provider-status">{{ baiduKey ? '浏览器已配置' : '待配置' }}</span></div><p class="settings-status-line">浏览器端 Key：<strong>{{ baiduKey ? '已配置' : '未配置' }}</strong><br />服务端 Key：<strong>{{ settingsData?.map?.baidu?.server_key_configured ? '已配置' : '未配置' }}</strong></p><label>浏览器端 Key<input v-model="baiduBrowserKeyInput" type="password" :placeholder="settingsData?.map?.baidu?.browser_key_configured ? '已配置，输入新 Key 可替换' : '用于浏览器端地图'" autocomplete="off" /></label><label>服务端 Key<input v-model="baiduServerKeyInput" type="password" placeholder="留空保持当前值" autocomplete="off" /></label><a href="https://lbsyun.baidu.com/apiconsole/key" target="_blank" rel="noopener noreferrer">申请/管理百度 Key ↗</a></article></div><p class="settings-help">保存地图 Key 到数据库后，浏览器端 Key 会立即生效；服务端 Key 和安全密钥只返回配置状态，不会回显原文。</p><div class="settings-actions"><button class="primary-action" type="button" :disabled="settingsSaving" @click="saveMapKeys">{{ settingsSaving ? '保存中…' : '保存地图 Key 到数据库' }}</button></div><p v-if="settingsMessage" class="settings-feedback">{{ settingsMessage }}</p>
               </section>
 
