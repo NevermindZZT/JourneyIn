@@ -717,6 +717,7 @@ flowchart TD
         SettingsModal[系统设置与多数据源配置弹窗]
         HistoryModal[历史版本管理与回滚弹窗]
         PosterModal[TripPosterModal.vue: 朋友圈海报生成器]
+        AnimationModal[TripAnimationModal.vue: 动态路线与视频工坊]
     end
 
     subgraph ActionDialogs [导入与分享交互体系]
@@ -743,6 +744,7 @@ flowchart TD
 - **`ShareTransferDialog.vue`**：在首页行程列表右上角提供统一收口操作面板，下设“导入 JSON 文件”、“从分享链接导入”与“多行程批量分享”。
 - **`ShareBundleDialog.vue`**：支持勾选多条行程一次性生成分享包链接。复用规范的 `.modal-close` 关闭按钮，针对长标题采用弹性省略布局，保障 18x18px 复选框与 76px 撤销按钮永不变形。
 - **`ShareImportDialog.vue`**：接收并解析对端分享 URL 或 JSON，以表格呈现各行程的包含天数、点数、已导入状态及警告信息，提供二次确认提交。
+- **`TripAnimationModal.vue`**：行程动态路线动画工坊。基于 SVG SMIL 规范与 HTML5 Canvas MediaRecorder，提供交互式 60fps 路线生长绘制预览、智能载具沿途切线自动转向漫游、站点到达弹跳与波纹、多底图（暗夜/明亮/卫星/透底）切换，支持一键导出免依赖自播 .svg 动画及高清 MP4/WebM 短视频。
 
 ### 7.2 Material 3 语义设计与主题适配
 

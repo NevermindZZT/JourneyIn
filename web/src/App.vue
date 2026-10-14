@@ -12,6 +12,7 @@ import PrototypePreview from './PrototypePreview.vue'
 import UiSelect from './UiSelect.vue'
 import MarkdownEditor from './MarkdownEditor.vue'
 import TripPosterModal from './TripPosterModal.vue'
+import TripAnimationModal from './TripAnimationModal.vue'
 import BrandLogo from './BrandLogo.vue'
 import MapLoadingState from './MapLoadingState.vue'
 import ShareBundleDialog from './ShareBundleDialog.vue'
@@ -524,6 +525,7 @@ const shareExpiryType = ref<'1d' | '7d' | '30d' | '90d' | 'permanent' | 'custom'
 const shareCustomDays = ref(30)
 const shareGenerating = ref(false)
 const posterModalOpen = ref(false)
+const animationModalOpen = ref(false)
 const actionLoading = ref(false)
 const settingsOpen = ref(false)
 type SettingsSection = 'appearance' | 'connection' | 'maps' | 'weather' | 'photos' | 'search' | 'sharing' | 'mcp' | 'users' | 'about'
@@ -5784,12 +5786,22 @@ const effectiveTheme = computed<'light' | 'dark'>(() => {
 function openTripPoster() {
   posterModalOpen.value = true
 }
+function openTripAnimation() {
+  animationModalOpen.value = true
+}
 async function openPosterForTrip(trip: TripSummary) {
   tripMenuID.value = ''
   if (selected.value?.id !== trip.id) {
     await selectTrip(trip)
   }
   posterModalOpen.value = true
+}
+async function openAnimationForTrip(trip: TripSummary) {
+  tripMenuID.value = ''
+  if (selected.value?.id !== trip.id) {
+    await selectTrip(trip)
+  }
+  animationModalOpen.value = true
 }
 async function revokeShare() {
   if (!isAdmin.value || !shareID.value || !window.confirm('确认撤销当前在线分享吗？撤销后链接将无法访问。')) return
@@ -6429,7 +6441,7 @@ onUnmounted(() => {
                   <span class="trip-card-arrow">›</span>
                 </button>
                 <button class="trip-card-menu-button" type="button" :aria-expanded="tripMenuID === trip.id" :aria-label="'打开 ' + trip.title + ' 更多操作'" @click.stop="toggleTripMenu(trip.id)">⋯</button>
-                <div v-if="tripMenuID === trip.id" class="trip-card-menu" role="menu"><button type="button" role="menuitem" @click="openPosterForTrip(trip)"><IonIcon :icon="imageOutline" /> 分享行程海报</button><button v-if="trip.can_edit || isAdmin" type="button" role="menuitem" @click="toggleTripAtlasFromList(trip)"><IonIcon :icon="footstepsOutline" /> {{ trip.show_in_atlas === false ? '加入足迹漫游' : '从足迹中隐藏' }}</button><button v-if="trip.can_edit || isAdmin" type="button" role="menuitem" @click="editTripDetailsFromList(trip)"><IonIcon :icon="createOutline" /> 编辑行程信息</button><button type="button" role="menuitem" @click="openTripHistoryFromList(trip)"><span aria-hidden="true">↶</span> 版本历史</button><button v-if="trip.can_edit || isAdmin" type="button" role="menuitem" class="danger-menu-item" @click="tripMenuID = ''; deleteTrip(trip)"><IonIcon :icon="closeOutline" /> 删除行程</button></div>
+                <div v-if="tripMenuID === trip.id" class="trip-card-menu" role="menu"><button type="button" role="menuitem" @click="openPosterForTrip(trip)"><IonIcon :icon="imageOutline" /> 分享行程海报</button><button type="button" role="menuitem" @click="openAnimationForTrip(trip)"><span aria-hidden="true">▶</span> 行程路线动画</button><button v-if="trip.can_edit || isAdmin" type="button" role="menuitem" @click="toggleTripAtlasFromList(trip)"><IonIcon :icon="footstepsOutline" /> {{ trip.show_in_atlas === false ? '加入足迹漫游' : '从足迹中隐藏' }}</button><button v-if="trip.can_edit || isAdmin" type="button" role="menuitem" @click="editTripDetailsFromList(trip)"><IonIcon :icon="createOutline" /> 编辑行程信息</button><button type="button" role="menuitem" @click="openTripHistoryFromList(trip)"><span aria-hidden="true">↶</span> 版本历史</button><button v-if="trip.can_edit || isAdmin" type="button" role="menuitem" class="danger-menu-item" @click="tripMenuID = ''; deleteTrip(trip)"><IonIcon :icon="closeOutline" /> 删除行程</button></div>
               </article>
             </div>
             </div>
@@ -6764,7 +6776,7 @@ onUnmounted(() => {
                   <div v-if="visibleStops.length" class="redesign-stop-list"><article v-for="stop in visibleStops" :key="stop.id" class="redesign-stop-row" :class="{ selected: selectedStopId === stop.id, 'reorder-active': reorderMode, 'location-missing': !pointFor(stop), 'route-excluded': stop.exclude_from_route }"><button class="redesign-stop-main" type="button" @click="selectPlanningPointFromList(stop)"><span class="stop-number">{{ stop.sequence }}</span><span><strong>{{ stop.title }}</strong><small>{{ stopDate(stop) }} · {{ stop.address || '地址待补充' }}</small><small v-if="planningPointWeatherPreview(stop)" class="stop-weather-preview"><span aria-hidden="true">{{ iconForWeatherLabel(planningPointWeatherPreview(stop)) }}</span><span class="stop-weather-text">{{ planningPointWeatherPreview(stop) }}</span></small><small v-if="planningPointDescriptionPreview(stop)" class="stop-description-preview">{{ planningPointDescriptionPreview(stop) }}</small><span class="planning-point-badge-row"><em class="planning-point-kind-badge" :style="{ '--kind-color': planningPointCategoryColor(stop.kind) }">{{ planningPointCategoryLabel(stop.kind) }}</em><em class="stop-location-badge" :class="{ missing: !pointFor(stop) }">{{ locationStatus(stop) }}</em><em v-if="stop.exclude_from_route" class="stop-route-excluded-badge">已排除路线</em></span></span><span class="row-chevron">›</span></button><div v-if="reorderMode && !readOnlyView" class="reorder-actions" @click.stop><button class="reorder-move-button" type="button" :disabled="actionLoading || !canMovePlanningPoint(stop, -1)" :aria-label="'上移规划点 ' + stop.title" @click="movePlanningPoint(stop, -1)"><IonIcon :icon="chevronUpOutline" /></button><button class="reorder-move-button" type="button" :disabled="actionLoading || !canMovePlanningPoint(stop, 1)" :aria-label="'下移规划点 ' + stop.title" @click="movePlanningPoint(stop, 1)"><IonIcon :icon="chevronDownOutline" /></button></div><button v-if="!readOnlyView" class="stop-delete-button" type="button" :aria-label="'删除规划点 ' + stop.title" @click.stop="deletePlanningPoint(stop)">×</button></article></div><p v-else class="muted compact-empty">当前日期还没有规划点。</p>
                   <button v-if="!readOnlyView" class="add-place-action" type="button" @click="openJourneySearch()"><IonIcon :icon="searchOutline" /> 搜索并添加规划点</button>
                 </div>
-                <div v-if="ownerWorkspace" class="panel-data-actions"><button v-if="canCreateTrips" type="button" @click="openImportPicker">导入</button><button type="button" :disabled="actionLoading" @click="downloadTrip">导出 JSON</button><button v-if="isAdmin" type="button" :disabled="actionLoading" @click="openShareModal">{{ shareURL ? '分享管理' : '在线分享' }}</button><button type="button" @click="openTripPoster">生成海报</button></div><div v-else class="panel-data-actions"><button type="button" @click="openTripPoster">保存为图片</button></div>
+                <div v-if="ownerWorkspace" class="panel-data-actions"><button v-if="canCreateTrips" type="button" @click="openImportPicker">导入</button><button type="button" :disabled="actionLoading" @click="downloadTrip">导出 JSON</button><button v-if="isAdmin" type="button" :disabled="actionLoading" @click="openShareModal">{{ shareURL ? '分享管理' : '在线分享' }}</button><button type="button" @click="openTripPoster">生成海报</button><button type="button" class="anim-btn" @click="openTripAnimation">路线动画</button></div><div v-else class="panel-data-actions"><button type="button" @click="openTripPoster">保存为图片</button><button type="button" class="anim-btn" @click="openTripAnimation">路线动画</button></div>
               </div>
             </aside>
 
@@ -6830,7 +6842,7 @@ onUnmounted(() => {
               <div v-if="historyView" class="history-readonly-banner"><span><strong>历史版本 · 只读</strong><small>{{ historyView.label || '保存于 ' + formatDateTime(historyView.created_at) }} · 工作版本 {{ historyView.source_revision }}</small></span><button type="button" @click="exitTripHistory">返回当前版本</button></div>
               <div v-if="error" class="global-error"><IonIcon :icon="cloudOfflineOutline" /><span>{{ error }}</span><button type="button" class="notice-close-btn" aria-label="关闭错误提示" @click="closeError">×</button></div>
               <div v-if="tripDetailsNotice" class="global-notice"><IonIcon :icon="createOutline" /><span>{{ tripDetailsNotice }}</span><button type="button" class="notice-close-btn" aria-label="关闭提示" @click="closeNotice">×</button></div>
-              <div v-if="shareNoticeVisible && shareURL && isAdmin" class="share-banner"><span><strong>{{ shareNoticeTitle }}</strong><a :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><small v-if="shareExpiresAt">有效期至 {{ formatDateTime(shareExpiresAt) }}</small><small v-else class="permanent-badge">永久有效</small><small v-if="shareCopyMessage" class="share-copy-feedback">{{ shareCopyMessage }}</small></span><div class="share-actions"><button type="button" @click="copyShareURL">复制链接</button><button type="button" @click="openShareModal">分享设置</button><button type="button" @click="openTripPoster">生成海报</button><button v-if="shareID" type="button" @click="revokeShare">撤销</button><button type="button" class="notice-close-btn" aria-label="关闭分享提示" @click="dismissShareNotice">×</button></div></div>
+              <div v-if="shareNoticeVisible && shareURL && isAdmin" class="share-banner"><span><strong>{{ shareNoticeTitle }}</strong><a :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><small v-if="shareExpiresAt">有效期至 {{ formatDateTime(shareExpiresAt) }}</small><small v-else class="permanent-badge">永久有效</small><small v-if="shareCopyMessage" class="share-copy-feedback">{{ shareCopyMessage }}</small></span><div class="share-actions"><button type="button" @click="copyShareURL">复制链接</button><button type="button" @click="openShareModal">分享设置</button><button type="button" @click="openTripPoster">生成海报</button><button type="button" @click="openTripAnimation">路线动画</button><button v-if="shareID" type="button" @click="revokeShare">撤销</button><button type="button" class="notice-close-btn" aria-label="关闭分享提示" @click="dismissShareNotice">×</button></div></div>
             </section>
           </section>
         </main>
@@ -7213,7 +7225,7 @@ onUnmounted(() => {
 
               <section v-else-if="settingsSection === 'sharing'" class="settings-page-section">
                 <div class="settings-section-heading"><span class="eyebrow">ONLINE SHARING</span><h3>在线分享</h3><p>集中管理当前行程的只读分享链接；分享状态不会遮挡地图。</p></div>
-                <div class="settings-card settings-share-card"><div class="settings-card-heading"><div><strong>{{ selected?.title || '当前行程' }}</strong><small>持有链接即可查看当前行程快照</small></div><span class="provider-status">{{ shareURL ? '已分享' : '未分享' }}</span></div><template v-if="selected"><a v-if="shareURL" class="settings-share-url" :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><p v-if="shareExpiresAt" class="settings-share-expiry">有效期至 {{ formatDateTime(shareExpiresAt) }}</p><p v-else-if="shareURL" class="settings-share-expiry settings-share-permanent">永久有效</p><p v-if="!shareURL" class="settings-help">当前行程还没有在线分享；点击下方按钮设置有效期并创建只读链接。</p><div class="settings-actions"><button v-if="shareURL" class="primary-action" type="button" @click="copyShareURL">复制链接</button><button class="secondary-action" type="button" @click="openTripPoster">分享海报</button><button v-if="shareURL" class="secondary-action" type="button" @click="openShareModal">分享设置</button><button v-if="shareURL && shareID" class="secondary-action" type="button" :disabled="actionLoading" @click="revokeShare">撤销分享</button><button v-else class="primary-action" type="button" :disabled="actionLoading" @click="openShareModal">{{ actionLoading ? '创建中…' : '在线分享' }}</button></div><p v-if="shareCopyMessage" class="settings-feedback">{{ shareCopyMessage }}</p></template><p v-else class="settings-help">请先选择一条行程，再管理它的在线分享链接。</p></div>
+                <div class="settings-card settings-share-card"><div class="settings-card-heading"><div><strong>{{ selected?.title || '当前行程' }}</strong><small>持有链接即可查看当前行程快照</small></div><span class="provider-status">{{ shareURL ? '已分享' : '未分享' }}</span></div><template v-if="selected"><a v-if="shareURL" class="settings-share-url" :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><p v-if="shareExpiresAt" class="settings-share-expiry">有效期至 {{ formatDateTime(shareExpiresAt) }}</p><p v-else-if="shareURL" class="settings-share-expiry settings-share-permanent">永久有效</p><p v-if="!shareURL" class="settings-help">当前行程还没有在线分享；点击下方按钮设置有效期并创建只读链接。</p><div class="settings-actions"><button v-if="shareURL" class="primary-action" type="button" @click="copyShareURL">复制链接</button><button class="secondary-action" type="button" @click="openTripPoster">分享海报</button><button class="secondary-action" type="button" @click="openTripAnimation">路线动画</button><button v-if="shareURL" class="secondary-action" type="button" @click="openShareModal">分享设置</button><button v-if="shareURL && shareID" class="secondary-action" type="button" :disabled="actionLoading" @click="revokeShare">撤销分享</button><button v-else class="primary-action" type="button" :disabled="actionLoading" @click="openShareModal">{{ actionLoading ? '创建中…' : '在线分享' }}</button></div><p v-if="shareCopyMessage" class="settings-feedback">{{ shareCopyMessage }}</p></template><p v-else class="settings-help">请先选择一条行程，再管理它的在线分享链接。</p></div>
                 <div class="settings-note"><span class="settings-note-mark">i</span><span>分享链接是只读快照，默认有效期为 7 天。撤销后，持有链接的人将无法继续查看。</span></div>
               </section>
 
@@ -7698,6 +7710,12 @@ onUnmounted(() => {
         :current-theme="effectiveTheme"
         @close="posterModalOpen = false"
         @create-share="createShare"
+      />
+      <TripAnimationModal
+        :is-open="animationModalOpen"
+        :trip="tripDocument"
+        :current-theme="effectiveTheme"
+        @close="animationModalOpen = false"
       />
     </div>
   </IonApp>
