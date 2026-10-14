@@ -413,5 +413,5 @@ JourneyIn 采用 [MIT License](LICENSE) 开源协议。完整许可文本见仓�
 
 方案与实现约束：
 
-- plan.md
+- docs/ARCHITECTURE.md
 - AGENTS.md

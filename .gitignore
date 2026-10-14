@@ -11,9 +11,8 @@ web/dist/assets/
 web/dist/bmap-smoke.html
 
 # Local agent and planning artifacts
-/plan.md
-/AGENTS.md
 /.planning/
 /plans/
-*.plan.md
 .dsh
+
+dev.ps1
