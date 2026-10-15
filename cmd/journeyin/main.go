@@ -20,6 +20,7 @@ import (
 	"journeyin/internal/application"
 	"journeyin/internal/collaboration"
 	journeymaps "journeyin/internal/maps"
+	"journeyin/internal/monitor"
 	"journeyin/internal/photos"
 	"journeyin/internal/security"
 	journeyshare "journeyin/internal/share"
@@ -184,6 +185,15 @@ func main() {
 	weatherService := weather.NewService(weatherRegistry, qweatherProvider, caiyunProvider, openmeteoProvider, weatherCache, defaultWeatherProvider)
 	app.SetWeatherService(weatherService)
 	api.SetWeatherService(weatherService)
+
+	monitorService := monitor.NewService(database, weatherService, logger)
+	api.SetMonitorService(monitorService)
+	go func() {
+		time.Sleep(2 * time.Second)
+		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		_ = monitorService.EvaluateAll(bgCtx)
+	}()
 
 	mcpToken := strings.TrimSpace(settingValue(ctx, database, "mcp.token", os.Getenv("JOURNEYIN_MCP_TOKEN")))
 	if !isLoopback(listen) && mcpToken == "" && !authenticator.Enabled() {

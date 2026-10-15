@@ -5,7 +5,7 @@ import {
 } from '@ionic/vue'
 import BMapLoader from '@baidumap/jsapi-loader'
 import AMapLoader from '@amap/amap-jsapi-loader'
-import { addOutline, chevronBackOutline, chevronDownOutline, chevronForwardOutline, chevronUpOutline, closeOutline, cloudOfflineOutline, copyOutline, createOutline, eyeOffOutline, eyeOutline, footstepsOutline, imageOutline, linkOutline, logInOutline, mapOutline, menuOutline, navigateOutline, partlySunnyOutline, refreshOutline, searchOutline, settingsOutline, sunnyOutline } from 'ionicons/icons'
+import { addOutline, chevronBackOutline, notificationsOutline, radioOutline, chevronDownOutline, chevronForwardOutline, chevronUpOutline, closeOutline, cloudOfflineOutline, copyOutline, createOutline, eyeOffOutline, eyeOutline, footstepsOutline, imageOutline, linkOutline, logInOutline, mapOutline, menuOutline, navigateOutline, partlySunnyOutline, refreshOutline, searchOutline, settingsOutline, sunnyOutline } from 'ionicons/icons'
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 import PrototypePreview from './PrototypePreview.vue'
@@ -13,6 +13,8 @@ import UiSelect from './UiSelect.vue'
 import MarkdownEditor from './MarkdownEditor.vue'
 import TripPosterModal from './TripPosterModal.vue'
 import TripAnimationModal from './TripAnimationModal.vue'
+import TravelRadarView, { type MonitorItem } from './TravelRadarView.vue'
+import MonitorEditModal, { type MonitorFormData } from './MonitorEditModal.vue'
 import BrandLogo from './BrandLogo.vue'
 import MapLoadingState from './MapLoadingState.vue'
 import ShareBundleDialog from './ShareBundleDialog.vue'
@@ -609,7 +611,7 @@ const panelOpen = ref(localStorage.getItem('journeyin.panelOpen') !== 'false')
 const panelCollapsed = ref(localStorage.getItem('journeyin.panelCollapsed') === 'true')
 const mobileMapToolsOpen = ref(false)
 const detailCollapsed = ref(localStorage.getItem('journeyin.detailCollapsed') === 'true')
-const tripView = ref<'list' | 'detail' | 'atlas'>('list')
+const tripView = ref<'list' | 'detail' | 'atlas' | 'radar'>('list')
 type SheetBreakpoint = 'peek' | 'half' | 'expanded'
 type JourneyLayer = 'list' | 'trip' | 'stop' | 'substop'
 const sheetBreakpoint = ref<SheetBreakpoint>('half')
@@ -4091,6 +4093,131 @@ function formatPhotoTime(val?: string) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')
 }
 
+
+// --- 旅行时机雷达 (Travel Opportunity Radar) 状态与方法 ---
+const radarSummary = ref<{ total_monitors: number; recommended_count: number; top_opportunity?: any; top_place_name?: string } | null>(null)
+const monitorEditModalOpen = ref(false)
+const monitorEditInitialData = ref<MonitorFormData | null>(null)
+const travelRadarViewRef = ref<any>(null)
+
+async function loadRadarSummary() {
+  try {
+    const res = await apiFetch('/api/v1/monitors/radar-summary')
+    if (res.ok) {
+      radarSummary.value = await res.json()
+    }
+  } catch {
+    // best effort
+  }
+}
+
+function navigateToRadar() {
+  historyOpen.value = false
+  historyView.value = null
+  selected.value = null
+  tripDocument.value = null
+  tripView.value = 'radar'
+  selectedStopId.value = ''
+  selectedSubStopId.value = ''
+  panelOpen.value = false
+  mobileMapToolsOpen.value = false
+  tripMenuID.value = ''
+  detailMoreOpen.value = false
+  resetMapSDK()
+  void loadRadarSummary()
+  if (travelRadarViewRef.value) {
+    void travelRadarViewRef.value.loadMonitors()
+  }
+}
+
+function openNewMonitor() {
+  monitorEditInitialData.value = null
+  monitorEditModalOpen.value = true
+}
+
+function openEditMonitor(item: MonitorItem) {
+  monitorEditInitialData.value = {
+    id: item.id,
+    title: item.title,
+    place_name: item.place_name,
+    lat: item.lat,
+    lng: item.lng,
+    crs: item.crs,
+    criteria: item.criteria,
+    origin_city: item.origin_city,
+    max_budget: item.max_budget,
+  }
+  monitorEditModalOpen.value = true
+}
+
+function addStopToMonitor(stop: Stop | SubStop | null) {
+  if (!stop) return
+  const pt = pointFor(stop)
+  monitorEditInitialData.value = {
+    title: `${stop.title} · 最佳游玩时机监控`,
+    place_name: stop.title,
+    lat: pt?.lat || 0,
+    lng: pt?.lng || 0,
+    crs: pt?.crs || 'gcj02',
+    criteria: {
+      months: [5, 6, 7, 8, 9, 10],
+      stargazing_mode: false,
+      max_leave_days: 1,
+    },
+  }
+  monitorEditModalOpen.value = true
+}
+
+function addCandidateToMonitor(candidate: PlaceCandidate) {
+  monitorEditInitialData.value = {
+    title: `${candidate.name} · 最佳游玩时机监控`,
+    place_name: candidate.name,
+    lat: candidate.location.lat,
+    lng: candidate.location.lng,
+    crs: candidate.location.crs || 'gcj02',
+    criteria: {
+      months: [5, 6, 7, 8, 9, 10],
+      stargazing_mode: false,
+      max_leave_days: 1,
+    },
+  }
+  monitorEditModalOpen.value = true
+}
+
+async function handleSaveMonitor(data: MonitorFormData) {
+  try {
+    const isEdit = Boolean(data.id)
+    const url = isEdit ? `/api/v1/monitors/${data.id}` : '/api/v1/monitors'
+    const method = isEdit ? 'PATCH' : 'POST'
+    const res = await apiFetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!res.ok) {
+      const err = await res.json() as { error?: { message?: string } }
+      throw new Error(err.error?.message || '保存监控规则失败')
+    }
+    monitorEditModalOpen.value = false
+    monitorEditInitialData.value = null
+    await loadRadarSummary()
+    if (travelRadarViewRef.value) {
+      await travelRadarViewRef.value.loadMonitors()
+    }
+    settingsMessage.value = isEdit ? '监控规则已更新' : '已添加新的景点时机监控规则'
+  } catch (err) {
+    alert(err instanceof Error ? err.message : '保存监控规则失败')
+  }
+}
+
+async function handleRadarOpenTrip(tripID: string) {
+  await loadTrips()
+  const target = trips.value.find(t => t.id === tripID)
+  if (target) {
+    await selectTrip(target)
+  }
+}
+
 function navigateToAtlas() {
   historyOpen.value = false
   historyView.value = null
@@ -6350,7 +6477,8 @@ async function login() {
     authOpen.value = false; loginPassword.value = ''; loginMessage.value = ''; settingsMessage.value = '登录成功'; await loadCurrentUser(); await loadTrips()
   } catch (cause) { loginMessage.value = cause instanceof Error ? cause.message : '登录失败' } finally { loginLoading.value = false }
 }
-function saveAuth() { authTokenInput.value = authTokenInput.value.trim(); if (authTokenInput.value) localStorage.setItem('journeyin.apiToken', authTokenInput.value); else localStorage.removeItem('journeyin.apiToken'); authOpen.value = false; settingsMessage.value = '兼容 API Token 已保存'; void loadCurrentUser().then(() => loadTrips()) }
+function saveAuth() { authTokenInput.value = authTokenInput.value.trim(); if (authTokenInput.value) localStorage.setItem('journeyin.apiToken', authTokenInput.value); else localStorage.removeItem('journeyin.apiToken'); authOpen.value = false; settingsMessage.value = '兼容 API Token 已保存'; void loadCurrentUser().then(() => loadTrips())
+  void loadRadarSummary() }
 async function logout() { authTokenInput.value = ''; localStorage.removeItem('journeyin.apiToken'); await fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => undefined); currentUser.value = null; authOpen.value = false; settingsMessage.value = '已退出登录'; await loadCurrentUser(); await loadTrips() }
 function applyTheme() { const actual = theme.value === 'system' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : theme.value; document.documentElement.dataset.theme = actual; localStorage.setItem('journeyin.theme', theme.value) }
 function setTheme(value: Theme) { theme.value = value; applyTheme() }
@@ -6401,6 +6529,7 @@ onUnmounted(() => {
               <button v-if="ownerWorkspace" class="rail-nav-item" :class="{ selected: tripView === 'list' }" type="button" @click="navigateToList()"><IonIcon :icon="menuOutline" /><span>行程</span></button>
               <button class="rail-nav-item" :class="{ selected: tripView === 'detail' }" type="button" :disabled="!selected" @click="selected ? navigateToTrip(selected, 'replace') : undefined"><IonIcon :icon="mapOutline" /><span>地图</span></button>
               <button v-if="ownerWorkspace" class="rail-nav-item" :class="{ selected: tripView === 'atlas' }" type="button" @click="navigateToAtlas()"><IonIcon :icon="footstepsOutline" /><span>足迹</span></button>
+              <button v-if="ownerWorkspace" class="rail-nav-item" :class="{ selected: tripView === 'radar' }" type="button" @click="navigateToRadar()"><IonIcon :icon="radioOutline" /><span>雷达</span><em v-if="radarSummary?.recommended_count" class="rail-badge">{{ radarSummary.recommended_count }}</em></button>
             </nav>
             <div class="rail-spacer"></div>
             <a v-if="ownerWorkspace" class="rail-nav-item rail-link" :href="GITHUB_URL" target="_blank" rel="noopener noreferrer"><IonIcon :icon="linkOutline" /><span>项目</span></a>
@@ -6415,8 +6544,19 @@ onUnmounted(() => {
                 <h1 id="trip-list-title">你的行程</h1>
                 <p class="list-page-subtitle">把下一段旅程放在地图上</p>
               </div>
-              <div class="list-page-actions">
+              <div v-if="radarSummary?.top_opportunity && radarSummary.recommended_count > 0" class="home-radar-banner" @click="navigateToRadar">
+              <div class="banner-badge">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 23c-4.97 0-9-4.03-9-9 0-3.64 2.2-6.77 5.38-8.11C8.75 8.13 9 10.45 9 11.5c0 1.25.54 2.39 1.41 3.17.65.59 1.48.97 2.39 1.07.72.08 1.45-.11 2.05-.51.87-.58 1.4-1.57 1.4-2.64 0-1.22-.39-2.35-1.07-3.29C17.2 11.08 19 13.56 19 16.5c0 3.59-2.91 6.5-6.5 6.5h-.5z"/></svg>
+                <span>旅行雷达良机</span>
+              </div>
+              <div class="banner-body">
+                <strong>{{ radarSummary.top_place_name }}</strong> · {{ radarSummary.top_opportunity.details?.summary || '近期迎来绝佳游玩窗口' }}
+              </div>
+              <button type="button" class="banner-action-btn">查看雷达 ↗</button>
+            </div>
+            <div class="list-page-actions">
                 <button class="secondary-action" type="button" @click="navigateToAtlas()"><IonIcon :icon="footstepsOutline" /> 足迹漫游</button>
+                <button class="secondary-action" type="button" @click="navigateToRadar()"><IonIcon :icon="radioOutline" /> 旅行雷达 <span v-if="radarSummary?.recommended_count" class="rail-badge">{{ radarSummary.recommended_count }}</span></button>
                 <button v-if="canCreateTrips || canShareBundles" class="secondary-action" type="button" @click="shareTransferDialogOpen = true"><IonIcon :icon="linkOutline" /> 导入与分享</button>
                 <button v-if="canCreateTrips" class="primary-action" type="button" @click="newTripOpen = true"><IonIcon :icon="addOutline" /> 新建行程</button>
               </div>
@@ -6689,6 +6829,21 @@ onUnmounted(() => {
             </div>
           </section>
 
+          <!-- 旅行雷达 (Radar) 心愿时机大盘视图 -->
+          <section
+            v-else-if="tripView === 'radar'"
+            class="radar-workspace-view"
+            aria-label="旅行时机雷达"
+          >
+            <TravelRadarView
+              ref="travelRadarViewRef"
+              :api-fetch="apiFetch"
+              @new-monitor="openNewMonitor"
+              @edit-monitor="openEditMonitor"
+              @open-trip="handleRadarOpenTrip"
+            />
+          </section>
+
           <section
             v-else
             class="journey-workspace"
@@ -6750,7 +6905,7 @@ onUnmounted(() => {
                 <div class="search-panel-heading"><button class="inline-back-button" type="button" @click="closeJourneySearch"><span>‹</span> 返回行程</button><span class="eyebrow">{{ locationSearchMode === 'repair' ? 'RELOCATE POINT' : searchParentStopId ? 'ADD CHILD POINT' : 'ADD A PLACE' }}</span><h2>{{ locationSearchMode === 'repair' ? '重新定位规划点' : searchParentStopId ? '添加子规划点' : '搜索地点' }}</h2><p>{{ locationSearchMode === 'repair' ? '为“' + (findPlanningPoint(locationSearchTargetID)?.title || '当前规划点') + '”查找新的坐标；名称可以一起调整。' : searchParentStopId && selectedStop ? '添加到：' + selectedStop.title : '搜索结果会保留名称、地址、坐标系和 Provider 引用。' }}</p></div>
                 <form class="redesign-search-form" @submit.prevent="searchPlaces"><label>{{ locationSearchMode === 'repair' ? '搜索关键词' : '地点或关键词' }}<input v-model="searchQuery" :placeholder="locationSearchMode === 'repair' ? '可改用别名、完整地址或附近地标' : '例如：西湖、咖啡馆、观景台'" autocomplete="off" /></label><label v-if="locationSearchMode === 'repair'" class="location-search-title-field">保存名称<input v-model="locationSearchTitleDraft" maxlength="200" placeholder="保留当前名称或改成更准确的名称" autocomplete="off" /></label><label>城市/区域（可选）<input v-model="searchRegion" placeholder="例如：杭州市西湖区" autocomplete="address-level2" /></label><label class="select-field">搜索类型<UiSelect v-model="searchCategory" aria-label="搜索类型" :options="searchCategoryOptions" /></label><label v-if="locationSearchMode === 'add'" class="select-field">规划点标签<UiSelect v-model="searchPointCategory" aria-label="新增规划点标签" :options="planningPointCategoryOptions" /></label><button class="primary-action search-submit" type="submit" :disabled="searchLoading"><IonIcon :icon="searchOutline" /> {{ searchLoading ? '搜索中…' : locationSearchMode === 'repair' ? '重新搜索候选' : '搜索地点' }}</button></form>
                 <p class="search-help">{{ locationSearchMode === 'repair' ? '只会在你点击“替换位置”后写入；候选会显示完整地址、Provider 和 CRS。位置变更会清除受影响路线与该点天气。' : '先查询本地地点目录，未命中后调用当前优先 Provider；选择结果后才会保存到 Trip。' }}</p><p v-if="searchMessage" class="inline-message">{{ searchMessage }}</p>
-                <div class="search-results"><article v-for="(result, index) in searchResults" :key="result.id || result.name + index" class="search-result" :class="{ selected: selectedSearchResultIndex === index }" @click="selectSearchResult(index)"><div><strong>{{ result.name }}</strong><span>{{ result.address || '地址待补充' }}</span><small v-if="result.location">{{ candidateCoordinateCRS(result) }} · {{ result.location.lat.toFixed(5) }}, {{ result.location.lng.toFixed(5) }} · {{ result.provider || 'Provider 未知' }}</small></div><div class="search-result-actions"><button class="text-action search-locate-button" type="button" @click.stop="selectSearchResult(index)">定位</button><button class="secondary-action compact-action" type="button" :disabled="actionLoading" @click.stop="applySearchResult(result)">{{ locationSearchMode === 'repair' ? '替换位置' : searchParentStopId ? '添加子点' : '添加' }}</button></div></article></div>
+                <div class="search-results"><article v-for="(result, index) in searchResults" :key="result.id || result.name + index" class="search-result" :class="{ selected: selectedSearchResultIndex === index }" @click="selectSearchResult(index)"><div><strong>{{ result.name }}</strong><span>{{ result.address || '地址待补充' }}</span><small v-if="result.location">{{ candidateCoordinateCRS(result) }} · {{ result.location.lat.toFixed(5) }}, {{ result.location.lng.toFixed(5) }} · {{ result.provider || 'Provider 未知' }}</small></div><div class="search-result-actions"><button class="text-action search-locate-button" type="button" @click.stop="selectSearchResult(index)">定位</button><button class="secondary-action compact-action" type="button" :disabled="actionLoading" @click.stop="applySearchResult(result)">{{ locationSearchMode === 'repair' ? '替换位置' : searchParentStopId ? '添加子点' : '添加' }}</button><button class="btn-search-monitor" type="button" title="加入时机监控" @click.stop="addCandidateToMonitor(result)"><IonIcon :icon="notificationsOutline" /></button></div></article></div>
               </div>
 
               <div v-else class="panel-scroll itinerary-scroll">
@@ -6787,7 +6942,7 @@ onUnmounted(() => {
                 <p class="detail-kicker"><span>{{ selectedSubStop ? 'SUB-STOP ' + selectedSubStop.sequence : 'STOP ' + selectedStop.sequence }}</span><span class="planning-point-kind-badge" :style="{ '--kind-color': planningPointCategoryColor(selectedTarget?.kind) }">{{ planningPointCategoryLabel(selectedTarget?.kind) }}</span></p>
                 <h1>{{ selectedTarget?.title }}</h1><p class="detail-address">{{ selectedTarget?.address || '地址待解析' }}</p><div class="detail-date-row"><p class="detail-date">{{ stopDate(selectedTarget || selectedStop) }}<span v-if="stopTime(selectedTarget || selectedStop)"> · {{ stopTime(selectedTarget || selectedStop) }}</span></p><button v-if="!readOnlyView && !selectedSubStop" class="text-action detail-date-edit" type="button" @click="beginEditStopDate">修改日期</button><span v-if="selectedSubStop" class="detail-date-follow-note">跟随主规划点</span></div><div v-if="stopDateEditing && !selectedSubStop && !readOnlyView" class="detail-date-editor"><label class="select-field">移动到日期<UiSelect v-model="stopDateDraftDayID" aria-label="规划点目标日期" :options="tripDayOptions" /></label><div class="editor-actions"><button class="secondary-action compact-action" type="button" @click="cancelEditStopDate">取消</button><button class="primary-action compact-action" type="button" :disabled="stopDateSaving" @click="saveStopDate">{{ stopDateSaving ? '保存中…' : '保存日期' }}</button></div></div>
                 <div class="detail-location" :class="{ 'location-missing': !pointFor(selectedTarget || selectedStop) }"><div class="detail-location-heading"><span><span class="location-status-icon" :class="{ missing: !pointFor(selectedTarget || selectedStop) }" aria-hidden="true">{{ pointFor(selectedTarget || selectedStop) ? '●' : '!' }}</span>{{ locationStatus(selectedTarget || selectedStop) }}</span><span class="location-state-label">{{ pointFor(selectedTarget || selectedStop) ? '可用于路线与导航' : '需要处理' }}</span></div><small v-if="pointFor(selectedTarget || selectedStop)">{{ pointFor(selectedTarget || selectedStop)?.crs }} · {{ pointFor(selectedTarget || selectedStop)?.lat.toFixed(6) }}, {{ pointFor(selectedTarget || selectedStop)?.lng.toFixed(6) }}</small><small v-else>暂无可靠坐标，路线和导航暂不可用。</small><small v-if="pointFor(selectedTarget || selectedStop)">来源：{{ locationSource(selectedTarget || selectedStop) }}</small><div v-if="!readOnlyView" class="detail-location-actions"><button class="text-action" type="button" @click="beginEditPoint">编辑名称/地址</button><button class="text-action" type="button" @click="openPointSearch(selectedTarget || selectedStop)">重新搜索</button><button class="text-action" type="button" :disabled="!mapReady" @click="startMapPickForPoint(selectedTarget || selectedStop)">地图选点</button></div></div>
-                <section v-if="!selectedSubStop" class="detail-route-participation" :class="{ excluded: selectedStop.exclude_from_route }"><div><strong>路线规划</strong><small>{{ selectedStop.exclude_from_route ? '此规划点仍会显示在地图和行程中，但生成路线时会跳过。' : '此规划点会作为路线途经点参与生成。' }}</small></div><button v-if="!readOnlyView" type="button" :aria-pressed="selectedStop.exclude_from_route ? 'true' : 'false'" @click="toggleRouteExclusion">{{ selectedStop.exclude_from_route ? '加入路线' : '排除路线' }}</button></section><div class="detail-primary-actions"><button class="detail-navigation-button" type="button" :disabled="!pointFor(selectedTarget || selectedStop)" @click="openNavigation('amap')"><IonIcon :icon="navigateOutline" /> 高德导航</button><button class="detail-navigation-button" type="button" :disabled="!pointFor(selectedTarget || selectedStop)" @click="openNavigation('baidu')"><IonIcon :icon="navigateOutline" /> 百度导航</button></div>
+                <section v-if="!selectedSubStop" class="detail-route-participation" :class="{ excluded: selectedStop.exclude_from_route }"><div><strong>路线规划</strong><small>{{ selectedStop.exclude_from_route ? '此规划点仍会显示在地图和行程中，但生成路线时会跳过。' : '此规划点会作为路线途经点参与生成。' }}</small></div><button v-if="!readOnlyView" type="button" :aria-pressed="selectedStop.exclude_from_route ? 'true' : 'false'" @click="toggleRouteExclusion">{{ selectedStop.exclude_from_route ? '加入路线' : '排除路线' }}</button></section><div class="detail-primary-actions"><button class="detail-navigation-button" type="button" :disabled="!pointFor(selectedTarget || selectedStop)" @click="openNavigation('amap')"><IonIcon :icon="navigateOutline" /> 高德导航</button><button class="detail-navigation-button" type="button" :disabled="!pointFor(selectedTarget || selectedStop)" @click="openNavigation('baidu')"><IonIcon :icon="navigateOutline" /> 百度导航</button><button class="detail-navigation-button" type="button" :disabled="!pointFor(selectedTarget || selectedStop)" @click="addStopToMonitor(selectedTarget || selectedStop)"><IonIcon :icon="notificationsOutline" /> 监控时机</button></div>
                 <div class="detail-weather">
                   <IonIcon :icon="sunnyOutline" />
                   <span class="weather-text-wrap">
@@ -7718,5 +7873,12 @@ onUnmounted(() => {
         @close="animationModalOpen = false"
       />
     </div>
-  </IonApp>
+        <MonitorEditModal
+        :is-open="monitorEditModalOpen"
+        :initial-data="monitorEditInitialData"
+        :api-fetch="apiFetch"
+        @close="monitorEditModalOpen = false"
+        @save="handleSaveMonitor"
+      />
+    </IonApp>
 </template>

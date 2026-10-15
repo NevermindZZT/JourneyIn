@@ -18,6 +18,7 @@ import (
 	journeymaps "journeyin/internal/maps"
 	"journeyin/internal/photos"
 	journeyshare "journeyin/internal/share"
+	"journeyin/internal/monitor"
 	"journeyin/internal/store"
 	"journeyin/internal/weather"
 )
@@ -45,6 +46,7 @@ type Server struct {
 	userService          *application.UserService
 	photosService        *photos.Service
 	weatherService       *weather.Service
+	monitorService       *monitor.Service
 	mcpToken             string
 }
 
@@ -105,6 +107,7 @@ func (s *Server) SetUserService(service *application.UserService) {
 }
 func (s *Server) SetPhotoService(service *photos.Service)    { s.photosService = service }
 func (s *Server) SetWeatherService(service *weather.Service) { s.weatherService = service }
+func (s *Server) SetMonitorService(service *monitor.Service) { s.monitorService = service }
 func (s *Server) SetMCPToken(token string)                   { s.mcpToken = strings.TrimSpace(token) }
 
 func (s *Server) Handler() http.Handler {
@@ -165,6 +168,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/share-bundles/{id}/revoke", s.revokeShareBundle)
 	mux.HandleFunc("POST /api/v1/share-import/previews", s.previewShareImport)
 	mux.HandleFunc("POST /api/v1/share-import/commits", s.commitShareImport)
+	mux.HandleFunc("GET /api/v1/monitors", s.listMonitors)
+	mux.HandleFunc("POST /api/v1/monitors", s.createMonitor)
+	mux.HandleFunc("GET /api/v1/monitors/radar-summary", s.getRadarSummary)
+	mux.HandleFunc("GET /api/v1/monitors/{id}", s.getMonitor)
+	mux.HandleFunc("PATCH /api/v1/monitors/{id}", s.updateMonitor)
+	mux.HandleFunc("DELETE /api/v1/monitors/{id}", s.deleteMonitor)
+	mux.HandleFunc("GET /api/v1/monitors/{id}/evaluations", s.getMonitorEvaluations)
+	mux.HandleFunc("POST /api/v1/monitors/{id}/evaluate", s.evaluateMonitor)
+	mux.HandleFunc("POST /api/v1/monitors/{id}/convert-trip", s.convertMonitorToTrip)
 	mux.HandleFunc("GET /s/{token}", s.publicShare)
 	mux.HandleFunc("POST /api/v1/trips/{id}/collaboration-shares", s.createCollaborationShare)
 	mux.HandleFunc("GET /api/v1/trips/{id}/collaboration-shares", s.listCollaborationShares)
