@@ -3057,14 +3057,25 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .home-radar-banner {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  margin: 12px 0 16px;
+  justify-content: space-between;
+  gap: 16px;
+  max-width: 1120px;
+  width: 100%;
+  padding: 12px 20px;
+  margin: 0 auto 22px;
   background: color-mix(in srgb, #ff6b35 12%, var(--surface));
   border: 1px solid color-mix(in srgb, #ff6b35 55%, var(--line));
-  border-radius: 14px;
+  border-radius: 16px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+  box-sizing: border-box;
+}
+
+.home-radar-banner:hover {
+  background: color-mix(in srgb, #ff6b35 18%, var(--surface));
+  border-color: #ff6b35;
+  box-shadow: 0 6px 20px rgba(255, 107, 53, 0.12);
+  transform: translateY(-1px);
 }
 
 .home-radar-banner:hover {

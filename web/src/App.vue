@@ -6544,7 +6544,16 @@ onUnmounted(() => {
                 <h1 id="trip-list-title">你的行程</h1>
                 <p class="list-page-subtitle">把下一段旅程放在地图上</p>
               </div>
-              <div v-if="radarSummary?.top_opportunity && radarSummary.recommended_count > 0" class="home-radar-banner" @click="navigateToRadar">
+              <div class="list-page-actions">
+                <button class="secondary-action" type="button" @click="navigateToAtlas()"><IonIcon :icon="footstepsOutline" /> 足迹漫游</button>
+                <button class="secondary-action" type="button" @click="navigateToRadar()"><IonIcon :icon="radioOutline" /> 旅行雷达 <span v-if="radarSummary?.recommended_count" class="rail-badge">{{ radarSummary.recommended_count }}</span></button>
+                <button v-if="canCreateTrips || canShareBundles" class="secondary-action" type="button" @click="shareTransferDialogOpen = true"><IonIcon :icon="linkOutline" /> 导入与分享</button>
+                <button v-if="canCreateTrips" class="primary-action" type="button" @click="newTripOpen = true"><IonIcon :icon="addOutline" /> 新建行程</button>
+              </div>
+            </header>
+
+            <!-- 首页时机推荐横幅 (大屏独立成行，不与标题和操作按钮争抢同一行) -->
+            <div v-if="radarSummary?.top_opportunity && radarSummary.recommended_count > 0" class="home-radar-banner" @click="navigateToRadar">
               <div class="banner-badge">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 23c-4.97 0-9-4.03-9-9 0-3.64 2.2-6.77 5.38-8.11C8.75 8.13 9 10.45 9 11.5c0 1.25.54 2.39 1.41 3.17.65.59 1.48.97 2.39 1.07.72.08 1.45-.11 2.05-.51.87-.58 1.4-1.57 1.4-2.64 0-1.22-.39-2.35-1.07-3.29C17.2 11.08 19 13.56 19 16.5c0 3.59-2.91 6.5-6.5 6.5h-.5z"/></svg>
                 <span>旅行雷达良机</span>
@@ -6552,15 +6561,8 @@ onUnmounted(() => {
               <div class="banner-body">
                 <strong>{{ radarSummary.top_place_name }}</strong> · {{ radarSummary.top_opportunity.details?.summary || '近期迎来绝佳游玩窗口' }}
               </div>
-              <button type="button" class="banner-action-btn">查看雷达 ↗</button>
+              <button type="button" class="banner-action-btn">查看雷达时机 ↗</button>
             </div>
-            <div class="list-page-actions">
-                <button class="secondary-action" type="button" @click="navigateToAtlas()"><IonIcon :icon="footstepsOutline" /> 足迹漫游</button>
-                <button class="secondary-action" type="button" @click="navigateToRadar()"><IonIcon :icon="radioOutline" /> 旅行雷达 <span v-if="radarSummary?.recommended_count" class="rail-badge">{{ radarSummary.recommended_count }}</span></button>
-                <button v-if="canCreateTrips || canShareBundles" class="secondary-action" type="button" @click="shareTransferDialogOpen = true"><IonIcon :icon="linkOutline" /> 导入与分享</button>
-                <button v-if="canCreateTrips" class="primary-action" type="button" @click="newTripOpen = true"><IonIcon :icon="addOutline" /> 新建行程</button>
-              </div>
-            </header>
 
             <section class="list-summary-bar" aria-label="行程筛选">
               <span>全部行程 <strong>{{ trips.length }}</strong></span>
