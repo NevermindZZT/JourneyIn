@@ -80,6 +80,8 @@ description: 完成从需求确认、环境预检、真实资料检索、高德�
 
 本 Skill 采用模块化架构，各阶段的详细操作指令、代码模板与规范参见子文档：
 
+- 🛰️ **旅行时机雷达与景点监控**：请参考配套技能 [`journeyin-attraction-monitor`](../journeyin-attraction-monitor/SKILL.md)
+  - 目的地适游月份匹配、纯数学天文月相/银河观测时长计算、法定节假日与拼假智能评估，以及通过 `journeyin.convert_monitor_to_trip` 一键将良机转化为 Trip 草案。
 - ⚙️ **环境与依赖配置**：请参考 [`references/env-setup.md`](./references/env-setup.md)
   - 核心能力矩阵、高德地图 Key 配置与探测、百度 CLI/Agent Plan 探测、agent-reach 体检、缺失 Skill 搜索与安装审批流程。
 - 🔍 **资料检索与来源验收**：请参考 [`references/research-workflow.md`](./references/research-workflow.md)

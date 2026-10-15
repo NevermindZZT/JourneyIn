@@ -9,6 +9,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	journeyinroot "journeyin"
 	"journeyin/internal/application"
+	"journeyin/internal/monitor"
+	"journeyin/internal/weather"
 	"journeyin/internal/store"
 )
 
@@ -173,4 +175,161 @@ func TestReadTripToolsReturnCompleteDocument(t *testing.T) {
 		t.Fatalf("get trip history: %v", err)
 	}
 	assertDocument(t, historyResult)
+}
+
+func TestAttractionMonitorMCPTools(t *testing.T) {
+	ctx := context.Background()
+	migrations, err := fs.Sub(journeyinroot.MigrationFS, "migrations")
+	if err != nil {
+		t.Fatalf("sub migrations: %v", err)
+	}
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"), migrations)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer db.Close()
+
+	app := application.NewTripService(db)
+	weatherReg := weather.NewRegistry()
+	weatherSvc := weather.NewService(weatherReg, nil, nil, nil, nil, weather.ProviderAuto)
+	monSvc := monitor.NewService(db, weatherSvc, nil)
+
+	server := NewServer(app, "test", nil)
+	server.SetMonitorService(monSvc)
+
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	serverSession, err := server.mcp.Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatalf("connect server: %v", err)
+	}
+	defer serverSession.Close()
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "test"}, nil)
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("connect client: %v", err)
+	}
+	defer clientSession.Close()
+
+	// 1. Verify tools are declared
+	toolsResult, err := clientSession.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatalf("list tools: %v", err)
+	}
+
+	expectedTools := []string{
+		"journeyin.create_attraction_monitor",
+		"journeyin.list_attraction_monitors",
+		"journeyin.get_attraction_monitor",
+		"journeyin.get_radar_opportunities",
+		"journeyin.convert_monitor_to_trip",
+	}
+
+	for _, expected := range expectedTools {
+		found := false
+		for _, tool := range toolsResult.Tools {
+			if tool.Name == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected tool %s to be registered in MCP server", expected)
+		}
+	}
+
+	// 2. Call journeyin.create_attraction_monitor
+	createRes, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
+		Name: "journeyin.create_attraction_monitor",
+		Arguments: map[string]any{
+			"place_name":       "冷嘎措",
+			"title":            "冷嘎措 · 贡嘎倒影与银河",
+			"lat":               29.58,
+			"lng":               101.78,
+			"crs":               "gcj02",
+			"months":            []int{6, 7, 8, 9, 10},
+			"stargazing_mode":   true,
+			"max_leave_days":    1,
+			"min_duration_days": 2,
+			"max_duration_days": 3,
+			"origin_city":       "成都",
+			"max_budget":        1200,
+		},
+	})
+	if err != nil {
+		t.Fatalf("call create_attraction_monitor: %v", err)
+	}
+	if createRes.IsError {
+		t.Fatalf("create_attraction_monitor returned error: %+v", createRes.Content)
+	}
+
+	createPayload, ok := createRes.StructuredContent.(map[string]any)
+	if !ok {
+		t.Fatalf("expected structured content map, got %T", createRes.StructuredContent)
+	}
+	monitorID, _ := createPayload["monitor_id"].(string)
+	if monitorID == "" {
+		t.Fatalf("expected non-empty monitor_id")
+	}
+
+	// 3. Call journeyin.list_attraction_monitors
+	listRes, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
+		Name: "journeyin.list_attraction_monitors",
+		Arguments: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("call list_attraction_monitors: %v", err)
+	}
+	if listRes.IsError {
+		t.Fatalf("list_attraction_monitors returned error: %+v", listRes.Content)
+	}
+
+	// 4. Call journeyin.get_attraction_monitor
+	getRes, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
+		Name: "journeyin.get_attraction_monitor",
+		Arguments: map[string]any{
+			"monitor_id": monitorID,
+		},
+	})
+	if err != nil {
+		t.Fatalf("call get_attraction_monitor: %v", err)
+	}
+	if getRes.IsError {
+		t.Fatalf("get_attraction_monitor returned error: %+v", getRes.Content)
+	}
+
+	// 5. Call journeyin.get_radar_opportunities
+	radarRes, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
+		Name: "journeyin.get_radar_opportunities",
+		Arguments: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("call get_radar_opportunities: %v", err)
+	}
+	if radarRes.IsError {
+		t.Fatalf("get_radar_opportunities returned error: %+v", radarRes.Content)
+	}
+
+	// 6. Call journeyin.convert_monitor_to_trip
+	convRes, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
+		Name: "journeyin.convert_monitor_to_trip",
+		Arguments: map[string]any{
+			"monitor_id":   monitorID,
+			"window_start": "2026-06-19",
+			"window_end":   "2026-06-21",
+		},
+	})
+	if err != nil {
+		t.Fatalf("call convert_monitor_to_trip: %v", err)
+	}
+	if convRes.IsError {
+		t.Fatalf("convert_monitor_to_trip returned error: %+v", convRes.Content)
+	}
+	convPayload, _ := convRes.StructuredContent.(map[string]any)
+	tripID, _ := convPayload["trip_id"].(string)
+	if tripID == "" {
+		t.Fatalf("expected non-empty trip_id from convert_monitor_to_trip")
+	}
+
+	t.Logf("Successfully executed all 5 attraction monitor MCP tools. Created Trip ID: %s", tripID)
 }

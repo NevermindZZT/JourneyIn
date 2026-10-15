@@ -13,16 +13,22 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"journeyin/internal/application"
 	"journeyin/internal/domain"
+	"journeyin/internal/monitor"
 	journeymaps "journeyin/internal/maps"
 	"journeyin/internal/security"
 	"journeyin/internal/store"
 )
 
 type Server struct {
-	app     *application.TripService
-	version string
-	schema  fs.FS
-	mcp     *mcp.Server
+	app            *application.TripService
+	monitorService *monitor.Service
+	version        string
+	schema         fs.FS
+	mcp            *mcp.Server
+}
+
+func (s *Server) SetMonitorService(svc *monitor.Service) {
+	s.monitorService = svc
 }
 
 type ValidateArgs struct {
@@ -72,6 +78,37 @@ type HistoryGetArgs struct {
 	TripID    string `json:"trip_id"`
 	HistoryID string `json:"history_id"`
 }
+type CreateMonitorArgs struct {
+	PlaceName      string   `json:"place_name"`
+	Title          string   `json:"title,omitempty"`
+	Lat            float64  `json:"lat"`
+	Lng            float64  `json:"lng"`
+	CRS            string   `json:"crs,omitempty"`
+	Months         []int    `json:"months,omitempty"`
+	StargazingMode bool     `json:"stargazing_mode,omitempty"`
+	MaxLeaveDays   int      `json:"max_leave_days,omitempty"`
+	MaxCloudCover  int      `json:"max_cloud_cover,omitempty"`
+	MaxRainProb    int      `json:"max_rain_prob,omitempty"`
+	MinDurationDays int     `json:"min_duration_days,omitempty"`
+	MaxDurationDays int     `json:"max_duration_days,omitempty"`
+	OriginCity     string   `json:"origin_city,omitempty"`
+	MaxBudget      float64  `json:"max_budget,omitempty"`
+}
+
+type ListMonitorsArgs struct {
+	EnabledOnly bool `json:"enabled_only,omitempty"`
+}
+
+type GetMonitorArgs struct {
+	MonitorID string `json:"monitor_id"`
+}
+
+type ConvertMonitorTripArgs struct {
+	MonitorID   string `json:"monitor_id"`
+	WindowStart string `json:"window_start"`
+	WindowEnd   string `json:"window_end"`
+}
+
 type PlanArgs struct {
 	TripID           string                 `json:"trip_id"`
 	ExpectedRevision int                    `json:"expected_revision"`
@@ -131,6 +168,11 @@ func NewServer(app *application.TripService, version string, schema fs.FS) *Serv
 	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.list_trips", Description: "List JourneyIn trips visible to the current connection."}, result.listTrips)
 	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.list_trip_history", Description: "List user-saved read-only history versions for a JourneyIn trip."}, result.listTripHistory)
 	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.get_trip_history", Description: "Read one complete immutable saved JourneyIn Trip history snapshot, including Markdown, days, stops, legs, links, and map data."}, result.getTripHistory)
+	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.create_attraction_monitor", Description: "Create a new attraction opportunity monitor rule with target place name, coordinates, seasonality months, stargazing mode, and holiday constraints. The system automatically monitors future calendar and weather windows to recommend the optimal trip timing."}, result.createAttractionMonitor)
+	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.list_attraction_monitors", Description: "List all monitored attraction rules and their latest opportunity evaluations."}, result.listAttractionMonitors)
+	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.get_attraction_monitor", Description: "Get details of an attraction monitor rule, including its upcoming 45-day evaluation timeline of candidate travel windows (lunar phase, weather, holidays, and scores)."}, result.getAttractionMonitor)
+	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.get_radar_opportunities", Description: "Get travel radar summary and currently recommended optimal travel windows across all monitored attractions."}, result.getRadarOpportunities)
+	mcp.AddTool(server, &mcp.Tool{Name: "journeyin.convert_monitor_to_trip", Description: "Convert a recommended travel window from an attraction monitor directly into a new JourneyIn Trip draft with dates and starting location."}, result.convertMonitorToTrip)
 	result.registerResources()
 	return result
 }
@@ -141,7 +183,7 @@ func (s *Server) HTTPHandler() http.Handler {
 func (s *Server) RunStdio(ctx context.Context) error { return s.mcp.Run(ctx, &mcp.StdioTransport{}) }
 
 func (s *Server) getCapabilities(ctx context.Context, req *mcp.CallToolRequest, input struct{}) (*mcp.CallToolResult, map[string]any, error) {
-	return nil, map[string]any{"version": s.version, "schema_versions": []int{1}, "features": map[string]any{"preview_merge": true, "merge_patch_version": 3}, "tools": []string{"journeyin.get_capabilities", "journeyin.validate_trip", "journeyin.preview_save_trip", "journeyin.commit_save_trip", "journeyin.plan_trip", "journeyin.refresh_routes", "journeyin.get_trip", "journeyin.list_trips", "journeyin.list_trip_history", "journeyin.get_trip_history"}, "resources": []string{"journeyin://schema/trip/v1", "journeyin://trips/{trip_id}", "journeyin://trips/{trip_id}/history/{history_id}"}, "map_providers": []string{"baidu", "amap"}}, nil
+	return nil, map[string]any{"version": s.version, "schema_versions": []int{1}, "features": map[string]any{"preview_merge": true, "merge_patch_version": 3}, "tools": []string{"journeyin.get_capabilities", "journeyin.validate_trip", "journeyin.preview_save_trip", "journeyin.commit_save_trip", "journeyin.plan_trip", "journeyin.refresh_routes", "journeyin.get_trip", "journeyin.list_trips", "journeyin.list_trip_history", "journeyin.get_trip_history", "journeyin.create_attraction_monitor", "journeyin.list_attraction_monitors", "journeyin.get_attraction_monitor", "journeyin.get_radar_opportunities", "journeyin.convert_monitor_to_trip"}, "resources": []string{"journeyin://schema/trip/v1", "journeyin://trips/{trip_id}", "journeyin://trips/{trip_id}/history/{history_id}"}, "map_providers": []string{"baidu", "amap"}}, nil
 }
 
 func (s *Server) validateTrip(ctx context.Context, req *mcp.CallToolRequest, input ValidateArgs) (*mcp.CallToolResult, ValidateOutput, error) {
@@ -316,4 +358,193 @@ func hasErrors(issues []domain.ValidationIssue) bool {
 		}
 	}
 	return false
+}
+
+func (s *Server) createAttractionMonitor(ctx context.Context, req *mcp.CallToolRequest, input CreateMonitorArgs) (*mcp.CallToolResult, map[string]any, error) {
+	if s.monitorService == nil {
+		return nil, nil, errors.New("monitor service is not configured")
+	}
+	place := strings.TrimSpace(input.PlaceName)
+	if place == "" {
+		return nil, nil, errors.New("place_name is required")
+	}
+	if input.Lat == 0 && input.Lng == 0 {
+		return nil, nil, errors.New("valid coordinates (lat, lng) are required")
+	}
+	title := strings.TrimSpace(input.Title)
+	if title == "" {
+		title = place
+	}
+	crs := strings.TrimSpace(input.CRS)
+	if crs == "" {
+		crs = "gcj02"
+	}
+
+	m, err := s.monitorService.CreateMonitor(ctx, monitor.Monitor{
+		Title:     title,
+		PlaceName: place,
+		Lat:       input.Lat,
+		Lng:       input.Lng,
+		CRS:       crs,
+		Criteria: monitor.MonitorCriteria{
+			Months:          input.Months,
+			StargazingMode:  input.StargazingMode,
+			MaxLeaveDays:    input.MaxLeaveDays,
+			MaxCloudCover:   input.MaxCloudCover,
+			MaxRainProb:     input.MaxRainProb,
+			MinDurationDays: input.MinDurationDays,
+			MaxDurationDays: input.MaxDurationDays,
+		},
+		OriginCity: strings.TrimSpace(input.OriginCity),
+		MaxBudget:  input.MaxBudget,
+		Enabled:    true,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return nil, map[string]any{
+		"status":      "created",
+		"monitor_id":  m.ID,
+		"title":       m.Title,
+		"place_name":  m.PlaceName,
+		"lat":         m.Lat,
+		"lng":         m.Lng,
+		"crs":         m.CRS,
+		"criteria":    m.Criteria,
+		"message":     "Attraction monitor created successfully. System will automatically evaluate future calendar and weather windows.",
+	}, nil
+}
+
+func (s *Server) listAttractionMonitors(ctx context.Context, req *mcp.CallToolRequest, input ListMonitorsArgs) (*mcp.CallToolResult, map[string]any, error) {
+	if s.monitorService == nil {
+		return nil, nil, errors.New("monitor service is not configured")
+	}
+	monitors, err := s.monitorService.ListMonitors(ctx, input.EnabledOnly)
+	if err != nil {
+		return nil, nil, err
+	}
+	items := make([]map[string]any, 0, len(monitors))
+	for _, m := range monitors {
+		item := map[string]any{
+			"id":          m.ID,
+			"title":       m.Title,
+			"place_name":  m.PlaceName,
+			"lat":         m.Lat,
+			"lng":         m.Lng,
+			"crs":         m.CRS,
+			"criteria":    m.Criteria,
+			"enabled":     m.Enabled,
+			"origin_city": m.OriginCity,
+			"max_budget":  m.MaxBudget,
+		}
+		if m.LatestEvaluation != nil {
+			item["latest_opportunity"] = map[string]any{
+				"window_start": m.LatestEvaluation.WindowStart,
+				"window_end":   m.LatestEvaluation.WindowEnd,
+				"score":        m.LatestEvaluation.Score,
+				"level":        m.LatestEvaluation.Level,
+				"summary":      m.LatestEvaluation.Details.Summary,
+			}
+		}
+		items = append(items, item)
+	}
+	return nil, map[string]any{
+		"total":    len(items),
+		"monitors": items,
+	}, nil
+}
+
+func (s *Server) getAttractionMonitor(ctx context.Context, req *mcp.CallToolRequest, input GetMonitorArgs) (*mcp.CallToolResult, map[string]any, error) {
+	if s.monitorService == nil {
+		return nil, nil, errors.New("monitor service is not configured")
+	}
+	id := strings.TrimSpace(input.MonitorID)
+	if id == "" {
+		return nil, nil, errors.New("monitor_id is required")
+	}
+	m, err := s.monitorService.GetMonitor(ctx, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	evals, err := s.monitorService.GetEvaluations(ctx, id, 30)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, map[string]any{
+		"monitor":     m,
+		"evaluations": evals,
+	}, nil
+}
+
+func (s *Server) getRadarOpportunities(ctx context.Context, req *mcp.CallToolRequest, input struct{}) (*mcp.CallToolResult, map[string]any, error) {
+	if s.monitorService == nil {
+		return nil, nil, errors.New("monitor service is not configured")
+	}
+	summary, err := s.monitorService.GetRadarSummary(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	monitors, err := s.monitorService.ListMonitors(ctx, true)
+	if err != nil {
+		return nil, nil, err
+	}
+	var recommended []map[string]any
+	for _, m := range monitors {
+		if m.LatestEvaluation != nil && m.LatestEvaluation.Level == monitor.LevelStronglyRecommended {
+			recommended = append(recommended, map[string]any{
+				"monitor_id":   m.ID,
+				"place_name":   m.PlaceName,
+				"title":        m.Title,
+				"window_start": m.LatestEvaluation.WindowStart,
+				"window_end":   m.LatestEvaluation.WindowEnd,
+				"score":        m.LatestEvaluation.Score,
+				"summary":      m.LatestEvaluation.Details.Summary,
+				"moon_phase":   m.LatestEvaluation.Details.MoonPhaseName,
+				"moon_illum":   m.LatestEvaluation.Details.MoonIllumination,
+				"galactic_h":   m.LatestEvaluation.Details.GalacticHours,
+				"weather":      m.LatestEvaluation.Details.WeatherCondition,
+			})
+		}
+	}
+	return nil, map[string]any{
+		"total_monitors":       summary.TotalMonitors,
+		"recommended_count":    summary.RecommendedCount,
+		"top_place_name":       summary.TopPlaceName,
+		"top_opportunity":      summary.TopOpportunity,
+		"recommended_monitors": recommended,
+	}, nil
+}
+
+func (s *Server) convertMonitorToTrip(ctx context.Context, req *mcp.CallToolRequest, input ConvertMonitorTripArgs) (*mcp.CallToolResult, map[string]any, error) {
+	if s.monitorService == nil || s.app == nil {
+		return nil, nil, errors.New("monitor service or trip service is not configured")
+	}
+	id := strings.TrimSpace(input.MonitorID)
+	if id == "" {
+		return nil, nil, errors.New("monitor_id is required")
+	}
+	if input.WindowStart == "" || input.WindowEnd == "" {
+		return nil, nil, errors.New("window_start and window_end are required (YYYY-MM-DD)")
+	}
+
+	tripID, err := s.monitorService.ConvertToTrip(ctx, id, input.WindowStart, input.WindowEnd, func(ctx context.Context, doc []byte, src string) (string, error) {
+		record, err := s.app.Create(ctx, doc, "mcp:convert_monitor")
+		if err != nil {
+			return "", err
+		}
+		return record.ID, nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return nil, map[string]any{
+		"status":       "created",
+		"trip_id":      tripID,
+		"monitor_id":   id,
+		"window_start": input.WindowStart,
+		"window_end":   input.WindowEnd,
+		"message":      "Successfully converted recommended opportunity window into a new JourneyIn Trip draft.",
+	}, nil
 }

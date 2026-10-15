@@ -695,6 +695,11 @@ JourneyIn 服务端原生实现了 Anthropic 发起的 MCP 协议，成为连接
 | `journeyin.list_trips` | `limit` | 列出当前连接主体可见的行程摘要清单。 |
 | `journeyin.list_trip_history` | `trip_id`, `limit` | 查询行程的用户历史快照版本列表。 |
 | `journeyin.get_trip_history` | `trip_id`, `history_id` | 读取指定不可变历史快照文档。 |
+| `journeyin.create_attraction_monitor` | `place_name`, `lat`, `lng`, `crs`, `months`, `stargazing_mode`, `max_leave_days`... | 创建心愿景点时机监控规则，系统自动开启未来 45 天日历、天文与气象巡检。 |
+| `journeyin.list_attraction_monitors` | `enabled_only` | 列出当前所有受监控景点及其最新出行良机评定等级。 |
+| `journeyin.get_attraction_monitor` | `monitor_id` | 读取单个景点的监控规则详情与未来 45 天全部候选窗口时间轴。 |
+| `journeyin.get_radar_opportunities` | (none) | 查询旅行雷达大盘推荐摘要，获取当前所有处于“🔥强烈推荐”的绝佳窗口。 |
+| `journeyin.convert_monitor_to_trip` | `monitor_id`, `window_start`, `window_end` | 将雷达命中的机会窗口一键转化为 JourneyIn 规范化 Trip 草稿。 |
 
 #### AI 两阶段安全写工作流：
 任何 AI Agent 均不得通过单一调用直接向数据库写入行程。必须严格遵循：

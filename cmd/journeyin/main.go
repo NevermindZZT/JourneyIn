@@ -202,6 +202,7 @@ func main() {
 	}
 	api.SetMCPToken(mcpToken)
 	mcpServer := mcptransport.NewServer(app, version, schemaFS)
+	mcpServer.SetMonitorService(monitorService)
 	mux := http.NewServeMux()
 	mcpHandler := mcpServer.HTTPHandler()
 	if mcpToken != "" || authenticator.Enabled() {
@@ -275,8 +276,16 @@ func runStdio() {
 	}
 	app := application.NewTripService(database)
 	app.SetUserService(userService)
+
+	weatherReg := weather.NewRegistry()
+	weatherCache := weatherCacheStoreAdapter{store: database}
+	weatherSvc := weather.NewService(weatherReg, nil, nil, nil, weatherCache, weather.ProviderAuto)
+	monSvc := monitor.NewService(database, weatherSvc, logger)
+	mcpServer := mcptransport.NewServer(app, version, schemaFS)
+	mcpServer.SetMonitorService(monSvc)
+
 	stdioCtx := security.WithPrincipal(context.Background(), principal)
-	if err := mcptransport.NewServer(app, version, schemaFS).RunStdio(stdioCtx); err != nil {
+	if err := mcpServer.RunStdio(stdioCtx); err != nil {
 		logger.Error("MCP stdio stopped", "error", err)
 		os.Exit(1)
 	}

@@ -164,7 +164,7 @@ transport -> application -> domain <- store / maps / weather / photos adapters
 - 兼容 MCP 2025-06-18+ 协议，并通过协议协商处理后续版本；不要在业务代码中散落版本字符串。
 - stdio stdout 只能输出合法 MCP JSON-RPC；banner、日志和诊断全部写 stderr；每个进程默认只服务一个客户端。
 - 工具名稳定、明确、使用 `journeyin.` 前缀；不创建万能 action 工具。
-- 核心工具清单：`get_capabilities`、`validate_trip`、`preview_save_trip`、`commit_save_trip`、`plan_trip`、`refresh_routes`、`get_trip`、`list_trips`、`list_trip_history`、`get_trip_history`。
+- 核心工具清单：`get_capabilities`、`validate_trip`、`preview_save_trip`、`commit_save_trip`、`plan_trip`、`refresh_routes`、`get_trip`、`list_trips`、`list_trip_history`、`get_trip_history`、`create_attraction_monitor`、`list_attraction_monitors`、`get_attraction_monitor`、`get_radar_opportunities`、`convert_monitor_to_trip`。
 - **两阶段安全写流程**：保存流程必须 `validate` -> `preview` -> 展示摘要/diff/警告 -> 用户确认 -> `commit`；没有确认不得产生写副作用。
 - preview 必须短期有效（15 分钟）并绑定 payload hash、用户和目标 Trip；`confirmation_token` 不是通用 API token。
 - commit_save_trip 必须接收 preview_id、confirmation_token 和幂等键；重试复用同一键；参数不同复用同一键必须报冲突。
