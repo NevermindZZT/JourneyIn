@@ -13,7 +13,7 @@ import UiSelect from './UiSelect.vue'
 import MarkdownEditor from './MarkdownEditor.vue'
 import TripPosterModal from './TripPosterModal.vue'
 import TripAnimationModal from './TripAnimationModal.vue'
-import TravelRadarView, { type MonitorItem } from './TravelRadarView.vue'
+import TravelRadarView, { type EvaluationItem, type MonitorItem } from './TravelRadarView.vue'
 import MonitorEditModal, { type MonitorFormData } from './MonitorEditModal.vue'
 import BrandLogo from './BrandLogo.vue'
 import MapLoadingState from './MapLoadingState.vue'
@@ -789,6 +789,8 @@ let weatherLabelOverlays: any[] = []
 let weatherLabelExpiryTimer: number | null = null
 let atlasStopMarkers: any[] = []
 let atlasTripLabels: any[] = []
+let radarMonitorMarkers: any[] = []
+let radarMonitorLabels: any[] = []
 let amapSatelliteLayer: any = null
 let mediaQuery: MediaQueryList | null = null
 let mapReadyTimer: number | null = null
@@ -3126,6 +3128,10 @@ function resetMapSDK() {
   atlasStopMarkers = []
   atlasTripLabels = []
   atlasPhotoMarkers = []
+  radarMonitorMarkers = []
+  radarMonitorLabels = []
+  radarMapInitialFitDone = false
+  if (radarMapRefreshTimer !== null) { window.clearTimeout(radarMapRefreshTimer); radarMapRefreshTimer = null }
   if (mapZoomDebounceTimer !== null) { window.clearTimeout(mapZoomDebounceTimer); mapZoomDebounceTimer = null }
   amapSatelliteLayer = null
   mapReady.value = false
@@ -3185,7 +3191,7 @@ function safeMapError(cause: unknown, fallback: string) { const message = cause 
 function amapPointToArray(point: Coord) { return [point.lng, point.lat] }
 function addAMapOverlay(overlay: any) { mapInstance?.add?.(overlay); mapOverlays.push(overlay); return overlay }
 function clearWeatherLabelExpiryTimer() { if (weatherLabelExpiryTimer !== null) { window.clearTimeout(weatherLabelExpiryTimer); weatherLabelExpiryTimer = null } }
-function clearAMapOverlays() { clearWeatherLabelExpiryTimer(); mapInstance?.clearMap?.(); mapOverlays = []; currentStopMarkers = []; weatherLabelOverlays = []; atlasStopMarkers = []; atlasTripLabels = [] }
+function clearAMapOverlays() { clearWeatherLabelExpiryTimer(); mapInstance?.clearMap?.(); mapOverlays = []; currentStopMarkers = []; weatherLabelOverlays = []; atlasStopMarkers = []; atlasTripLabels = []; radarMonitorMarkers = []; radarMonitorLabels = [] }
 function renderStopPinHTML(sequence: number | string, isTarget: boolean, isCarryOver: boolean, kind?: string): string {
   const bg = planningPointCategoryColor(kind)
   const text = isCarryOver ? '‹' : String(sequence)
@@ -3716,6 +3722,7 @@ async function renderMapNow(options?: { preserveView?: boolean }) {
   if (!mapContainer.value) return
   const preserveView = options?.preserveView ?? false
   if (tripView.value === 'atlas') return renderAtlasMap(preserveView)
+  if (tripView.value === 'radar') return renderRadarMap(preserveView)
   if (!tripDocument.value) return
   if (!key.value) { resetMapSDK(); return }
   if (selectedMapProvider.value === 'amap') await renderAMapMap(preserveView)
@@ -4096,6 +4103,12 @@ function formatPhotoTime(val?: string) {
 
 // --- 旅行时机雷达 (Travel Opportunity Radar) 状态与方法 ---
 const radarSummary = ref<{ total_monitors: number; recommended_count: number; top_opportunity?: any; top_place_name?: string } | null>(null)
+const radarMonitors = ref<MonitorItem[]>([])
+const visibleRadarMonitorIDs = ref<string[] | null>(null)
+const selectedRadarMonitorID = ref('')
+const selectedRadarEvaluation = ref<EvaluationItem | null>(null)
+let radarMapInitialFitDone = false
+let radarMapRefreshTimer: number | null = null
 const monitorEditModalOpen = ref(false)
 const monitorEditInitialData = ref<MonitorFormData | null>(null)
 const travelRadarViewRef = ref<any>(null)
@@ -4103,12 +4116,44 @@ const travelRadarViewRef = ref<any>(null)
 async function loadRadarSummary() {
   try {
     const res = await apiFetch('/api/v1/monitors/radar-summary')
-    if (res.ok) {
-      radarSummary.value = await res.json()
-    }
-  } catch {
-    // best effort
-  }
+    if (res.ok) radarSummary.value = await res.json()
+  } catch { /* best effort */ }
+}
+
+function handleRadarMonitorsUpdated(items: MonitorItem[]) {
+  radarMonitors.value = items
+  if (tripView.value === 'radar') void renderMap({ preserveView: radarMapInitialFitDone })
+}
+
+function handleVisibleRadarMonitorsChanged(monitorIDs: string[]) {
+  const previous = visibleRadarMonitorIDs.value
+  const changed = !previous || previous.length !== monitorIDs.length || previous.some((id, index) => id !== monitorIDs[index])
+  visibleRadarMonitorIDs.value = monitorIDs
+  if (tripView.value === 'radar' && changed) void renderMap({ preserveView: false })
+}
+
+function visibleRadarMonitors() {
+  const ids = visibleRadarMonitorIDs.value
+  return ids ? radarMonitors.value.filter(item => ids.includes(item.id)) : radarMonitors.value
+}
+
+async function handleRadarMonitorSelected(monitorID: string | null) {
+  selectedRadarMonitorID.value = monitorID || ''
+  selectedRadarEvaluation.value = null
+  if (tripView.value !== 'radar') return
+  await renderMap({ preserveView: true })
+  const item = radarMonitors.value.find(candidate => candidate.id === monitorID)
+  if (item) focusRadarMapOnMonitor(item)
+}
+
+function handleRadarWindowSelected(value: { monitorID: string; evaluation: EvaluationItem | null }) {
+  selectedRadarMonitorID.value = value.monitorID
+  selectedRadarEvaluation.value = value.evaluation
+  if (tripView.value === 'radar') void renderMap({ preserveView: true })
+}
+
+function selectRadarMonitorFromMap(monitorID: string) {
+  travelRadarViewRef.value?.selectMonitorFromMap?.(monitorID)
 }
 
 function navigateToRadar() {
@@ -4123,11 +4168,15 @@ function navigateToRadar() {
   mobileMapToolsOpen.value = false
   tripMenuID.value = ''
   detailMoreOpen.value = false
+  selectedRadarMonitorID.value = ''
+  selectedRadarEvaluation.value = null
+  visibleRadarMonitorIDs.value = null
+  radarMapInitialFitDone = false
+  mapError.value = ''
+  mapWarning.value = ''
   resetMapSDK()
   void loadRadarSummary()
-  if (travelRadarViewRef.value) {
-    void travelRadarViewRef.value.loadMonitors()
-  }
+  void nextTick().then(() => { void renderMap({ preserveView: false }) })
 }
 
 function openNewMonitor() {
@@ -4494,6 +4543,285 @@ function updateAtlasLabelsVisibility() {
   }
 }
 
+
+
+function radarMonitorAsStop(item: MonitorItem): Stop | null {
+  const crs = normalizeCoordinateCRS(item.crs)
+  if (!crs || !Number.isFinite(item.lat) || !Number.isFinite(item.lng) || Math.abs(item.lat) > 90 || Math.abs(item.lng) > 180 || (item.lat === 0 && item.lng === 0)) return null
+  const point = { lat: item.lat, lng: item.lng, crs }
+  return { location: { preferred: crs, coordinates: { [crs]: point } } } as unknown as Stop
+}
+
+function radarPointForProvider(item: MonitorItem, provider: 'baidu' | 'amap'): (Coord & { crs: string }) | null {
+  const stop = radarMonitorAsStop(item)
+  return stop ? pointForProvider(stop, provider) : null
+}
+
+function radarVisibleMonitors() {
+  const ids = visibleRadarMonitorIDs.value
+  return ids ? radarMonitors.value.filter(item => ids.includes(item.id)) : radarMonitors.value
+}
+
+
+
+
+type RadarMapGroup = { items: MonitorItem[]; point: Coord & { crs: string }; points: Array<Coord & { crs: string }> }
+
+function groupRadarMapPoints(provider: 'baidu' | 'amap'): RadarMapGroup[] {
+  const entries = radarVisibleMonitors().flatMap(item => {
+    const point = radarPointForProvider(item, provider)
+    return point ? [{ item, point, pixel: getMapPointScreenPixel(point) }] : []
+  })
+  const parents = entries.map((_, index) => index)
+  const find = (index: number): number => parents[index] === index ? index : (parents[index] = find(parents[index]))
+  const join = (left: number, right: number) => { const a = find(left); const b = find(right); if (a !== b) parents[b] = a }
+  const buckets = new Map<string, number[]>()
+  entries.forEach((entry, index) => {
+    if (!entry.pixel) {
+      const key = 'geo:' + entry.point.lng.toFixed(5) + ':' + entry.point.lat.toFixed(5)
+      const siblings = buckets.get(key) || []
+      siblings.forEach(other => join(index, other))
+      siblings.push(index); buckets.set(key, siblings)
+      return
+    }
+    const cx = Math.floor(entry.pixel.x / 48), cy = Math.floor(entry.pixel.y / 48)
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+      for (const other of buckets.get('px:' + (cx + dx) + ':' + (cy + dy)) || []) {
+        const pixel = entries[other].pixel
+        if (pixel && Math.hypot(entry.pixel.x - pixel.x, entry.pixel.y - pixel.y) < 46) join(index, other)
+      }
+    }
+    const key = 'px:' + cx + ':' + cy
+    const siblings = buckets.get(key) || []
+    siblings.push(index); buckets.set(key, siblings)
+  })
+  const groups = new Map<number, typeof entries>()
+  entries.forEach((entry, index) => {
+    const root = find(index)
+    const values = groups.get(root) || []
+    values.push(entry); groups.set(root, values)
+  })
+  const rank = (item: MonitorItem) => item.latest_evaluation?.level === 'strongly_recommended' ? 3 : item.latest_evaluation?.level === 'acceptable' ? 2 : item.latest_evaluation?.level === 'waiting' ? 1 : 0
+  return [...groups.values()].map(values => {
+    values.sort((a, b) => rank(b.item) - rank(a.item) || (b.item.latest_evaluation?.score || 0) - (a.item.latest_evaluation?.score || 0))
+    const points = values.map(value => value.point)
+    return { items: values.map(value => value.item), points, point: { lng: points.reduce((sum, point) => sum + point.lng, 0) / points.length, lat: points.reduce((sum, point) => sum + point.lat, 0) / points.length, crs: points[0].crs } }
+  })
+}
+
+function scheduleRadarMapRefresh() {
+  if (tripView.value !== 'radar') return
+  if (radarMapRefreshTimer !== null) window.clearTimeout(radarMapRefreshTimer)
+  radarMapRefreshTimer = window.setTimeout(() => {
+    radarMapRefreshTimer = null
+    void renderMap({ preserveView: true })
+  }, 140)
+}
+
+function handleRadarMapGroupClick(group: RadarMapGroup) {
+  if (group.items.length === 1) { selectRadarMonitorFromMap(group.items[0].id); return }
+  const zoom = Math.min(Number(mapInstance?.getZoom?.() || 10) + 2, 18)
+  if (selectedMapProvider.value === 'amap') mapInstance?.setZoomAndCenter?.(zoom, amapPointToArray(group.point), true)
+  else if (typeof mapAPI?.Point === 'function') mapInstance?.centerAndZoom?.(new mapAPI.Point(group.point.lng, group.point.lat), zoom, { noAnimation: true })
+  scheduleRadarMapRefresh()
+}
+
+
+function radarEvaluationForMap(item: MonitorItem): EvaluationItem | undefined {
+  if (selectedRadarMonitorID.value === item.id && selectedRadarEvaluation.value?.monitor_id === item.id) return selectedRadarEvaluation.value
+  return item.latest_evaluation
+}
+
+function radarMarkerLevel(item: MonitorItem): 'strongly_recommended' | 'acceptable' | 'waiting' {
+  const level = radarEvaluationForMap(item)?.level
+  return level === 'strongly_recommended' || level === 'acceptable' ? level : 'waiting'
+}
+
+function radarMarkerColor(item: MonitorItem): string {
+  const level = radarMarkerLevel(item)
+  return level === 'strongly_recommended' ? '#ff6b35' : level === 'acceptable' ? '#2980b9' : '#75828c'
+}
+
+function radarMarkerSVG(item: MonitorItem, selected: boolean, clusterCount = 0): string {
+  const evaluation = radarEvaluationForMap(item)
+  const label = clusterCount > 0 ? String(clusterCount) : evaluation && Number.isFinite(evaluation.score) ? String(Math.round(evaluation.score)) : '·'
+  const color = radarMarkerColor(item)
+  const size = selected || clusterCount > 0 ? 48 : 42
+  const radius = selected || clusterCount > 0 ? 20 : 18
+  const outerRing = selected ? '<circle cx="24" cy="24" r="22" fill="none" stroke="#ffffff" stroke-width="2"/>' : ''
+  return '<svg xmlns="http://www.w3.org/2000/svg" width="' + size + '" height="' + size + '" viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="' + radius + '" fill="' + color + '" stroke="#ffffff" stroke-width="3"/>' + outerRing + '<text x="24" y="28" text-anchor="middle" fill="#ffffff" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="' + (label.length > 2 ? 12 : 14) + '" font-weight="900">' + label + '</text></svg>'
+}
+
+function radarMapLabelText(item: MonitorItem): string {
+  const evaluation = radarEvaluationForMap(item)
+  return item.place_name + (evaluation ? ' · ' + Math.round(evaluation.score) + '分' : ' · 等待评估')
+}
+
+function radarFitBounds(points: any[], preserveView: boolean, provider: 'baidu' | 'amap') {
+  if (preserveView) return
+  if (!points.length) return
+  if (points.length === 1) {
+    if (provider === 'amap') mapInstance?.setZoomAndCenter?.(12, points[0], true)
+    else mapInstance?.centerAndZoom?.(points[0], 12, { noAnimation: true })
+    radarMapInitialFitDone = true
+    return
+  }
+  try {
+    const rect = mapVisibleRect()
+    const container = mapContainer.value
+    const fullW = container?.clientWidth || 0
+    const fullH = container?.clientHeight || 0
+    const mobile = isMobileViewport()
+    let top = 32, bottom = 32, left = 32, right = 32
+    if (mobile) {
+      top = rect ? Math.max(20, Math.round(rect.top + 8)) : 60
+      bottom = rect ? (sheetBreakpoint.value === 'expanded' ? 40 : Math.max(24, Math.round(fullH - rect.bottom + 12))) : 60
+      left = 24; right = 24
+    } else {
+      left = rect ? Math.max(36, Math.round(rect.left)) : 60
+      right = rect ? Math.max(48, Math.round(fullW - rect.right + 24)) : 60
+    }
+    if (provider === 'amap') mapInstance?.setFitView?.(mapOverlays.filter(Boolean), false, [top, bottom, left, right])
+    else {
+      const viewport = mapInstance?.getViewport?.(points, { margins: [top, right, bottom, left] })
+      if (viewport) mapInstance.centerAndZoom(viewport.center, viewport.zoom)
+    }
+    radarMapInitialFitDone = true
+  } catch {
+    if (provider === 'amap') mapInstance?.setCenter?.(points[0])
+    else if (points[0]) mapInstance?.setCenter?.(points[0])
+  }
+}
+
+function focusRadarMapOnMonitor(item: MonitorItem) {
+  const stop = radarMonitorAsStop(item)
+  if (!stop || !mapInstance || !mapAPI) return
+  if (selectedMapProvider.value === 'amap') focusAMapPoint(stop)
+  else focusMapOnPoint(stop)
+}
+
+function radarMarkersHtml(item: MonitorItem, selected: boolean, clusterCount = 0): string {
+  const level = radarMarkerLevel(item)
+  return '<div class="radar-map-pin ' + level + (selected ? ' is-selected' : '') + (clusterCount > 1 ? ' is-cluster' : '') + '">' + radarMarkerSVG(item, selected, clusterCount) + '</div>'
+}
+
+async function renderRadarMap(preserveView = false) {
+  if (tripView.value !== 'radar' || !mapContainer.value) return
+  if (!key.value) { mapReady.value = false; return }
+  mapError.value = ''
+  if (selectedMapProvider.value === 'amap') await renderRadarAMap(preserveView)
+  else await renderRadarBaidu(preserveView)
+}
+
+async function renderRadarAMap(preserveView = false) {
+  if (!mapContainer.value) return
+  const version = ++mapRenderVersion
+  try {
+    await loadAMap()
+    if (version !== mapRenderVersion || !mapAPI || typeof mapAPI.Map !== 'function') return
+    if (!mapInstance) {
+      mapReady.value = false
+      mapInstance = new mapAPI.Map(mapContainer.value, { viewMode: '2D', zoom: 5, center: [105, 35], resizeEnable: true })
+      mapInstance.on?.('complete', () => { mapReady.value = true; mapError.value = ''; mapWarning.value = ''; updateMapScale() })
+      mapInstance.on?.('zoomend', () => { handleMapZoomChange(); scheduleRadarMapRefresh() })
+      mapInstance.on?.('moveend', () => { updateMapScale(); scheduleRadarMapRefresh() })
+    }
+    mapInstance.resize?.()
+    clearAMapOverlays()
+    const positions: any[] = []
+    for (const group of groupRadarMapPoints('amap')) {
+      const position = amapPointToArray(group.point)
+      positions.push(position)
+      const selectedItem = group.items.find(item => item.id === selectedRadarMonitorID.value)
+      const item = selectedItem || group.items[0]
+      const selected = Boolean(selectedItem)
+      const clusterCount = group.items.length > 1 ? group.items.length : 0
+      const bestScore = Math.round(group.items[0].latest_evaluation?.score || 0)
+      const names = group.items.slice(0, 3).map(value => value.place_name).join('、')
+      const title = clusterCount ? names + (clusterCount > 3 ? ' 等' : '') + ' · ' + clusterCount + ' 个景点 · 最高 ' + bestScore + ' 分' : radarMapLabelText(item)
+      const size = selected || clusterCount > 0 ? 48 : 42
+      const marker = addAMapOverlay(new mapAPI.Marker({
+        position, title,
+        content: radarMarkersHtml(item, selected, clusterCount),
+        offset: new mapAPI.Pixel(-size / 2, -size / 2),
+        zIndex: selected ? 180 : radarMarkerLevel(item) === 'strongly_recommended' ? 120 : 80,
+      }))
+      marker.__journeyinRadarMonitorIDs = group.items.map(value => value.id)
+      marker.on?.('click', () => handleRadarMapGroupClick(group))
+      radarMonitorMarkers.push(marker)
+      const showLabel = mapLabelMode.value === 'always' || (mapLabelMode.value === 'auto' && selected)
+      if (showLabel) {
+        const label = addAMapOverlay(new mapAPI.Text({
+          text: clusterCount ? clusterCount + ' 个景点' : radarMapLabelText(item), position, anchor: 'center', zIndex: 190,
+          style: { backgroundColor: 'rgba(20,32,29,.96)', color: '#f7faf8', border: '1px solid rgba(255,255,255,.45)', borderRadius: '999px', padding: '4px 9px', fontSize: '11px', fontWeight: '800', lineHeight: '15px', maxWidth: '190px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', boxShadow: '0 4px 14px rgba(0,0,0,.32)' }
+        }))
+        radarMonitorLabels.push(label)
+      }
+    }
+    radarFitBounds(positions, preserveView && radarMapInitialFitDone, 'amap')
+    applyMapType()
+    mapError.value = ''
+  } catch (cause) {
+    mapReady.value = false; mapWarning.value = ''; mapError.value = safeMapError(cause, '高德地图初始化失败')
+  }
+}
+async function renderRadarBaidu(preserveView = false) {
+  if (!mapContainer.value) return
+  const version = ++mapRenderVersion
+  try {
+    await loadBaiduMap()
+    if (version !== mapRenderVersion || !mapAPI || typeof mapAPI.Map !== 'function') return
+    if (!mapInstance) {
+      mapReady.value = false
+      mapInstance = new mapAPI.Map(mapContainer.value, { enableIconClick: false, fixCenterWhenResize: true })
+      mapInstance.centerAndZoom?.('中国', 4)
+      mapInstance.enableScrollWheelZoom?.()
+      mapInstance.addEventListener?.('zoomend', () => { handleMapZoomChange(); scheduleRadarMapRefresh() })
+      mapInstance.addEventListener?.('moveend', () => { updateMapScale(); scheduleRadarMapRefresh() })
+      mapInstance.addEventListener?.('tilesloaded', () => { mapReady.value = true; mapError.value = ''; mapWarning.value = ''; updateMapScale(); alignBaiduAttributionElements() })
+      if (mapReadyTimer !== null) window.clearTimeout(mapReadyTimer)
+      mapReadyTimer = window.setTimeout(() => { if (!mapReady.value) mapWarning.value = '百度地图底图加载较慢；请检查浏览器端 AK、域名白名单和网络连接。' }, 8000)
+    }
+    mapInstance.resize?.()
+    mapInstance.clearOverlays?.()
+    radarMonitorMarkers = []; radarMonitorLabels = []
+    const positions: any[] = []
+    for (const group of groupRadarMapPoints('baidu')) {
+      if (typeof mapAPI.Point !== 'function') continue
+      const position = new mapAPI.Point(group.point.lng, group.point.lat)
+      positions.push(position)
+      const selectedItem = group.items.find(item => item.id === selectedRadarMonitorID.value)
+      const item = selectedItem || group.items[0]
+      const selected = Boolean(selectedItem)
+      const clusterCount = group.items.length > 1 ? group.items.length : 0
+      const bestScore = Math.round(group.items[0].latest_evaluation?.score || 0)
+      const names = group.items.slice(0, 3).map(value => value.place_name).join('、')
+      const title = clusterCount ? names + (clusterCount > 3 ? ' 等' : '') + ' · ' + clusterCount + ' 个景点 · 最高 ' + bestScore + ' 分' : item.place_name
+      const size = selected || clusterCount > 0 ? 48 : 42
+      const icon = typeof mapAPI.Icon === 'function' && typeof mapAPI.Size === 'function'
+        ? new mapAPI.Icon('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(radarMarkerSVG(item, selected, clusterCount)), new mapAPI.Size(size, size), { anchor: new mapAPI.Size(size / 2, size / 2) })
+        : undefined
+      const marker = new mapAPI.Marker(position, icon ? { icon, title } : undefined)
+      marker.__journeyinRadarMonitorIDs = group.items.map(value => value.id)
+      marker.addEventListener?.('click', () => handleRadarMapGroupClick(group))
+      mapInstance.addOverlay(marker)
+      radarMonitorMarkers.push(marker)
+      const showLabel = mapLabelMode.value === 'always' || (mapLabelMode.value === 'auto' && selected)
+      if (showLabel && typeof mapAPI.Label === 'function' && typeof mapAPI.Size === 'function') {
+        const labelText = clusterCount ? clusterCount + ' 个景点' : radarMapLabelText(item)
+        const label = new mapAPI.Label(labelText, { position, offset: new mapAPI.Size(-90, -34) })
+        label.setStyle?.({ color: '#f7faf8', backgroundColor: '#14201d', border: '1px solid rgba(255,255,255,.45)', borderRadius: '999px', padding: '4px 9px', fontSize: '11px', fontWeight: '800', lineHeight: '15px', maxWidth: '190px', boxShadow: '0 4px 14px rgba(0,0,0,.32)' })
+        mapInstance.addOverlay(label); radarMonitorLabels.push(label)
+      }
+    }
+    radarFitBounds(positions, preserveView && radarMapInitialFitDone, 'baidu')
+    applyMapType()
+    mapError.value = ''
+    observeBaiduAttribution()
+  } catch (cause) {
+    mapReady.value = false; mapWarning.value = ''; mapError.value = safeMapError(cause, '百度地图初始化失败')
+  }
+}
 async function renderAtlasMap(preserveView = false) {
   if (tripView.value !== 'atlas' || !mapContainer.value) return
   const currentKey = selectedMapProvider.value === 'amap' ? amapKey.value.trim() : baiduKey.value.trim()
@@ -6855,20 +7183,80 @@ onUnmounted(() => {
             </div>
           </section>
 
-          <!-- 旅行雷达 (Radar) 心愿时机大盘视图 -->
+          <!-- 旅行时机雷达：地图主画布 + 监控列表/详情浮层，与足迹漫游统一交互 -->
           <section
             v-else-if="tripView === 'radar'"
-            class="radar-workspace-view"
-            aria-label="旅行时机雷达"
+            class="journey-workspace atlas-workspace radar-workspace"
+            :class="'sheet-' + sheetBreakpoint"
+            :style="{
+              '--scale-width': (mapScale?.width ?? 50) + 'px',
+              '--map-logo-width': selectedMapProvider === 'amap' ? '92px' : '76px'
+            }"
+            aria-label="旅行时机雷达地图工作区"
           >
-            <TravelRadarView
-              ref="travelRadarViewRef"
-              :api-fetch="apiFetch"
-              @new-monitor="openNewMonitor"
-              @edit-monitor="openEditMonitor"
-              @open-trip="handleRadarOpenTrip"
-              @back-home="navigateToList()"
-            />
+            <div class="map-canvas redesign-map-canvas">
+              <div v-if="keyConfigured && !mapError" :key="selectedMapProvider + '_radar'" ref="mapContainer" id="map"></div>
+
+              <div v-if="mapReady && mapScale" class="journey-map-scale-chip" :class="['map-type-' + mapType]" aria-label="地图比例尺">
+                <span class="scale-bar-line" :style="{ width: mapScale.width + 'px' }"></span>
+                <span class="scale-bar-label">{{ mapScale.label }}</span>
+              </div>
+              <div v-if="mapReady" class="radar-map-legend" aria-label="推荐度图例">
+                <span><i class="strongly_recommended"></i>强烈推荐</span>
+                <span><i class="acceptable"></i>备选</span>
+                <span><i class="waiting"></i>待观察</span>
+              </div>
+
+              <MapLoadingState
+                v-if="keyConfigured && !mapError && !mapReady && !mapWarning"
+                title="正在绘制旅行时机雷达…"
+                subtitle="正在定位心愿景点与推荐窗口"
+                :hint="mapProviderLabel + '底图连接中'"
+                mode="atlas"
+                :sheet="sheetBreakpoint"
+              />
+
+              <div v-else-if="!keyConfigured || mapError" class="map-fallback">
+                <IonIcon :icon="radioOutline" />
+                <strong>{{ mapError || (mapProviderLabel + '未配置') }}</strong>
+                <span>{{ mapError ? '请确认浏览器端 Key、域名白名单和网络连接。监控列表仍可继续使用。' : '配置' + mapProviderLabel + '浏览器端 Key 后即可在地图上查看受监控景点；监控列表仍可继续使用。' }}</span>
+                <button v-if="mapError" type="button" class="secondary-action compact-action" @click="retryMap">重新尝试加载</button>
+                <button v-else-if="isAdmin" type="button" class="primary-action compact-action" @click="openSettings()">前往设置配置 Key</button>
+              </div>
+              <div v-if="mapWarning" class="map-warning"><span>{{ mapWarning }}</span><button type="button" @click="retryMap">重新加载</button></div>
+            </div>
+
+            <header class="workspace-topbar atlas-topbar radar-topbar">
+              <button class="workspace-back atlas-back-btn" type="button" aria-label="返回行程列表" @click="navigateToList()"><span>‹</span><small>行程</small></button>
+              <div class="workspace-top-actions">
+                <button class="workspace-tool-trigger" type="button" :aria-expanded="mobileMapToolsOpen" aria-label="打开地图选项" @click="toggleMobileMapTools"><IonIcon :icon="mapOutline" /><span>地图选项</span></button>
+                <button v-if="isAdmin" class="workspace-more" type="button" aria-label="打开更多操作" @click="openSettings"><span>⋯</span></button>
+              </div>
+            </header>
+
+            <div v-if="mobileMapToolsOpen" class="map-tools-backdrop" @click="mobileMapToolsOpen = false"></div>
+            <div v-if="mobileMapToolsOpen" class="map-tools-card" role="dialog" aria-label="地图选项">
+              <div class="map-tools-heading"><div><span class="eyebrow">MAP OPTIONS</span><strong>地图选项</strong></div><button type="button" aria-label="关闭地图选项" @click="toggleMobileMapTools"><IonIcon :icon="closeOutline" /></button></div>
+              <div class="map-tool-row"><span>底图 Provider</span><div class="provider-segment"><button type="button" :class="{ active: selectedMapProvider === 'amap' }" @click="setMapProvider('amap')">高德</button><button type="button" :class="{ active: selectedMapProvider === 'baidu' }" @click="setMapProvider('baidu')">百度</button></div></div>
+              <div class="map-tool-row"><span>图层</span><div class="provider-segment layer-segment" role="group" aria-label="地图图层"><button type="button" :class="{ active: mapType === 'normal' }" :aria-pressed="mapType === 'normal'" @click="setMapType('normal')">标准图</button><button type="button" :class="{ active: mapType === 'satellite' }" :aria-pressed="mapType === 'satellite'" @click="setMapType('satellite')">卫星图</button></div></div>
+              <div class="map-tool-row"><span>地图标签</span><div class="provider-segment label-segment" role="group" aria-label="地图标签显示模式"><button type="button" :class="{ active: mapLabelMode === 'auto' }" @click="setMapLabelMode('auto')">自动</button><button type="button" :class="{ active: mapLabelMode === 'always' }" @click="setMapLabelMode('always')">全部</button><button type="button" :class="{ active: mapLabelMode === 'none' }" @click="setMapLabelMode('none')">隐藏</button></div></div>
+              <p class="map-tool-hint">景点名称在选中监控点时显示；评分数字始终保留在标记上。</p>
+            </div>
+
+            <aside class="floating-panel workspace-panel atlas-floating-panel radar-floating-panel" :class="['sheet-' + sheetBreakpoint, { 'is-sheet-dragging': sheetDragActive }]" :style="sheetDragStyle" aria-label="旅行时机雷达监控面板">
+              <button class="sheet-handle" type="button" :aria-label="sheetBreakpoint === 'peek' ? '展开雷达面板' : '收起雷达面板'" @pointerdown="startSheetDrag" @click="cycleSheetBreakpoint"><span></span></button>
+              <TravelRadarView
+                ref="travelRadarViewRef"
+                :api-fetch="apiFetch"
+                @new-monitor="openNewMonitor"
+                @edit-monitor="openEditMonitor"
+                @open-trip="handleRadarOpenTrip"
+                @monitors-updated="handleRadarMonitorsUpdated"
+                @visible-monitors-changed="handleVisibleRadarMonitorsChanged"
+                @monitor-selected="handleRadarMonitorSelected"
+                @window-selected="handleRadarWindowSelected"
+              />
+            </aside>
           </section>
 
           <section

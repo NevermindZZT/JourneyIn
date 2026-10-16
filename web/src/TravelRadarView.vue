@@ -1,1165 +1,352 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import type { MonitorFormData } from './MonitorEditModal.vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
 export interface EvaluationItem {
-  id: string
-  monitor_id: string
-  window_start: string
-  window_end: string
-  score: number
+  id: string; monitor_id: string; window_start: string; window_end: string; score: number
   level: 'strongly_recommended' | 'acceptable' | 'waiting'
-  details: {
-    summary: string
-    moon_phase_name: string
-    moon_illumination: number
-    galactic_hours: number
-    holiday_name?: string
-    leave_days_required: number
-    weather_condition?: string
-    cloud_cover_avg: number
-    rain_prob_avg: number
-    scores: {
-      astro_score: number
-      weather_score: number
-      calendar_score: number
-      budget_score: number
-    }
-  }
+  details: { summary?: string; moon_phase_name?: string; moon_illumination?: number; galactic_hours?: number; holiday_name?: string; leave_days_required?: number; weather_condition?: string; cloud_cover_avg?: number; rain_prob_avg?: number; scores?: { astro_score?: number; weather_score?: number; calendar_score?: number; budget_score?: number } }
 }
-
 export interface MonitorItem {
-  id: string
-  title: string
-  place_name: string
-  lat: number
-  lng: number
-  crs: string
-  criteria: {
-    months?: number[]
-    stargazing_mode?: boolean
-    max_leave_days?: number
-    max_cloud_cover?: number
-    max_rain_prob?: number
-    min_duration_days?: number
-    max_duration_days?: number
-  }
-  origin_city?: string
-  max_budget?: number
-  enabled: boolean
-  latest_evaluation?: EvaluationItem
+  id: string; title: string; place_name: string; lat: number; lng: number; crs: string
+  criteria: { months?: number[]; stargazing_mode?: boolean; max_leave_days?: number; max_cloud_cover?: number; max_rain_prob?: number; min_duration_days?: number; max_duration_days?: number }
+  origin_city?: string; max_budget?: number; enabled: boolean; latest_evaluation?: EvaluationItem
 }
-
-const props = defineProps<{
-  apiFetch: (path: string, options?: RequestInit) => Promise<Response>
-}>()
-
+const props = defineProps<{ apiFetch: (path: string, options?: RequestInit) => Promise<Response> }>()
 const emit = defineEmits<{
   (e: 'newMonitor'): void
   (e: 'editMonitor', item: MonitorItem): void
   (e: 'openTrip', tripID: string): void
-  (e: 'backHome'): void
+  (e: 'monitorsUpdated', items: MonitorItem[]): void
+  (e: 'visibleMonitorsChanged', monitorIDs: string[]): void
+  (e: 'monitorSelected', monitorID: string | null): void
+  (e: 'windowSelected', value: { monitorID: string; evaluation: EvaluationItem | null }): void
 }>()
 
 const monitors = ref<MonitorItem[]>([])
 const loading = ref(false)
+const loadError = ref('')
 const filterTab = ref<'all' | 'recommended' | 'watching'>('all')
-const expandedMonitorID = ref<string | null>(null)
-const monitorTimeline = ref<Record<string, EvaluationItem[]>>({})
+const selectedMonitorID = ref<string | null>(null)
+const evaluationsByMonitor = ref<Record<string, EvaluationItem[]>>({})
+const selectedEvaluationID = ref<string | null>(null)
 const convertingID = ref<string | null>(null)
 const evaluatingID = ref<string | null>(null)
+const deletingID = ref<string | null>(null)
 const toastMsg = ref('')
 
-onMounted(() => {
-  void loadMonitors()
+const selectedMonitor = computed(() => monitors.value.find(item => item.id === selectedMonitorID.value) || null)
+const selectedEvaluations = computed(() => [...(evaluationsByMonitor.value[selectedMonitorID.value || ''] || [])].sort((a, b) => a.window_start.localeCompare(b.window_start)))
+const selectedEvaluation = computed(() => {
+  const list = evaluationsByMonitor.value[selectedMonitorID.value || ''] || []
+  return list.find(item => item.id === selectedEvaluationID.value) || selectedMonitor.value?.latest_evaluation || list.slice().sort((a, b) => b.score - a.score)[0] || null
+})
+const recommendedCount = computed(() => monitors.value.filter(item => item.latest_evaluation?.level === 'strongly_recommended').length)
+const watchingCount = computed(() => monitors.value.length - recommendedCount.value)
+const filteredMonitors = computed(() => {
+  let items = monitors.value.slice()
+  if (filterTab.value === 'recommended') items = items.filter(item => item.latest_evaluation?.level === 'strongly_recommended')
+  if (filterTab.value === 'watching') items = items.filter(item => item.latest_evaluation?.level !== 'strongly_recommended')
+  return items.slice().sort((a, b) => {
+    const scoreA = a.latest_evaluation?.score ?? -1
+    const scoreB = b.latest_evaluation?.score ?? -1
+    if (scoreA !== scoreB) return scoreB - scoreA
+    return (a.latest_evaluation?.window_start || '9999').localeCompare(b.latest_evaluation?.window_start || '9999')
+  })
 })
 
+watch(filteredMonitors, items => emit('visibleMonitorsChanged', items.map(item => item.id)), { immediate: true })
+onMounted(() => { void loadMonitors() })
 async function loadMonitors() {
-  loading.value = true
+  loading.value = true; loadError.value = ''
   try {
     const res = await props.apiFetch('/api/v1/monitors')
-    if (res.ok) {
-      monitors.value = (await res.json()) as MonitorItem[]
-    }
-  } catch (err) {
-    console.error('load monitors error:', err)
-  } finally {
-    loading.value = false
-  }
+    if (!res.ok) throw new Error('无法读取景点监控列表')
+    const payload = await res.json() as MonitorItem[]
+    monitors.value = Array.isArray(payload) ? payload : []
+    emit('monitorsUpdated', monitors.value)
+    if (selectedMonitorID.value && !monitors.value.some(item => item.id === selectedMonitorID.value)) await returnToList()
+  } catch (err) { loadError.value = err instanceof Error ? err.message : '读取监控列表失败' }
+  finally { loading.value = false }
 }
-
-const filteredMonitors = computed(() => {
-  if (filterTab.value === 'recommended') {
-    return monitors.value.filter(m => m.latest_evaluation?.level === 'strongly_recommended')
-  }
-  if (filterTab.value === 'watching') {
-    return monitors.value.filter(m => m.latest_evaluation?.level !== 'strongly_recommended')
-  }
-  return monitors.value
-})
-
-const recommendedCount = computed(() => {
-  return monitors.value.filter(m => m.latest_evaluation?.level === 'strongly_recommended').length
-})
-
-async function toggleTimeline(m: MonitorItem) {
-  if (expandedMonitorID.value === m.id) {
-    expandedMonitorID.value = null
-    return
-  }
-  expandedMonitorID.value = m.id
-  if (!monitorTimeline.value[m.id]) {
-    try {
-      const res = await props.apiFetch(`/api/v1/monitors/${m.id}/evaluations`)
-      if (res.ok) {
-        monitorTimeline.value[m.id] = (await res.json()) as EvaluationItem[]
-      }
-    } catch (err) {
-      console.error('load evaluations error:', err)
-    }
-  }
-}
-
-async function triggerEvaluate(m: MonitorItem) {
-  evaluatingID.value = m.id
+async function loadEvaluations(monitorID: string) {
+  if (evaluationsByMonitor.value[monitorID]) return evaluationsByMonitor.value[monitorID]
   try {
-    const res = await props.apiFetch(`/api/v1/monitors/${m.id}/evaluate`, { method: 'POST' })
-    if (res.ok) {
-      const data = (await res.json()) as { evaluations?: EvaluationItem[] }
-      if (data.evaluations?.length) {
-        monitorTimeline.value[m.id] = data.evaluations
-      }
-      await loadMonitors()
-      showToast('时机评估已更新！')
-    }
-  } catch (err) {
-    console.error('evaluate error:', err)
-  } finally {
-    evaluatingID.value = null
-  }
+    const res = await props.apiFetch('/api/v1/monitors/' + encodeURIComponent(monitorID) + '/evaluations?limit=100')
+    if (!res.ok) throw new Error('无法读取未来机会窗口')
+    const payload = await res.json() as EvaluationItem[]
+    const items = Array.isArray(payload) ? payload : []
+    evaluationsByMonitor.value = { ...evaluationsByMonitor.value, [monitorID]: items }
+    return items
+  } catch (err) { loadError.value = err instanceof Error ? err.message : '读取机会窗口失败'; return [] }
 }
-
-async function deleteMonitor(m: MonitorItem) {
-  if (!window.confirm(`确认删除对【${m.place_name}】的监控规则吗？`)) return
-  try {
-    const res = await props.apiFetch(`/api/v1/monitors/${m.id}`, { method: 'DELETE' })
-    if (res.ok) {
-      await loadMonitors()
-      showToast('监控已移除')
-    }
-  } catch (err) {
-    console.error('delete monitor error:', err)
-  }
+async function openMonitorDetails(monitorID: string) {
+  const item = monitors.value.find(candidate => candidate.id === monitorID)
+  if (!item) return
+  selectedMonitorID.value = monitorID
+  selectedEvaluationID.value = item.latest_evaluation?.id || null
+  loadError.value = ''
+  emit('monitorSelected', monitorID)
+  const items = await loadEvaluations(monitorID)
+  if (selectedMonitorID.value !== monitorID) return
+  if (!selectedEvaluationID.value && items.length) selectedEvaluationID.value = items.slice().sort((a, b) => b.score - a.score)[0]?.id || null
+  emit('windowSelected', { monitorID, evaluation: selectedEvaluation.value })
 }
-
-async function convertToTrip(m: MonitorItem, winStart: string, winEnd: string) {
-  convertingID.value = m.id
-  try {
-    const res = await props.apiFetch(`/api/v1/monitors/${m.id}/convert-trip`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ window_start: winStart, window_end: winEnd }),
-    })
-    if (!res.ok) {
-      throw new Error('转换行程失败')
-    }
-    const data = (await res.json()) as { trip_id?: string }
-    if (data.trip_id) {
-      showToast('已为你自动生成行程草稿！正在直达行程规划…')
-      emit('openTrip', data.trip_id)
-    }
-  } catch (err) {
-    alert(err instanceof Error ? err.message : '创建行程失败')
-  } finally {
-    convertingID.value = null
-  }
+function selectMonitorFromMap(monitorID: string) { void openMonitorDetails(monitorID) }
+async function returnToList() {
+  selectedMonitorID.value = null; selectedEvaluationID.value = null; loadError.value = ''
+  emit('monitorSelected', null); emit('windowSelected', { monitorID: '', evaluation: null })
 }
-
-function showToast(text: string) {
-  toastMsg.value = text
-  setTimeout(() => {
-    if (toastMsg.value === text) toastMsg.value = ''
-  }, 3500)
+function selectEvaluation(evaluation: EvaluationItem) {
+  selectedEvaluationID.value = evaluation.id
+  if (selectedMonitorID.value) emit('windowSelected', { monitorID: selectedMonitorID.value, evaluation })
 }
-
-function formatMonths(months?: number[]): string {
+function formatMonths(months?: number[]) {
   if (!months?.length || months.length === 12) return '全年适游'
-  return months.map(m => m + '月').join('、')
+  return months.slice().sort((a,b)=>a-b).map(month => month + '月').join('、')
 }
-
-function formatLeaveDays(days?: number): string {
-  return days == null || days <= 0 ? '免请假' : `最多请${days}天`
+function formatLeaveDays(days?: number) { return days == null || days <= 0 ? '免请假' : '最多请' + days + '天' }
+function levelLabel(level?: EvaluationItem['level']) {
+  if (level === 'strongly_recommended') return '强烈推荐'
+  if (level === 'acceptable') return '备选时机'
+  if (level === 'waiting') return '继续等待'
+  return '等待评估'
 }
-
-defineExpose({
-  loadMonitors,
-})
+function levelClass(level?: EvaluationItem['level']) { return level === 'strongly_recommended' ? 'strongly_recommended' : level === 'acceptable' ? 'acceptable' : 'waiting' }
+function showToast(message: string) { toastMsg.value = message; window.setTimeout(() => { if (toastMsg.value === message) toastMsg.value = '' }, 3200) }
+async function triggerEvaluate(item: MonitorItem) {
+  evaluatingID.value = item.id; loadError.value = ''
+  try {
+    const res = await props.apiFetch('/api/v1/monitors/' + encodeURIComponent(item.id) + '/evaluate', { method: 'POST' })
+    if (!res.ok) throw new Error('重新评估失败')
+    const data = await res.json() as { evaluations?: EvaluationItem[] }
+    if (data.evaluations) evaluationsByMonitor.value = { ...evaluationsByMonitor.value, [item.id]: data.evaluations }
+    await loadMonitors(); showToast('时机评估已更新')
+  } catch (err) { loadError.value = err instanceof Error ? err.message : '重新评估失败' }
+  finally { evaluatingID.value = null }
+}
+async function deleteMonitor(item: MonitorItem) {
+  if (!window.confirm('确认删除对「' + item.place_name + '」的景点监控吗？')) return
+  deletingID.value = item.id
+  try {
+    const res = await props.apiFetch('/api/v1/monitors/' + encodeURIComponent(item.id), { method: 'DELETE' })
+    if (!res.ok) throw new Error('删除监控失败')
+    if (selectedMonitorID.value === item.id) await returnToList()
+    const next = { ...evaluationsByMonitor.value }; delete next[item.id]; evaluationsByMonitor.value = next
+    await loadMonitors(); showToast('监控已删除')
+  } catch (err) { loadError.value = err instanceof Error ? err.message : '删除监控失败' }
+  finally { deletingID.value = null }
+}
+async function convertToTrip(item: MonitorItem, evaluation: EvaluationItem | null) {
+  if (!evaluation) return
+  convertingID.value = item.id; loadError.value = ''
+  try {
+    const res = await props.apiFetch('/api/v1/monitors/' + encodeURIComponent(item.id) + '/convert-trip', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ window_start: evaluation.window_start, window_end: evaluation.window_end }),
+    })
+    if (!res.ok) { const payload = await res.json() as { error?: { message?: string } }; throw new Error(payload.error?.message || '转换行程失败') }
+    const data = await res.json() as { trip_id?: string }
+    if (data.trip_id) { showToast('已生成行程草稿，正在打开…'); emit('openTrip', data.trip_id) }
+  } catch (err) { loadError.value = err instanceof Error ? err.message : '创建行程草稿失败' }
+  finally { convertingID.value = null }
+}
+defineExpose({ loadMonitors, selectMonitorFromMap })
 </script>
 
 <template>
-  <div class="travel-radar-view">
-    <!-- 头部栏 -->
-    <header class="radar-header">
-      <button type="button" class="radar-mobile-back" @click="emit('backHome')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/><path d="M9 12h12"/></svg>
-        <span>返回行程</span>
-      </button>
-      <div class="header-main">
-        <span class="eyebrow">TRAVEL OPPORTUNITY RADAR</span>
-        <h2>旅行时机雷达</h2>
-        <p>多维监测目标景点的适游月份、天文月相、节假日与气象少云窗口，捕捉最佳游玩良机</p>
+  <div class="travel-radar-view is-panel">
+    <header class="radar-panel-header">
+      <div class="radar-panel-heading">
+        <button v-if="selectedMonitor" type="button" class="radar-detail-back" aria-label="返回监控列表" @click="returnToList">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/><path d="M9 12h12"/></svg>
+        </button>
+        <div class="radar-panel-heading-copy">
+          <span class="eyebrow">TRAVEL OPPORTUNITY RADAR</span>
+          <h2>{{ selectedMonitor?.place_name || '旅行时机雷达' }}</h2>
+          <p v-if="selectedMonitor">{{ selectedMonitor.title }}</p>
+          <p v-else>监控 {{ monitors.length }} 个心愿景点 · {{ recommendedCount }} 个强烈推荐</p>
+        </div>
       </div>
-      <button type="button" class="btn-create-monitor" @click="emit('newMonitor')">
-        <span class="icon">+</span>
-        <span>添加心愿景点监控</span>
+      <button v-if="!selectedMonitor" type="button" class="radar-add-button" aria-label="添加心愿景点监控" @click="emit('newMonitor')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg><span>添加</span>
       </button>
     </header>
 
-    <!-- 顶部状态横幅 (如果有推荐) -->
-    <div v-if="recommendedCount > 0" class="radar-highlight-banner">
-      <div class="banner-badge">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 23c-4.97 0-9-4.03-9-9 0-3.64 2.2-6.77 5.38-8.11C8.75 8.13 9 10.45 9 11.5c0 1.25.54 2.39 1.41 3.17.65.59 1.48.97 2.39 1.07.72.08 1.45-.11 2.05-.51.87-.58 1.4-1.57 1.4-2.64 0-1.22-.39-2.35-1.07-3.29C17.2 11.08 19 13.56 19 16.5c0 3.59-2.91 6.5-6.5 6.5h-.5z"/></svg>
-        <span>强烈推荐</span>
+    <template v-if="!selectedMonitor">
+      <div class="radar-list-summary"><span class="radar-list-count">{{ filteredMonitors.length }} 个景点</span><span class="radar-list-hint">按推荐度与窗口日期排序</span></div>
+      <div class="radar-filter-pills" role="group" aria-label="监控点筛选">
+        <button type="button" :class="{ active: filterTab === 'all' }" @click="filterTab = 'all'">全部 {{ monitors.length }}</button>
+        <button type="button" :class="{ active: filterTab === 'recommended' }" @click="filterTab = 'recommended'">强烈推荐 {{ recommendedCount }}</button>
+        <button type="button" :class="{ active: filterTab === 'watching' }" @click="filterTab = 'watching'">待观察 {{ watchingCount }}</button>
       </div>
-      <div class="banner-text">
-        当前雷达巡检已锁定 <strong>{{ recommendedCount }} 个绝佳出行窗口</strong>，包含新月纯黑夜、假期免请假与晴空少云时机，可直接一键生成行程！
+      <div class="radar-list-scroll">
+        <div v-if="loading" class="radar-state-message" role="status">正在读取景点监控…</div>
+        <div v-else-if="loadError" class="radar-state-message radar-state-error" role="alert"><span>{{ loadError }}</span><button type="button" @click="loadMonitors">重试</button></div>
+        <div v-else-if="filteredMonitors.length === 0" class="radar-state-message radar-empty-panel">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M12 3v2M21 12h-2M12 21v-2M3 12h2"/></svg>
+          <strong>{{ monitors.length ? '当前筛选下没有监控点' : '还没有心愿景点' }}</strong>
+          <span>{{ monitors.length ? '切换筛选条件查看其他景点。' : '添加景点，雷达会持续寻找合适的出行窗口。' }}</span>
+          <button v-if="!monitors.length" type="button" class="radar-add-button" @click="emit('newMonitor')">添加景点</button>
+        </div>
+        <div v-else class="radar-monitor-list">
+          <button v-for="item in filteredMonitors" :key="item.id" type="button" class="radar-monitor-row" :class="levelClass(item.latest_evaluation?.level)" @click="openMonitorDetails(item.id)">
+            <span class="radar-row-indicator" :class="levelClass(item.latest_evaluation?.level)" aria-hidden="true"></span>
+            <span class="radar-row-main">
+              <span class="radar-row-title"><strong>{{ item.place_name }}</strong><span class="radar-row-level" :class="levelClass(item.latest_evaluation?.level)">{{ levelLabel(item.latest_evaluation?.level) }}</span></span>
+              <span class="radar-row-window">{{ item.latest_evaluation ? item.latest_evaluation.window_start + ' ~ ' + item.latest_evaluation.window_end : '暂无匹配的近期窗口' }}</span>
+              <span class="radar-row-tags"><span>{{ formatMonths(item.criteria?.months) }}</span><span v-if="item.criteria?.stargazing_mode">星空监控</span><span>{{ formatLeaveDays(item.criteria?.max_leave_days) }}</span></span>
+            </span>
+            <span v-if="item.latest_evaluation" class="radar-row-score" :class="levelClass(item.latest_evaluation.level)">{{ Math.round(item.latest_evaluation.score) }}<small>分</small></span>
+            <span v-else class="radar-row-score radar-row-score-empty" aria-label="尚无评分">—</span>
+            <svg class="radar-row-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+        </div>
       </div>
-    </div>
+    </template>
 
-    <!-- 筛选工具条 -->
-    <div class="radar-filter-bar">
-      <div class="filter-pills">
-        <button
-          type="button"
-          class="filter-btn"
-          :class="{ active: filterTab === 'all' }"
-          @click="filterTab = 'all'"
-        >
-          全部监控 ({{ monitors.length }})
-        </button>
-        <button
-          type="button"
-          class="filter-btn"
-          :class="{ active: filterTab === 'recommended' }"
-          @click="filterTab = 'recommended'"
-        >
-          <span class="btn-icon-label">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 23c-4.97 0-9-4.03-9-9 0-3.64 2.2-6.77 5.38-8.11C8.75 8.13 9 10.45 9 11.5c0 1.25.54 2.39 1.41 3.17.65.59 1.48.97 2.39 1.07.72.08 1.45-.11 2.05-.51.87-.58 1.4-1.57 1.4-2.64 0-1.22-.39-2.35-1.07-3.29C17.2 11.08 19 13.56 19 16.5c0 3.59-2.91 6.5-6.5 6.5h-.5z"/></svg>
-            <span>强烈推荐 ({{ recommendedCount }})</span>
-          </span>
-        </button>
-        <button
-          type="button"
-          class="filter-btn"
-          :class="{ active: filterTab === 'watching' }"
-          @click="filterTab = 'watching'"
-        >
-          <span class="btn-icon-label">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-            <span>监控等待中</span>
-          </span>
-        </button>
+    <template v-else>
+      <div class="radar-detail-scroll">
+        <div class="radar-detail-score-card" :class="levelClass(selectedEvaluation?.level)">
+          <div class="radar-detail-score-copy"><span class="radar-detail-level">{{ levelLabel(selectedEvaluation?.level) }}</span><strong>{{ selectedEvaluation ? selectedEvaluation.window_start + ' ~ ' + selectedEvaluation.window_end : '暂无可用窗口' }}</strong><small>{{ selectedEvaluation?.details?.summary || '雷达尚未计算出可用的近期出行窗口。' }}</small></div>
+          <div v-if="selectedEvaluation" class="radar-detail-score-value"><strong>{{ Math.round(selectedEvaluation.score) }}</strong><small>分</small></div>
+        </div>
+        <div class="radar-detail-tags"><span>{{ formatMonths(selectedMonitor.criteria?.months) }}</span><span v-if="selectedMonitor.criteria?.stargazing_mode">星空监控</span><span>{{ formatLeaveDays(selectedMonitor.criteria?.max_leave_days) }}</span><span v-if="selectedMonitor.origin_city">{{ selectedMonitor.origin_city }}出发</span><span v-if="selectedMonitor.max_budget">预算 ≤ {{ selectedMonitor.max_budget }} 元</span></div>
+        <section v-if="selectedEvaluation" class="radar-detail-section" aria-label="推荐因素">
+          <h3>推荐因素</h3>
+          <div class="radar-factor-list">
+            <div class="radar-factor-row"><span>月相</span><strong>{{ selectedEvaluation.details.moon_phase_name || '未启用' }}</strong><small>{{ selectedEvaluation.details.moon_illumination != null ? '月面照亮 ' + Math.round(selectedEvaluation.details.moon_illumination * 100) + '%' : '暂无月相数据' }} · 天文 {{ selectedEvaluation.details.scores?.astro_score ?? '—' }}分</small></div>
+            <div class="radar-factor-row"><span>银河核心</span><strong>{{ selectedEvaluation.details.galactic_hours ? selectedEvaluation.details.galactic_hours + ' 小时' : '不可见' }}</strong><small>纯黑夜有效时段 · 天文 {{ selectedEvaluation.details.scores?.astro_score ?? '—' }}分</small></div>
+            <div class="radar-factor-row"><span>天气</span><strong>{{ selectedEvaluation.details.weather_condition || '暂无预报' }}</strong><small>{{ selectedEvaluation.details.cloud_cover_avg != null ? '云量 ' + selectedEvaluation.details.cloud_cover_avg + '%' : '云量暂无' }} · 气象 {{ selectedEvaluation.details.scores?.weather_score ?? '—' }}分</small></div>
+            <div class="radar-factor-row"><span>假期</span><strong>{{ selectedEvaluation.details.holiday_name || '周末/工作日窗口' }}</strong><small>{{ selectedEvaluation.details.leave_days_required === 0 ? '无需请假' : '需请假 ' + (selectedEvaluation.details.leave_days_required ?? 0) + ' 天' }} · 日历 {{ selectedEvaluation.details.scores?.calendar_score ?? '—' }}分</small></div>
+          </div>
+        </section>
+        <section class="radar-detail-section" aria-label="未来出行窗口">
+          <div class="radar-detail-section-heading"><h3>未来出行窗口</h3><span>45 天内</span></div>
+          <div v-if="!selectedEvaluations.length" class="radar-state-message">{{ loadError || '暂无候选窗口；可以重新评估或继续等待条件变化。' }}</div>
+          <div v-else class="radar-window-list">
+            <div v-for="evaluation in selectedEvaluations" :key="evaluation.id" class="radar-window-row" :class="[levelClass(evaluation.level), { selected: selectedEvaluation?.id === evaluation.id }]">
+              <button type="button" class="radar-window-select" @click="selectEvaluation(evaluation)"><strong>{{ evaluation.window_start }} ~ {{ evaluation.window_end }}</strong><small>{{ evaluation.details.summary || levelLabel(evaluation.level) }}</small></button>
+              <span class="radar-window-score">{{ Math.round(evaluation.score) }} 分</span>
+              <button type="button" class="radar-window-convert" :disabled="convertingID === selectedMonitor.id" @click="convertToTrip(selectedMonitor, evaluation)">生成行程</button>
+            </div>
+          </div>
+        </section>
+        <p v-if="loadError" class="radar-inline-error" role="alert">{{ loadError }}</p>
       </div>
-    </div>
-
-    <!-- 监控卡片列表 -->
-    <div v-if="loading" class="radar-empty">
-      <span>正在扫描雷达时机…</span>
-    </div>
-
-    <div v-else-if="filteredMonitors.length === 0" class="radar-empty">
-      <div class="empty-icon">
-        <svg width="54" height="54" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 2a10 10 0 1 0 10 10" />
-          <path d="M12 6a6 6 0 1 0 6 6" />
-          <circle cx="12" cy="12" r="2" />
-          <line x1="12" y1="12" x2="19" y2="5" />
-        </svg>
-      </div>
-      <h3>暂无符合条件的景点监控</h3>
-      <p>你可以点击上方按钮添加你向往的旅行目的地，系统将为你每日自动巡检最佳游玩时间窗口。</p>
-      <button type="button" class="btn-create-monitor empty-create-btn" @click="emit('newMonitor')">
-        立即添加第一个心愿景点
-      </button>
-    </div>
-
-    <div v-else class="monitor-cards-grid">
-      <article
-        v-for="m in filteredMonitors"
-        :key="m.id"
-        class="monitor-card"
-        :class="{ 'is-recommended': m.latest_evaluation?.level === 'strongly_recommended' }"
-      >
-        <div class="card-header">
-          <div class="card-title-group">
-            <h3>{{ m.place_name }}</h3>
-            <span v-if="m.title && m.title !== m.place_name" class="card-subtitle">{{ m.title }}</span>
-          </div>
-          <div class="card-status-badge" :class="[m.latest_evaluation?.level || 'waiting']">
-            <span v-if="m.latest_evaluation?.level === 'strongly_recommended'" class="status-content">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 23c-4.97 0-9-4.03-9-9 0-3.64 2.2-6.77 5.38-8.11C8.75 8.13 9 10.45 9 11.5c0 1.25.54 2.39 1.41 3.17.65.59 1.48.97 2.39 1.07.72.08 1.45-.11 2.05-.51.87-.58 1.4-1.57 1.4-2.64 0-1.22-.39-2.35-1.07-3.29C17.2 11.08 19 13.56 19 16.5c0 3.59-2.91 6.5-6.5 6.5h-.5z"/></svg>
-              <span>强烈推荐出行</span>
-            </span>
-            <span v-else-if="m.latest_evaluation?.level === 'acceptable'" class="status-content">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-              <span>备选时机</span>
-            </span>
-            <span v-else class="status-content">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-              <span>监控等待中</span>
-            </span>
-          </div>
-        </div>
-
-        <!-- 规则标签 -->
-        <div class="criteria-tags">
-          <span class="criteria-tag">{{ formatMonths(m.criteria?.months) }}</span>
-          <span v-if="m.criteria?.stargazing_mode" class="criteria-tag tag-stargazing">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3z"/></svg>
-            <span>银河星空</span>
-          </span>
-          <span class="criteria-tag">{{ formatLeaveDays(m.criteria?.max_leave_days) }}</span>
-          <span v-if="m.origin_city" class="criteria-tag">{{ m.origin_city }}出发</span>
-          <span v-if="m.max_budget" class="criteria-tag">预算≤{{ m.max_budget }}元</span>
-        </div>
-
-        <!-- 最佳窗口预测展示区 -->
-        <div v-if="m.latest_evaluation" class="opportunity-window-box">
-          <div class="window-top">
-            <div class="window-date">
-              <strong>{{ m.latest_evaluation.window_start }} ~ {{ m.latest_evaluation.window_end }}</strong>
-              <small>{{ m.latest_evaluation.details?.summary }}</small>
-            </div>
-            <div class="window-score">
-              <span class="score-val">{{ m.latest_evaluation.score }}</span>
-              <span class="score-lbl">分</span>
-            </div>
-          </div>
-
-          <!-- 要素卡片细分 -->
-          <div class="factors-grid">
-            <div class="factor-item">
-              <span class="factor-lbl">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-                <span>月相条件</span>
-              </span>
-              <strong>{{ m.latest_evaluation.details?.moon_phase_name || '正常' }}</strong>
-              <small>月面照亮 {{ Math.round((m.latest_evaluation.details?.moon_illumination || 0) * 100) }}%</small>
-            </div>
-            <div class="factor-item">
-              <span class="factor-lbl">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
-                <span>银河核心</span>
-              </span>
-              <strong>{{ m.latest_evaluation.details?.galactic_hours > 0 ? `${m.latest_evaluation.details.galactic_hours}小时` : '不可见' }}</strong>
-              <small>纯黑夜有效观测时段</small>
-            </div>
-            <div class="factor-item">
-              <span class="factor-lbl">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-                <span>气象少云</span>
-              </span>
-              <strong>{{ m.latest_evaluation.details?.weather_condition || '少云' }}</strong>
-              <small>云量 {{ m.latest_evaluation.details?.cloud_cover_avg || 20 }}%</small>
-            </div>
-            <div class="factor-item">
-              <span class="factor-lbl">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                <span>假期匹配</span>
-              </span>
-              <strong>{{ m.latest_evaluation.details?.holiday_name || '周末' }}</strong>
-              <small>{{ m.latest_evaluation.details?.leave_days_required === 0 ? '无需请假' : `需请假 ${m.latest_evaluation.details?.leave_days_required} 天` }}</small>
-            </div>
-          </div>
-        </div>
-
-        <div v-else class="no-eval-box">
-          <span>暂无匹配的近期窗口，正在等待时机开启…</span>
-        </div>
-
-        <!-- 操作按钮栏 -->
-        <div class="card-actions">
-          <button
-            v-if="m.latest_evaluation"
-            type="button"
-            class="btn-convert"
-            :disabled="convertingID === m.id"
-            @click="convertToTrip(m, m.latest_evaluation.window_start, m.latest_evaluation.window_end)"
-          >
-            <span v-if="convertingID === m.id">正在生成行程…</span>
-            <span v-else class="btn-icon-label">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
-              <span>一键生成此窗口行程</span>
-            </span>
-          </button>
-          <button
-            type="button"
-            class="btn-sec"
-            @click="toggleTimeline(m)"
-          >
-            {{ expandedMonitorID === m.id ? '收起时间轴' : '查看未来45天窗口' }}
-          </button>
-          <button
-            type="button"
-            class="btn-sec"
-            :disabled="evaluatingID === m.id"
-            title="重新执行天气与月相评估"
-            @click="triggerEvaluate(m)"
-          >
-            <span v-if="evaluatingID === m.id">…</span>
-            <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-          </button>
-          <button
-            type="button"
-            class="btn-sec"
-            title="编辑监控"
-            @click="emit('editMonitor', m)"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-          </button>
-          <button
-            type="button"
-            class="btn-sec btn-del"
-            title="删除监控"
-            @click="deleteMonitor(m)"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-        </div>
-
-        <!-- 展开的未来 45 天打分时间轴 -->
-        <div v-if="expandedMonitorID === m.id" class="timeline-expand-box">
-          <label class="timeline-title">未来 45 天旅行窗口机会时间轴</label>
-          <div v-if="!monitorTimeline[m.id]?.length" class="timeline-empty">
-            <span>正在分析后续候选窗口…</span>
-          </div>
-          <div v-else class="timeline-list">
-            <div
-              v-for="ev in monitorTimeline[m.id]"
-              :key="ev.id"
-              class="timeline-row"
-              :class="[ev.level]"
-            >
-              <div class="timeline-dates">
-                <strong>{{ ev.window_start }} ~ {{ ev.window_end }}</strong>
-                <small>{{ ev.details?.summary }}</small>
-              </div>
-              <div class="timeline-score-badge">
-                {{ ev.score }} 分
-              </div>
-              <button
-                type="button"
-                class="timeline-convert-btn"
-                @click="convertToTrip(m, ev.window_start, ev.window_end)"
-              >
-                选此窗口成行
-              </button>
-            </div>
-          </div>
-        </div>
-      </article>
-    </div>
-
-    <!-- 底部反馈 -->
+      <footer class="radar-detail-actions">
+        <button type="button" class="radar-create-trip" :disabled="!selectedEvaluation || convertingID === selectedMonitor.id" @click="convertToTrip(selectedMonitor, selectedEvaluation)">{{ convertingID === selectedMonitor.id ? '正在生成…' : '生成所选窗口行程草稿' }}</button>
+        <button type="button" class="radar-icon-action" :disabled="evaluatingID === selectedMonitor.id" title="重新评估" aria-label="重新评估" @click="triggerEvaluate(selectedMonitor)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0 0 20.5 15"/></svg></button>
+        <button type="button" class="radar-icon-action" title="编辑监控规则" aria-label="编辑监控规则" @click="emit('editMonitor', selectedMonitor)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg></button>
+        <button type="button" class="radar-icon-action danger" :disabled="deletingID === selectedMonitor.id" title="删除监控" aria-label="删除监控" @click="deleteMonitor(selectedMonitor)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2m3 0-1 14H6L5 6m4 4v6m6-6v6"/></svg></button>
+      </footer>
+    </template>
     <div v-if="toastMsg" class="radar-toast">{{ toastMsg }}</div>
   </div>
 </template>
 
 <style scoped>
-.travel-radar-view {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 16px;
-  padding: 24px;
-  max-width: 1140px;
-  margin: 0 auto;
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.radar-header {
-  display: flex;
-  min-width: 0;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.radar-mobile-back {
-  display: none;
-}
-
-.header-main {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.header-main .eyebrow {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  color: var(--p);
-}
-
-.header-main h2 {
-  margin: 4px 0 6px;
-  font-size: 26px;
-  font-weight: 800;
-  color: var(--ink);
-}
-
-.header-main p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.btn-create-monitor {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 42px;
-  padding: 0 18px;
-  border-radius: 12px;
-  border: 0;
-  background: var(--p);
-  color: var(--md-on-primary, #ffffff);
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  white-space: nowrap;
-}
-
-.btn-create-monitor:hover {
-  background: color-mix(in srgb, var(--p) 86%, #000);
-}
-
-.radar-highlight-banner {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 18px;
-  background: color-mix(in srgb, var(--p) 12%, var(--surface));
-  border: 1px solid var(--p);
-  border-radius: 14px;
-}
-
-.banner-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: var(--p);
-  color: var(--md-on-primary, #ffffff);
-  font-size: 11px;
-  font-weight: 800;
-  white-space: nowrap;
-  line-height: 1;
-}
-
-.banner-badge svg {
-  flex-shrink: 0;
-  display: block;
-}
-
-.btn-icon-label {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  line-height: 1;
-}
-
-.btn-icon-label svg {
-  flex-shrink: 0;
-  display: block;
-}
-
-.banner-text {
-  min-width: 0;
-  flex: 1 1 180px;
-  overflow-wrap: anywhere;
-  font-size: 13px;
-  color: var(--ink);
-  line-height: 1.45;
-}
-
-.radar-filter-bar {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid var(--line);
-  padding-bottom: 12px;
-}
-
-.filter-pills {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.filter-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 32px;
-  padding: 6px 14px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--ink);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  line-height: 1;
-}
-
-.filter-btn:hover {
-  background: var(--panel);
-}
-
-.filter-btn.active {
-  background: var(--p);
-  color: var(--md-on-primary, #ffffff);
-  border-color: var(--p);
-}
-
-.radar-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 60px 20px;
-  text-align: center;
-  color: var(--muted);
-  gap: 12px;
-}
-
-.empty-icon {
-  font-size: 48px;
-}
-
-.empty-create-btn {
-  margin-top: 12px;
-}
-
-.monitor-cards-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 480px), 1fr));
-  min-width: 0;
-  gap: 20px;
-}
-
-.monitor-card {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 14px;
-  padding: 20px;
-  border-radius: 18px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.05);
-  transition: all 0.2s ease;
-}
-
-.monitor-card.is-recommended {
-  border-color: color-mix(in srgb, #ff6b35 70%, var(--line));
-  box-shadow: 0 6px 24px rgba(255, 107, 53, 0.12);
-}
-
-.card-header {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.card-title-group {
-  min-width: 0;
-  flex: 1 1 180px;
-  overflow-wrap: anywhere;
-}
-
-.card-title-group h3 {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 800;
-  color: var(--ink);
-}
-
-.card-subtitle {
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.card-status-badge {
-  display: inline-flex;
-  max-width: 100%;
-  align-items: center;
-  padding: 4px 10px;
-  border-radius: 8px;
-  font-size: 11px;
-  font-weight: 700;
-  white-space: normal;
-  line-height: 1.15;
-}
-
-.status-content {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  line-height: 1;
-}
-
-.status-content svg {
-  flex-shrink: 0;
-  display: block;
-}
-
-.card-status-badge.strongly_recommended {
-  background: color-mix(in srgb, #ff6b35 18%, var(--surface));
-  color: #ff6b35;
-  border: 1px solid #ff6b35;
-}
-
-.card-status-badge.acceptable {
-  background: color-mix(in srgb, #0284c7 15%, var(--surface));
-  color: #0284c7;
-  border: 1px solid #0284c7;
-}
-
-.card-status-badge.waiting {
-  background: var(--panel);
-  color: var(--muted);
-  border: 1px solid var(--line);
-}
-
-.criteria-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.criteria-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 8px;
-  border-radius: 6px;
-  background: var(--panel);
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.2;
-}
-
-.criteria-tag svg {
-  flex-shrink: 0;
-  display: block;
-}
-
-.tag-stargazing {
-  background: color-mix(in srgb, #6366f1 15%, var(--surface));
-  color: #818cf8;
-}
-
-.opportunity-window-box {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 12px;
-  padding: 14px;
-  background: var(--panel);
-  border-radius: 14px;
-  border: 1px solid var(--line);
-}
-
-.window-top {
-  display: flex;
-  min-width: 0;
-  gap: 8px;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.window-date {
-  min-width: 0;
-  flex: 1;
-  overflow-wrap: anywhere;
-}
-
-.window-date strong {
-  font-size: 15px;
-  color: var(--ink);
-}
-
-.window-date small {
-  display: block;
-  color: var(--p);
-  font-size: 12px;
-  font-weight: 600;
-  margin-top: 2px;
-}
-
-.window-score {
-  display: flex;
-  align-items: baseline;
-  color: #ff6b35;
-}
-
-.score-val {
-  font-size: 26px;
-  font-weight: 900;
-  font-variant-numeric: tabular-nums;
-}
-
-.score-lbl {
-  font-size: 12px;
-  font-weight: 700;
-  margin-left: 2px;
-}
-
-.factors-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  min-width: 0;
-  gap: 8px;
-}
-
-.factor-item {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 10px;
-  background: var(--surface);
-  border-radius: 10px;
-  border: 1px solid var(--line);
-}
-
-.factor-lbl {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 10px;
-  color: var(--muted);
-  font-weight: 700;
-  line-height: 1;
-}
-
-.factor-lbl svg {
-  flex-shrink: 0;
-  display: block;
-}
-
-.factor-item strong {
-  font-size: 12px;
-  color: var(--ink);
-}
-
-.factor-item small {
-  font-size: 10px;
-  color: var(--muted);
-}
-
-.no-eval-box {
-  padding: 24px;
-  text-align: center;
-  background: var(--panel);
-  border-radius: 14px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.card-actions {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-top: auto;
-}
-
-.btn-convert {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  flex: 1;
-  min-height: 38px;
-  padding: 0 16px;
-  border-radius: 10px;
-  border: 0;
-  background: var(--p);
-  color: var(--md-on-primary, #ffffff);
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  white-space: nowrap;
-}
-
-.btn-convert svg {
-  flex-shrink: 0;
-  display: block;
-}
-
-.btn-convert:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--p) 86%, #000);
-}
-
-.btn-sec {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  min-height: 38px;
-  padding: 0 12px;
-  border-radius: 10px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  color: var(--ink);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.btn-sec svg {
-  flex-shrink: 0;
-  display: block;
-}
-
-.btn-sec:hover {
-  background: color-mix(in srgb, var(--ink) 8%, var(--panel));
-}
-
-.btn-del {
-  color: #ef4444;
-  font-size: 15px;
-  padding: 0 10px;
-}
-
-.timeline-expand-box {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
-}
-
-.timeline-title {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--muted);
-}
-
-.timeline-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  max-height: 240px;
-  overflow-y: auto;
-}
-
-.timeline-row {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: var(--panel);
-  font-size: 12px;
-}
-
-.timeline-dates {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  flex: 1;
-}
-
-.timeline-dates strong {
-  color: var(--ink);
-  font-size: 12px;
-}
-
-.timeline-dates small {
-  color: var(--muted);
-  font-size: 10px;
-}
-
-.timeline-score-badge {
-  font-size: 12px;
-  font-weight: 800;
-  color: var(--p);
-}
-
-.timeline-convert-btn {
-  padding: 4px 8px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--p);
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.radar-toast {
-  position: fixed;
-  bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 10px 20px;
-  background: var(--ink);
-  color: var(--surface);
-  border-radius: 999px;
-  font-size: 13px;
-  font-weight: 600;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
-  z-index: 9999;
-}
-
-@media (max-width: 900px) {
-  .radar-header {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .radar-mobile-back {
-    display: inline-flex;
-    align-items: center;
-    align-self: flex-start;
-    gap: 7px;
-    min-height: 40px;
-    padding: 0 12px;
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    background: var(--panel);
-    color: var(--ink);
-    font-size: 12px;
-    font-weight: 700;
-    cursor: pointer;
-  }
-  .radar-mobile-back svg {
-    display: block;
-    flex-shrink: 0;
-  }
-}
-
-@media (max-width: 600px) {
-  .travel-radar-view {
-    padding: 16px;
-  }
-  .monitor-cards-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .radar-header {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .btn-create-monitor {
-    width: 100%;
-    justify-content: center;
-    white-space: normal;
-  }
-  .radar-highlight-banner {
-    align-items: flex-start;
-    gap: 8px;
-    padding: 12px;
-  }
-  .banner-body {
-    flex-basis: 100%;
-  }
-  .banner-action-btn {
-    margin-left: auto;
-  }
-  .filter-pills {
-    display: grid;
-    width: 100%;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .filter-btn {
-    min-width: 0;
-    white-space: normal;
-    padding-inline: 8px;
-    line-height: 1.2;
-  }
-  .monitor-card {
-    padding: 14px;
-    gap: 12px;
-  }
-  .card-header {
-    align-items: flex-start;
-  }
-  .card-title-group {
-    flex-basis: 100%;
-  }
-  .card-status-badge {
-    white-space: normal;
-  }
-  .window-top {
-    align-items: flex-start;
-  }
-  .window-date strong {
-    font-size: 14px;
-  }
-  .window-score {
-    flex: 0 0 auto;
-  }
-  .factors-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .factor-item {
-    padding: 8px;
-  }
-  .factor-item strong,
-  .factor-item small {
-    overflow-wrap: anywhere;
-  }
-  .card-actions {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) repeat(3, 40px);
-    gap: 6px;
-  }
-  .card-actions .btn-convert {
-    grid-column: 1 / -1;
-    width: 100%;
-    white-space: normal;
-    padding-inline: 8px;
-  }
-  .card-actions .btn-sec {
-    min-width: 0;
-    width: 100%;
-    padding-inline: 5px;
-    white-space: normal;
-    line-height: 1.15;
-  }
-  .timeline-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 8px;
-  }
-  .timeline-convert-btn {
-    grid-column: 1 / -1;
-    width: 100%;
-  }
+.travel-radar-view.is-panel { display:flex; min-width:0; min-height:0; width:100%; height:auto; flex:1 1 auto; flex-direction:column; gap:0; padding:0; margin:0; overflow:hidden; box-sizing:border-box; }
+.radar-panel-header { display:flex; min-width:0; align-items:center; justify-content:space-between; gap:10px; padding:15px 18px 13px; border-bottom:1px solid var(--line); flex:0 0 auto; }
+.radar-panel-heading,.radar-panel-heading-copy { display:flex; min-width:0; }
+.radar-panel-heading { align-items:center; gap:10px; }
+.radar-panel-heading-copy { flex-direction:column; gap:2px; }
+.radar-panel-heading-copy .eyebrow { margin:0; color:var(--p); font-size:9px; font-weight:900; letter-spacing:.1em; }
+.radar-panel-heading h2 { overflow:hidden; margin:0; color:var(--ink); font-size:18px; font-weight:850; text-overflow:ellipsis; white-space:nowrap; }
+.radar-panel-heading-copy p { overflow:hidden; margin:0; color:var(--muted); font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
+.radar-detail-back,.radar-add-button { display:inline-flex; flex:0 0 auto; align-items:center; justify-content:center; gap:6px; min-height:38px; padding:0 11px; border:1px solid var(--line); border-radius:11px; color:var(--ink); background:var(--surface); font-size:11px; font-weight:800; cursor:pointer; }
+.radar-detail-back { width:38px; padding:0; }
+.radar-add-button { color:var(--md-on-primary); border-color:var(--p); background:var(--p); }
+.radar-add-button svg,.radar-detail-back svg { display:block; flex-shrink:0; }
+.radar-list-summary { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:13px 18px 8px; color:var(--muted); font-size:10px; }
+.radar-list-count { color:var(--ink); font-size:11px; font-weight:800; }
+.radar-list-hint { text-align:right; }
+.radar-filter-pills { display:flex; gap:6px; padding:4px 18px 12px; overflow-x:auto; scrollbar-width:none; }
+.radar-filter-pills::-webkit-scrollbar { display:none; }
+.radar-filter-pills button { display:inline-flex; min-height:32px; flex:0 0 auto; align-items:center; justify-content:center; padding:0 10px; border:1px solid var(--line); border-radius:999px; color:var(--muted); background:var(--surface); font-size:10px; font-weight:800; white-space:nowrap; cursor:pointer; }
+.radar-filter-pills button.active { border-color:var(--p); color:var(--md-on-primary); background:var(--p); }
+.radar-list-scroll,.radar-detail-scroll { min-width:0; min-height:0; flex:1 1 auto; overflow-y:auto; overscroll-behavior-y:contain; padding:0 14px 16px; scrollbar-color:var(--line) transparent; scrollbar-width:thin; }
+.radar-monitor-list { display:grid; gap:7px; padding-top:2px; }
+.radar-monitor-row { display:flex; min-width:0; align-items:center; gap:9px; padding:10px; border:1px solid var(--line); border-radius:13px; color:var(--ink); background:var(--surface); text-align:left; cursor:pointer; transition:border-color .15s ease,background .15s ease,transform .15s ease; }
+.radar-monitor-row:hover,.radar-monitor-row:focus-visible { border-color:color-mix(in srgb,var(--p) 60%,var(--line)); background:color-mix(in srgb,var(--p) 5%,var(--surface)); }
+.radar-monitor-row:active { transform:scale(.99); }
+.radar-row-indicator { width:4px; align-self:stretch; flex:0 0 4px; border-radius:99px; background:#7b8790; }
+.radar-row-indicator.strongly_recommended { background:#ff6b35; }
+.radar-row-indicator.acceptable { background:#2980b9; }
+.radar-row-main { display:grid; min-width:0; flex:1 1 auto; gap:4px; }
+.radar-row-title { display:flex; min-width:0; align-items:center; justify-content:space-between; gap:6px; }
+.radar-row-title strong { overflow:hidden; min-width:0; font-size:13px; font-weight:850; text-overflow:ellipsis; white-space:nowrap; }
+.radar-row-level { flex:0 0 auto; color:var(--muted); font-size:9px; font-weight:800; white-space:nowrap; }
+.radar-row-level.strongly_recommended { color:#ff6b35; }
+.radar-row-level.acceptable { color:#2980b9; }
+.radar-row-window { overflow:hidden; color:var(--p); font-size:10px; font-weight:750; text-overflow:ellipsis; white-space:nowrap; }
+.radar-row-tags { display:flex; min-width:0; flex-wrap:wrap; gap:4px; }
+.radar-row-tags span { padding:2px 5px; border-radius:5px; color:var(--muted); background:var(--panel); font-size:9px; font-weight:700; }
+.radar-row-score { display:inline-flex; align-items:baseline; flex:0 0 auto; color:#ff6b35; font-size:19px; font-weight:900; font-variant-numeric:tabular-nums; }
+.radar-row-score.acceptable { color:#2980b9; }
+.radar-row-score.waiting,.radar-row-score-empty { color:var(--muted); font-size:14px; }
+.radar-row-score small { margin-left:2px; font-size:9px; }
+.radar-row-chevron { flex:0 0 auto; color:var(--muted); }
+.radar-state-message { display:flex; min-width:0; flex-direction:column; align-items:center; gap:9px; padding:24px 14px; color:var(--muted); font-size:11px; line-height:1.45; text-align:center; }
+.radar-state-error { color:#d34e3b; }
+.radar-state-message button { padding:6px 12px; border:1px solid var(--line); border-radius:8px; color:var(--p); background:var(--surface); font-weight:800; cursor:pointer; }
+.radar-empty-panel svg { color:var(--p); }
+.radar-empty-panel strong { color:var(--ink); font-size:13px; }
+.radar-detail-scroll { padding-top:13px; }
+.radar-detail-score-card { display:flex; min-width:0; align-items:center; justify-content:space-between; gap:10px; padding:13px; border:1px solid var(--line); border-radius:14px; background:var(--panel); }
+.radar-detail-score-card.strongly_recommended { border-color:color-mix(in srgb,#ff6b35 65%,var(--line)); background:color-mix(in srgb,#ff6b35 8%,var(--panel)); }
+.radar-detail-score-card.acceptable { border-color:color-mix(in srgb,#2980b9 55%,var(--line)); background:color-mix(in srgb,#2980b9 7%,var(--panel)); }
+.radar-detail-score-copy { display:grid; min-width:0; gap:4px; }
+.radar-detail-level { color:var(--p); font-size:10px; font-weight:850; }
+.radar-detail-score-card.strongly_recommended .radar-detail-level { color:#ff6b35; }
+.radar-detail-score-copy > strong { overflow-wrap:anywhere; color:var(--ink); font-size:14px; font-weight:850; }
+.radar-detail-score-copy > small { color:var(--muted); font-size:10px; line-height:1.35; }
+.radar-detail-score-value { display:flex; flex:0 0 auto; align-items:baseline; color:#ff6b35; }
+.radar-detail-score-value strong { font-size:26px; font-weight:950; font-variant-numeric:tabular-nums; }
+.radar-detail-score-value small { font-size:10px; font-weight:800; }
+.radar-detail-tags { display:flex; flex-wrap:wrap; gap:5px; margin:9px 0 14px; }
+.radar-detail-tags span { padding:3px 7px; border-radius:6px; color:var(--muted); background:var(--panel); font-size:9px; font-weight:750; }
+.radar-detail-section { margin-top:14px; }
+.radar-detail-section h3 { margin:0; color:var(--ink); font-size:12px; font-weight:850; }
+.radar-detail-section-heading { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+.radar-detail-section-heading span { color:var(--muted); font-size:9px; font-weight:750; }
+.radar-factor-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; margin-top:8px; }
+.radar-factor-row { display:grid; min-width:0; gap:3px; padding:8px; border:1px solid var(--line); border-radius:10px; background:color-mix(in srgb,var(--surface) 78%,transparent); }
+.radar-factor-row > span { color:var(--muted); font-size:9px; font-weight:800; }
+.radar-factor-row > strong { overflow-wrap:anywhere; color:var(--ink); font-size:10px; font-weight:800; }
+.radar-factor-row > small { overflow-wrap:anywhere; color:var(--muted); font-size:9px; }
+.radar-window-list { display:grid; gap:6px; margin-top:8px; }
+.radar-window-row { display:grid; min-width:0; grid-template-columns:minmax(0,1fr) auto auto; align-items:center; gap:6px; padding:8px; border:1px solid var(--line); border-radius:10px; color:var(--ink); background:var(--surface); text-align:left; }
+.radar-window-row.selected { border-color:var(--p); background:color-mix(in srgb,var(--p) 7%,var(--surface)); }
+.radar-window-select { display:grid; min-width:0; gap:3px; padding:0; border:0; background:transparent; text-align:left; cursor:pointer; }
+.radar-window-select strong { overflow:hidden; color:var(--ink); font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
+.radar-window-select small { overflow:hidden; color:var(--muted); font-size:9px; text-overflow:ellipsis; white-space:nowrap; }
+.radar-window-score { color:#ff6b35; font-size:10px; font-weight:900; white-space:nowrap; }
+.radar-window-convert { padding:5px 6px; border:0; border-radius:7px; color:var(--p); background:var(--panel); font-size:9px; font-weight:800; white-space:nowrap; cursor:pointer; }
+.radar-window-convert:disabled { opacity:.5; cursor:not-allowed; }
+.radar-inline-error { color:#d34e3b; font-size:10px; }
+.radar-detail-actions { display:flex; flex:0 0 auto; gap:6px; padding:10px 12px calc(10px + env(safe-area-inset-bottom)); border-top:1px solid var(--line); background:var(--surface); }
+.radar-create-trip { display:flex; min-width:0; min-height:40px; flex:1 1 auto; align-items:center; justify-content:center; padding:0 9px; border:0; border-radius:10px; color:var(--md-on-primary); background:var(--p); font-size:10px; font-weight:850; cursor:pointer; }
+.radar-create-trip:disabled { cursor:not-allowed; opacity:.5; }
+.radar-icon-action { display:grid; width:40px; min-width:40px; height:40px; flex:0 0 40px; place-items:center; border:1px solid var(--line); border-radius:10px; color:var(--ink); background:var(--panel); cursor:pointer; }
+.radar-icon-action.danger { color:#e5484d; }
+.radar-icon-action:disabled { cursor:not-allowed; opacity:.5; }
+.radar-toast { position:fixed; z-index:9999; right:20px; bottom:20px; padding:9px 14px; border-radius:999px; color:var(--surface); background:var(--ink); font-size:11px; font-weight:750; box-shadow:0 8px 24px rgba(0,0,0,.25); }
+@media (max-width:560px) {
+  .radar-panel-header { padding:12px 13px 10px; gap:6px; }
+  .radar-panel-heading { gap:7px; }
+  .radar-panel-heading h2 { font-size:16px; }
+  .radar-add-button { min-height:36px; padding-inline:8px; }
+  .radar-list-summary { padding-inline:13px; }
+  .radar-filter-pills { padding-inline:13px; }
+  .radar-list-scroll,.radar-detail-scroll { padding-right:10px; padding-left:10px; }
+  .radar-monitor-row { gap:7px; padding:9px 8px; }
+  .radar-row-title { align-items:flex-start; flex-direction:column; gap:2px; }
+  .radar-row-title strong { max-width:100%; }
+  .radar-row-score { font-size:17px; }
+  .radar-detail-actions { gap:4px; padding-inline:8px; }
+  .radar-create-trip { font-size:9px; }
+  .radar-icon-action { width:36px; min-width:36px; height:36px; flex-basis:36px; }
+  .radar-window-row { grid-template-columns:minmax(0,1fr) auto; }
+  .radar-window-convert { grid-column:1/-1; text-align:center; }
 }
 </style>
