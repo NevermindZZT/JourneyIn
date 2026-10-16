@@ -926,6 +926,14 @@ const plannableDays = computed(() => visibleDays.value.filter(canPlanDay))
 const selectedStop = computed(() => visibleStops.value.find(stop => stop.id === selectedStopId.value) || null)
 const selectedSubStop = computed(() => selectedStop.value?.children?.find(child => child.id === selectedSubStopId.value) || null)
 const selectedTarget = computed<Stop | SubStop | null>(() => selectedSubStop.value || selectedStop.value || null)
+const selectedPointNavigation = computed(() => {
+  const target = selectedTarget.value
+  if (!target) return { index: -1, total: 0 }
+  const siblings: Array<Stop | SubStop> = selectedSubStop.value && selectedStop.value
+    ? orderedSubStops(selectedStop.value.children || [])
+    : visibleStops.value
+  return { index: siblings.findIndex(point => point.id === target.id), total: siblings.length }
+})
 const unlocatedMainStops = computed(() => (tripDocument.value?.days || []).flatMap(day => day.stops || []).filter(stop => !pointFor(stop)))
 const unlocatedRouteStops = computed(() => unlocatedMainStops.value.filter(stop => !stop.exclude_from_route))
 const unlocatedPlanningPoints = computed(() => (tripDocument.value?.days || []).flatMap(day => (day.stops || []).flatMap(stop => [stop, ...(stop.children || [])])).filter(stop => !pointFor(stop)))
@@ -2597,6 +2605,33 @@ function focusMapOnPoint(stop: Stop | SubStop) {
 }
 function selectStop(stop: Stop) { navigateToStop(stop) }
 function selectSubStop(child: SubStop, parent: Stop) { navigateToStop(child, parent) }
+function navigateAdjacentPlanningPoint(direction: -1 | 1) {
+  const siblings: Array<Stop | SubStop> = selectedSubStop.value && selectedStop.value
+    ? orderedSubStops(selectedStop.value.children || [])
+    : visibleStops.value
+  const current = selectedTarget.value
+  const currentIndex = siblings.findIndex(point => point.id === current?.id)
+  const next = siblings[currentIndex + direction]
+  if (!next || currentIndex < 0 || actionLoading.value || descriptionSaving.value || stopDateSaving.value) return
+  if ((descriptionEditing.value || stopDateEditing.value) && !window.confirm('当前规划点有未保存的编辑内容，切换后将丢弃这些修改。继续切换吗？')) return
+  const isChild = Boolean(selectedSubStop.value && selectedStop.value)
+  if (isChild) selectedSubStopId.value = next.id
+  else { selectedStopId.value = next.id; selectedSubStopId.value = '' }
+  panelMode.value = 'journey'
+  panelOpen.value = true
+  mobileMapToolsOpen.value = false
+  detailMoreOpen.value = false
+  cancelEditStopDate()
+  descriptionEditing.value = false
+  descriptionDraft.value = ''
+  descriptionEditorMode.value = 'edit'
+  syncNavigationURL('replace')
+  void nextTick().then(() => {
+    const scroll = document.querySelector<HTMLElement>('.stop-detail-panel .redesign-detail-scroll')
+    scroll?.scrollTo({ top: 0, behavior: 'auto' })
+    void renderMap()
+  })
+}
 function openChildSearch(parent: Stop) {
   if (readOnlyView.value) return
   selectedStopId.value = parent.id; selectedSubStopId.value = ''; openJourneySearch(parent.id); searchMessage.value = '为“' + parent.title + '”添加子规划点' }
@@ -7369,10 +7404,26 @@ onUnmounted(() => {
 
             <aside v-if="selectedStop" class="details-drawer stop-detail-panel" :class="['sheet-' + sheetBreakpoint, { 'is-child-detail': Boolean(selectedSubStop), 'is-sheet-dragging': sheetDragActive }]" :style="sheetDragStyle" aria-label="规划点详情">
               <div class="detail-sheet-handle"><button type="button" :aria-label="sheetBreakpoint === 'expanded' ? '收起规划点详情到最低' : sheetBreakpoint === 'peek' ? '展开规划点详情到半屏' : '收起规划点详情到最低'" @pointerdown="startSheetDrag" @click="cycleSheetBreakpoint"><span></span></button></div>
-              <div class="detail-scroll redesign-detail-scroll">
-                <header class="detail-topbar"><button type="button" class="detail-back-button" @click="selectedSubStop ? navigateBackFromSubStop() : navigateBackFromStop()"><span>‹</span>{{ selectedSubStop ? '主规划点' : selectedDay === 'all' ? '行程' : 'D' + selectedDay + ' 行程' }}</button><div class="detail-topbar-actions"><button class="detail-sheet-toggle" type="button" :aria-label="sheetBreakpoint === 'expanded' ? '收起到半屏' : sheetBreakpoint === 'peek' ? '展开到半屏' : '展开规划点详情'" @click="toggleDetailSheet"><IonIcon :icon="sheetBreakpoint === 'expanded' ? chevronDownOutline : chevronUpOutline" /></button><div v-if="!readOnlyView" class="detail-more-wrap"><button type="button" class="detail-more-button" :aria-expanded="detailMoreOpen" aria-label="规划点更多操作" @click.stop="toggleDetailMore">⋯</button><div v-if="detailMoreOpen" class="detail-more-menu" role="menu"><button type="button" role="menuitem" @click="editSelectedDescriptionFromMenu">编辑规划点</button><button type="button" role="menuitem" @click="editSelectedContentFromMenu">编辑说明与时间</button><button type="button" role="menuitem" class="danger-menu-item" @click="deleteSelectedPointFromMenu">删除{{ selectedSubStop ? '子规划点' : '规划点' }}</button></div></div></div></header>
+              <header class="detail-sticky-header">
+                <div class="detail-topbar">
+                  <button type="button" class="detail-back-button" @click="selectedSubStop ? navigateBackFromSubStop() : navigateBackFromStop()"><span>‹</span><span class="detail-back-label">{{ selectedSubStop ? '主规划点' : selectedDay === 'all' ? '行程' : 'D' + selectedDay + ' 行程' }}</span></button>
+                  <div class="detail-topbar-actions">
+                    <div v-if="selectedPointNavigation.total > 1" class="detail-point-switcher" role="group" aria-label="切换规划点">
+                      <button type="button" :disabled="selectedPointNavigation.index <= 0 || actionLoading || descriptionSaving || stopDateSaving" aria-label="上一个规划点" title="上一个规划点" @click="navigateAdjacentPlanningPoint(-1)"><IonIcon :icon="chevronBackOutline" /></button>
+                      <span aria-live="polite">{{ selectedPointNavigation.index + 1 }}/{{ selectedPointNavigation.total }}</span>
+                      <button type="button" :disabled="selectedPointNavigation.index < 0 || selectedPointNavigation.index >= selectedPointNavigation.total - 1 || actionLoading || descriptionSaving || stopDateSaving" aria-label="下一个规划点" title="下一个规划点" @click="navigateAdjacentPlanningPoint(1)"><IonIcon :icon="chevronForwardOutline" /></button>
+                    </div>
+                    <button class="detail-sheet-toggle" type="button" :aria-label="sheetBreakpoint === 'expanded' ? '收起到半屏' : sheetBreakpoint === 'peek' ? '展开到半屏' : '展开规划点详情'" @click="toggleDetailSheet"><IonIcon :icon="sheetBreakpoint === 'expanded' ? chevronDownOutline : chevronUpOutline" /></button>
+                    <div v-if="!readOnlyView" class="detail-more-wrap"><button type="button" class="detail-more-button" :aria-expanded="detailMoreOpen" aria-label="规划点更多操作" @click.stop="toggleDetailMore">⋯</button><div v-if="detailMoreOpen" class="detail-more-menu" role="menu"><button type="button" role="menuitem" @click="editSelectedDescriptionFromMenu">编辑规划点</button><button type="button" role="menuitem" @click="editSelectedContentFromMenu">编辑说明与时间</button><button type="button" role="menuitem" class="danger-menu-item" @click="deleteSelectedPointFromMenu">删除{{ selectedSubStop ? '子规划点' : '规划点' }}</button></div></div>
+                  </div>
+                </div>
                 <p class="detail-kicker"><span>{{ selectedSubStop ? 'SUB-STOP ' + selectedSubStop.sequence : 'STOP ' + selectedStop.sequence }}</span><span class="planning-point-kind-badge" :style="{ '--kind-color': planningPointCategoryColor(selectedTarget?.kind) }">{{ planningPointCategoryLabel(selectedTarget?.kind) }}</span></p>
-                <h1>{{ selectedTarget?.title }}</h1><p class="detail-address">{{ selectedTarget?.address || '地址待解析' }}</p><div class="detail-date-row"><p class="detail-date">{{ stopDate(selectedTarget || selectedStop) }}<span v-if="stopTime(selectedTarget || selectedStop)"> · {{ stopTime(selectedTarget || selectedStop) }}</span></p><button v-if="!readOnlyView && !selectedSubStop" class="text-action detail-date-edit" type="button" @click="beginEditStopDate">修改日期</button><span v-if="selectedSubStop" class="detail-date-follow-note">跟随主规划点</span></div><div v-if="stopDateEditing && !selectedSubStop && !readOnlyView" class="detail-date-editor"><label class="select-field">移动到日期<UiSelect v-model="stopDateDraftDayID" aria-label="规划点目标日期" :options="tripDayOptions" /></label><div class="editor-actions"><button class="secondary-action compact-action" type="button" @click="cancelEditStopDate">取消</button><button class="primary-action compact-action" type="button" :disabled="stopDateSaving" @click="saveStopDate">{{ stopDateSaving ? '保存中…' : '保存日期' }}</button></div></div>
+                <h1>{{ selectedTarget?.title }}</h1>
+                <p class="detail-address">{{ selectedTarget?.address || '地址待解析' }}</p>
+                <div class="detail-date-row"><p class="detail-date">{{ stopDate(selectedTarget || selectedStop) }}<span v-if="stopTime(selectedTarget || selectedStop)"> · {{ stopTime(selectedTarget || selectedStop) }}</span></p><button v-if="!readOnlyView && !selectedSubStop" class="text-action detail-date-edit" type="button" @click="beginEditStopDate">修改日期</button><span v-if="selectedSubStop" class="detail-date-follow-note">跟随主规划点</span></div>
+                <div v-if="stopDateEditing && !selectedSubStop && !readOnlyView" class="detail-date-editor"><label class="select-field">移动到日期<UiSelect v-model="stopDateDraftDayID" aria-label="规划点目标日期" :options="tripDayOptions" /></label><div class="editor-actions"><button class="secondary-action compact-action" type="button" @click="cancelEditStopDate">取消</button><button class="primary-action compact-action" type="button" :disabled="stopDateSaving" @click="saveStopDate">{{ stopDateSaving ? '保存中…' : '保存日期' }}</button></div></div>
+              </header>
+              <div class="detail-scroll redesign-detail-scroll">
                 <div class="detail-location" :class="{ 'location-missing': !pointFor(selectedTarget || selectedStop) }"><div class="detail-location-heading"><span><span class="location-status-icon" :class="{ missing: !pointFor(selectedTarget || selectedStop) }" aria-hidden="true">{{ pointFor(selectedTarget || selectedStop) ? '●' : '!' }}</span>{{ locationStatus(selectedTarget || selectedStop) }}</span><span class="location-state-label">{{ pointFor(selectedTarget || selectedStop) ? '可用于路线与导航' : '需要处理' }}</span></div><small v-if="pointFor(selectedTarget || selectedStop)">{{ pointFor(selectedTarget || selectedStop)?.crs }} · {{ pointFor(selectedTarget || selectedStop)?.lat.toFixed(6) }}, {{ pointFor(selectedTarget || selectedStop)?.lng.toFixed(6) }}</small><small v-else>暂无可靠坐标，路线和导航暂不可用。</small><small v-if="pointFor(selectedTarget || selectedStop)">来源：{{ locationSource(selectedTarget || selectedStop) }}</small><div v-if="!readOnlyView" class="detail-location-actions"><button class="text-action" type="button" @click="beginEditPoint">编辑名称/地址</button><button class="text-action" type="button" @click="openPointSearch(selectedTarget || selectedStop)">重新搜索</button><button class="text-action" type="button" :disabled="!mapReady" @click="startMapPickForPoint(selectedTarget || selectedStop)">地图选点</button></div></div>
                 <section v-if="!selectedSubStop" class="detail-route-participation" :class="{ excluded: selectedStop.exclude_from_route }"><div><strong>路线规划</strong><small>{{ selectedStop.exclude_from_route ? '此规划点仍会显示在地图和行程中，但生成路线时会跳过。' : '此规划点会作为路线途经点参与生成。' }}</small></div><button v-if="!readOnlyView" type="button" :aria-pressed="selectedStop.exclude_from_route ? 'true' : 'false'" @click="toggleRouteExclusion">{{ selectedStop.exclude_from_route ? '加入路线' : '排除路线' }}</button></section><div class="detail-primary-actions"><button class="detail-navigation-button" type="button" :disabled="!pointFor(selectedTarget || selectedStop)" @click="openNavigation('amap')"><IonIcon :icon="navigateOutline" /> 高德导航</button><button class="detail-navigation-button" type="button" :disabled="!pointFor(selectedTarget || selectedStop)" @click="openNavigation('baidu')"><IonIcon :icon="navigateOutline" /> 百度导航</button><button class="detail-navigation-button" type="button" :disabled="!pointFor(selectedTarget || selectedStop)" @click="addStopToMonitor(selectedTarget || selectedStop)"><IonIcon :icon="notificationsOutline" /> 监控时机</button></div>
                 <div class="detail-weather">

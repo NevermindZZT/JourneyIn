@@ -948,28 +948,45 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 /* Stop detail is a desktop drawer and the only mobile Sheet when a stop is selected. */
 .stop-detail-panel { position: absolute; z-index: 32; top: 18px; right: 18px; bottom: 18px; display: flex; width: min(420px, calc(100vw - 36px)); flex-direction: column; overflow: hidden; border-radius: 24px; }
 .detail-sheet-handle { display: none; }
-.redesign-detail-scroll { min-width: 0; flex: 1; overflow-y: auto; overflow-x: hidden; padding: 22px 21px 24px; scrollbar-color: var(--line) transparent; scrollbar-width: thin; }
+.detail-sticky-header { position: relative; z-index: 4; flex: 0 0 auto; padding: 12px 18px 11px; border-bottom: 1px solid var(--line); background: transparent; }
+.detail-sticky-header > h1 { margin: 4px 0 0; color: var(--ink); font-size: 26px; letter-spacing: -.06em; }
+.detail-sticky-header .detail-kicker { margin-top: 8px; }
+.detail-sticky-header .detail-address { margin-top: 4px; font-size: 11px; }
+.detail-sticky-header .detail-date-row { margin-top: 4px; }
+.redesign-detail-scroll { min-width: 0; min-height: 0; flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; padding: 16px 21px 24px; scrollbar-color: var(--line) transparent; scrollbar-width: thin; }
 .redesign-detail-scroll::-webkit-scrollbar { width: 8px; }
 .redesign-detail-scroll::-webkit-scrollbar-thumb { border: 2px solid var(--panel); border-radius: 99px; background: var(--line); }
-.detail-topbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.detail-topbar { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; }
 .detail-more-wrap { position: relative; }
 .detail-more-menu { position: absolute; z-index: 80; top: calc(100% + 6px); right: 0; display: grid; min-width: 142px; gap: 3px; padding: 5px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); box-shadow: 0 14px 32px color-mix(in srgb, var(--ink) 22%, transparent); }
 .detail-more-menu button { min-height: 38px; padding: 8px 10px; border: 0; border-radius: 9px; text-align: left; color: var(--ink); background: transparent; font-size: 11px; font-weight: 800; }
 @media (hover: hover) and (pointer: fine) { .detail-more-menu button:hover { color: var(--p); background: color-mix(in srgb, var(--p) 9%, var(--surface)); } }
 .detail-more-menu .danger-menu-item { color: var(--md-error); }
 @media (hover: hover) and (pointer: fine) { .detail-more-menu .danger-menu-item:hover { background: color-mix(in srgb, var(--md-error) 9%, transparent); } }
-.detail-back-button, .detail-more-button { display: inline-flex; min-height: 37px; align-items: center; gap: 3px; border: 1px solid var(--line); border-radius: 10px; color: var(--p); background: transparent; font-size: 11px; font-weight: 900; }
-.detail-back-button { padding: 5px 9px 5px 5px; }
-.detail-back-button span { font-size: 23px; line-height: 14px; }
-.detail-more-button { width: 37px; justify-content: center; color: var(--muted); font-size: 20px; }
-.detail-topbar-actions { display: flex; align-items: center; gap: 5px; }
-.detail-sheet-toggle { display: none; width: 37px; height: 37px; place-items: center; border: 1px solid var(--line); border-radius: 10px; color: var(--p); background: transparent; }
+.detail-back-button, .detail-more-button { position: relative; display: inline-flex; min-height: 44px; align-items: center; gap: 3px; border: 0; border-radius: 10px; color: var(--p); background: transparent; font-size: 11px; font-weight: 900; }
+.detail-back-button::before, .detail-more-button::before { position: absolute; inset: 4px 0; border: 1px solid var(--line); border-radius: 9px; content: ''; pointer-events: none; }
+.detail-back-button > span, .detail-back-label { position: relative; z-index: 1; }
+.detail-back-button { min-width: 76px; justify-content: flex-start; padding: 6px 11px 6px 8px; }
+.detail-back-button > span:first-child { font-size: 23px; line-height: 14px; }
+.detail-back-label { font-size: 11px; line-height: 1; white-space: nowrap; }
+.detail-more-button { width: 44px; justify-content: center; color: var(--muted); font-size: 20px; }
+.detail-topbar-actions { display: flex; min-width: 0; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 5px; }
+.detail-point-switcher { display: inline-flex; min-height: 44px; align-items: center; gap: 2px; padding: 0; border: 0; color: var(--muted); background: transparent; }
+.detail-point-switcher button { position: relative; display: grid; width: 44px; height: 44px; place-items: center; padding: 0; border: 0; border-radius: 10px; color: var(--p); background: transparent; }
+.detail-point-switcher button::before { position: absolute; inset: 4px; border: 1px solid var(--line); border-radius: 8px; content: ''; pointer-events: none; }
+.detail-point-switcher button ion-icon { position: relative; z-index: 1; }
+.detail-point-switcher button:disabled { color: var(--muted); cursor: not-allowed; opacity: .38; }
+.detail-point-switcher button ion-icon { font-size: 16px; }
+.detail-point-switcher span { min-width: 30px; color: var(--ink); font-size: 10px; font-weight: 850; text-align: center; font-variant-numeric: tabular-nums; }
+.detail-sheet-toggle { position: relative; display: none; width: 44px; min-width: 44px; height: 44px; place-items: center; border: 0; border-radius: 10px; color: var(--p); background: transparent; }
+.detail-sheet-toggle::before { position: absolute; inset: 4px; border: 1px solid var(--line); border-radius: 8px; content: ''; pointer-events: none; }
+.detail-sheet-toggle ion-icon { position: relative; z-index: 1; }
 .detail-sheet-toggle ion-icon { font-size: 17px; }
-@media (hover: hover) and (pointer: fine) { .detail-back-button:hover, .detail-more-button:hover, .detail-sheet-toggle:hover { border-color: var(--p); background: color-mix(in srgb, var(--p) 8%, transparent); } }
+@media (hover: hover) and (pointer: fine) { .detail-back-button:hover::before, .detail-more-button:hover::before, .detail-sheet-toggle:hover::before, .detail-point-switcher button:not(:disabled):hover::before { border-color: var(--p); background: color-mix(in srgb, var(--p) 8%, transparent); } }
 .detail-kicker { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 19px 0 0; color: var(--p); font-size: 10px; font-weight: 900; letter-spacing: .1em; text-transform: uppercase; }
 .detail-kicker span:last-child { padding: 5px 7px; border-radius: 999px; letter-spacing: 0; color: var(--muted); background: var(--surface); font-size: 10px; text-transform: none; }
 .detail-kicker .planning-point-kind-badge { border: 1px solid color-mix(in srgb, var(--kind-color) 38%, var(--line)); color: var(--kind-color); background: color-mix(in srgb, var(--kind-color) 10%, var(--surface)); }
-.redesign-detail-scroll > h1 { margin: 7px 0 0; color: var(--ink); font-size: 30px; letter-spacing: -.06em; }
+
 .detail-address { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .detail-date-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-top: 7px; }
 .detail-date-row .detail-date { min-width: 0; flex: 1; margin: 0; }
@@ -997,9 +1014,9 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .detail-route-participation small { color: var(--muted); font-size: 10px; line-height: 1.45; }
 .detail-route-participation button { flex: 0 0 auto; min-height: 40px; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--p) 42%, var(--line)); border-radius: 10px; color: var(--p); background: var(--surface); font-size: 11px; font-weight: 900; }
 .detail-route-participation.excluded button { border-color: color-mix(in srgb, var(--md-warning) 48%, var(--line)); color: var(--md-warning); }
-.detail-primary-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin-top: 13px; }
-.detail-navigation-button { display: inline-flex; min-width: 0; min-height: 48px; align-items: center; justify-content: center; gap: 7px; padding: 10px 11px; border: 1px solid var(--p); border-radius: 14px; color: var(--p); background: transparent; font-size: 12px; font-weight: 900; }
-.detail-navigation-button ion-icon { flex: 0 0 auto; font-size: 17px; }
+.detail-primary-actions { display: grid; min-width: 0; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 12px; }
+.detail-navigation-button { display: inline-flex; min-width: 0; min-height: 44px; align-items: center; justify-content: center; gap: 4px; padding: 5px 4px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--p) 65%, var(--line)); border-radius: 11px; color: var(--p); background: color-mix(in srgb, var(--p) 4%, var(--surface)); font-size: 10px; font-weight: 850; white-space: nowrap; }
+.detail-navigation-button ion-icon { flex: 0 0 auto; font-size: 14px; }
 @media (hover: hover) and (pointer: fine) { .detail-navigation-button:hover { color: var(--md-on-primary); background: var(--p); } }
 .detail-weather { display: flex; min-height: 54px; align-items: center; gap: 9px; margin-top: 16px; padding: 10px 11px; border-radius: 14px; color: var(--p); background: color-mix(in srgb, #4f7fa3 12%, var(--surface)); }
 .detail-weather > ion-icon { flex: 0 0 auto; font-size: 20px; }
@@ -1228,20 +1245,39 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
    .stop-detail-panel.sheet-half { top: auto; height: 53%; max-height: 53%; }
   .stop-detail-panel.sheet-expanded { top: 60px; height: calc(100% - 68px); max-height: none; }
    .stop-detail-panel.sheet-peek .redesign-detail-scroll { overflow: hidden; padding: 0 16px 12px; }
-   .stop-detail-panel.sheet-peek .detail-kicker { margin-top: 6px; }
-   .stop-detail-panel.sheet-peek .redesign-detail-scroll > h1 { margin-top: 2px; font-size: 22px; }
-   .stop-detail-panel.sheet-peek .detail-address { margin-top: 2px; }
-   .stop-detail-panel.sheet-peek .detail-date-row, .stop-detail-panel.sheet-peek .detail-location, .stop-detail-panel.sheet-peek .detail-primary-actions, .stop-detail-panel.sheet-peek .detail-weather, .stop-detail-panel.sheet-peek .detail-section, .stop-detail-panel.sheet-peek .detail-parent-button, .stop-detail-panel.sheet-peek .detail-danger-button { display: none; }
+   .stop-detail-panel.sheet-peek .detail-kicker, .stop-detail-panel.sheet-peek .detail-address { display: none; }
+   .stop-detail-panel.sheet-peek .detail-sticky-header > h1 { margin-top: 2px; font-size: 22px; }
+   .stop-detail-panel.sheet-peek .detail-date-row { display: flex; margin-top: 2px; }
+.stop-detail-panel.sheet-peek .detail-date-row .detail-date { color: var(--muted); font-size: 11px; line-height: 1.3; }
+.stop-detail-panel.sheet-peek .detail-date-edit { display: none; }
+   .stop-detail-panel.sheet-peek .detail-location, .stop-detail-panel.sheet-peek .detail-primary-actions, .stop-detail-panel.sheet-peek .detail-weather, .stop-detail-panel.sheet-peek .detail-section, .stop-detail-panel.sheet-peek .detail-parent-button, .stop-detail-panel.sheet-peek .detail-danger-button { display: none; }
   .detail-sheet-toggle { display: grid; }
   .detail-sheet-handle { display: grid; height: 25px; place-items: center; }
   .detail-sheet-handle button { display: grid; width: 100%; height: 25px; place-items: center; border: 0; background: transparent; touch-action: none; }
   .detail-sheet-handle span { display: block; width: 40px; height: 4px; border-radius: 999px; background: color-mix(in srgb, var(--muted) 45%, transparent); }
-  .redesign-detail-scroll { padding: 8px 16px 22px; }
-  .redesign-detail-scroll > h1 { font-size: 26px; }
+  .detail-sticky-header { padding: 10px 16px 9px; }
+  .detail-sticky-header > h1 { font-size: 23px; }
+  .detail-sticky-header .detail-kicker { margin-top: 6px; }
+  .redesign-detail-scroll { padding: 12px 16px 22px; }
+  .detail-topbar { flex-wrap: wrap; }
+  .detail-topbar-actions { flex-wrap: wrap; }
+  .detail-point-switcher { min-height: 44px; gap: 3px; padding-inline: 0; }
+  .detail-point-switcher button { width: 44px; height: 44px; }
+  .detail-sheet-toggle { width: 44px; min-width: 44px; height: 44px; }
+  .detail-more-button { width: 44px; min-height: 44px; }
+  .detail-point-switcher span { min-width: 26px; font-size: 9px; }
   .journey-redesign.has-stop-selection .itinerary-panel { display: none; }
   .journey-redesign.has-stop-selection .itinerary-panel.panel-search-mode { display: flex; }
   .journey-redesign.has-stop-selection .itinerary-panel.panel-search-mode ~ .stop-detail-panel { display: none; }
   .map-tools-card { top: 59px; right: 10px; }
+}
+
+@media (max-width: 360px) {
+  .detail-back-button { width: 44px; min-width: 44px; justify-content: center; padding: 0; }
+  .detail-back-label { display: none; }
+  .detail-topbar-actions { gap: 3px; }
+  .detail-point-switcher { padding-inline: 0; }
+  .detail-point-switcher span { min-width: 20px; font-size: 8px; }
 }
 
 @media (max-width: 560px) {
@@ -1265,8 +1301,9 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
   .workspace-status { left: 12px; max-width: calc(100vw - 24px); font-size: 9px; }
   .peek-summary strong { font-size: 16px; }
   .redesign-route-summary small { display: none; }
-  .detail-primary-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .detail-navigation-button { min-height: 46px; padding-inline: 8px; font-size: 11px; }
+  .detail-primary-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
+  .detail-navigation-button { min-height: 44px; padding-inline: 3px; gap: 3px; font-size: 9px; }
+  .detail-navigation-button ion-icon { font-size: 13px; }
   .detail-location small { overflow-wrap: anywhere; }
 }
 
