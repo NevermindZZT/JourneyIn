@@ -6527,7 +6527,6 @@ onUnmounted(() => {
             <button v-if="ownerWorkspace" class="rail-brand" type="button" aria-label="返回行程列表" @click="navigateToList()"><BrandLogo :size="38" variant="mark" shape="squircle" class="rail-brand-mark-logo" /><span class="rail-brand-name">JourneyIn</span></button>
             <nav class="rail-nav" aria-label="工作区">
               <button v-if="ownerWorkspace" class="rail-nav-item" :class="{ selected: tripView === 'list' }" type="button" @click="navigateToList()"><IonIcon :icon="menuOutline" /><span>行程</span></button>
-              <button class="rail-nav-item" :class="{ selected: tripView === 'detail' }" type="button" :disabled="!selected" @click="selected ? navigateToTrip(selected, 'replace') : undefined"><IonIcon :icon="mapOutline" /><span>地图</span></button>
               <button v-if="ownerWorkspace" class="rail-nav-item" :class="{ selected: tripView === 'atlas' }" type="button" @click="navigateToAtlas()"><IonIcon :icon="footstepsOutline" /><span>足迹</span></button>
               <button v-if="ownerWorkspace" class="rail-nav-item" :class="{ selected: tripView === 'radar' }" type="button" @click="navigateToRadar()"><IonIcon :icon="radioOutline" /><span>雷达</span><em v-if="radarSummary?.recommended_count" class="rail-badge">{{ radarSummary.recommended_count }}</em></button>
             </nav>
@@ -6535,6 +6534,33 @@ onUnmounted(() => {
             <a v-if="ownerWorkspace" class="rail-nav-item rail-link" :href="GITHUB_URL" target="_blank" rel="noopener noreferrer"><IonIcon :icon="linkOutline" /><span>项目</span></a>
             <button v-if="ownerWorkspace && isAdmin" class="rail-nav-item" type="button" @click="openSettings()"><IonIcon :icon="settingsOutline" /><span>设置</span></button><button v-if="ownerWorkspace && currentUser && !isAdmin" class="rail-nav-item" type="button" @click="logout"><IonIcon :icon="logInOutline" /><span>退出</span></button>
           </aside>
+
+          <nav v-if="ownerWorkspace && tripView === 'list'" class="mobile-primary-nav" aria-label="JourneyIn 主功能">
+            <button
+              type="button"
+              :class="{ selected: tripView === 'list' }"
+              :aria-current="tripView === 'list' ? 'page' : undefined"
+              @click="navigateToList()"
+            >
+              <IonIcon :icon="menuOutline" />
+              <span>行程</span>
+            </button>
+            <button
+              type="button"
+              @click="navigateToAtlas()"
+            >
+              <IonIcon :icon="footstepsOutline" />
+              <span>足迹</span>
+            </button>
+            <button
+              type="button"
+              @click="navigateToRadar()"
+            >
+              <IonIcon :icon="radioOutline" />
+              <span>雷达</span>
+              <em v-if="radarSummary?.recommended_count" class="rail-badge">{{ radarSummary.recommended_count }}</em>
+            </button>
+          </nav>
 
           <section v-if="tripView === 'list' && ownerWorkspace" class="trip-list-view" aria-labelledby="trip-list-title">
             <div ref="tripListScroll" class="trip-list-scroll" tabindex="0" role="region" aria-label="行程列表" @pointerdown="focusTripListScroll">
@@ -6545,8 +6571,6 @@ onUnmounted(() => {
                 <p class="list-page-subtitle">把下一段旅程放在地图上</p>
               </div>
               <div class="list-page-actions">
-                <button class="secondary-action" type="button" @click="navigateToAtlas()"><IonIcon :icon="footstepsOutline" /> 足迹漫游</button>
-                <button class="secondary-action" type="button" @click="navigateToRadar()"><IonIcon :icon="radioOutline" /> 旅行雷达 <span v-if="radarSummary?.recommended_count" class="rail-badge">{{ radarSummary.recommended_count }}</span></button>
                 <button v-if="canCreateTrips || canShareBundles" class="secondary-action" type="button" @click="shareTransferDialogOpen = true"><IonIcon :icon="linkOutline" /> 导入与分享</button>
                 <button v-if="canCreateTrips" class="primary-action" type="button" @click="newTripOpen = true"><IonIcon :icon="addOutline" /> 新建行程</button>
               </div>
@@ -6843,6 +6867,7 @@ onUnmounted(() => {
               @new-monitor="openNewMonitor"
               @edit-monitor="openEditMonitor"
               @open-trip="handleRadarOpenTrip"
+              @back-home="navigateToList()"
             />
           </section>
 

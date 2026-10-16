@@ -58,6 +58,7 @@ const emit = defineEmits<{
   (e: 'newMonitor'): void
   (e: 'editMonitor', item: MonitorItem): void
   (e: 'openTrip', tripID: string): void
+  (e: 'backHome'): void
 }>()
 
 const monitors = ref<MonitorItem[]>([])
@@ -186,6 +187,10 @@ function formatMonths(months?: number[]): string {
   return months.map(m => m + '月').join('、')
 }
 
+function formatLeaveDays(days?: number): string {
+  return days == null || days <= 0 ? '免请假' : `最多请${days}天`
+}
+
 defineExpose({
   loadMonitors,
 })
@@ -195,6 +200,10 @@ defineExpose({
   <div class="travel-radar-view">
     <!-- 头部栏 -->
     <header class="radar-header">
+      <button type="button" class="radar-mobile-back" @click="emit('backHome')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/><path d="M9 12h12"/></svg>
+        <span>返回行程</span>
+      </button>
       <div class="header-main">
         <span class="eyebrow">TRAVEL OPPORTUNITY RADAR</span>
         <h2>旅行时机雷达</h2>
@@ -309,7 +318,7 @@ defineExpose({
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3z"/></svg>
             <span>银河星空</span>
           </span>
-          <span class="criteria-tag">{{ m.criteria?.max_leave_days === 0 ? '免请假' : `最多请${m.criteria?.max_leave_days}天` }}</span>
+          <span class="criteria-tag">{{ formatLeaveDays(m.criteria?.max_leave_days) }}</span>
           <span v-if="m.origin_city" class="criteria-tag">{{ m.origin_city }}出发</span>
           <span v-if="m.max_budget" class="criteria-tag">预算≤{{ m.max_budget }}元</span>
         </div>
@@ -459,6 +468,7 @@ defineExpose({
 <style scoped>
 .travel-radar-view {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   gap: 16px;
   padding: 24px;
@@ -470,9 +480,19 @@ defineExpose({
 
 .radar-header {
   display: flex;
+  min-width: 0;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
+}
+
+.radar-mobile-back {
+  display: none;
+}
+
+.header-main {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .header-main .eyebrow {
@@ -518,6 +538,8 @@ defineExpose({
 
 .radar-highlight-banner {
   display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   padding: 12px 18px;
@@ -560,6 +582,9 @@ defineExpose({
 }
 
 .banner-text {
+  min-width: 0;
+  flex: 1 1 180px;
+  overflow-wrap: anywhere;
   font-size: 13px;
   color: var(--ink);
   line-height: 1.45;
@@ -567,6 +592,7 @@ defineExpose({
 
 .radar-filter-bar {
   display: flex;
+  min-width: 0;
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid var(--line);
@@ -575,6 +601,8 @@ defineExpose({
 
 .filter-pills {
   display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
@@ -627,12 +655,14 @@ defineExpose({
 
 .monitor-cards-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(480px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 480px), 1fr));
+  min-width: 0;
   gap: 20px;
 }
 
 .monitor-card {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   gap: 14px;
   padding: 20px;
@@ -650,9 +680,17 @@ defineExpose({
 
 .card-header {
   display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+}
+
+.card-title-group {
+  min-width: 0;
+  flex: 1 1 180px;
+  overflow-wrap: anywhere;
 }
 
 .card-title-group h3 {
@@ -669,13 +707,14 @@ defineExpose({
 
 .card-status-badge {
   display: inline-flex;
+  max-width: 100%;
   align-items: center;
   padding: 4px 10px;
   border-radius: 8px;
   font-size: 11px;
   font-weight: 700;
-  white-space: nowrap;
-  line-height: 1;
+  white-space: normal;
+  line-height: 1.15;
 }
 
 .status-content {
@@ -739,6 +778,7 @@ defineExpose({
 
 .opportunity-window-box {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   gap: 12px;
   padding: 14px;
@@ -749,8 +789,16 @@ defineExpose({
 
 .window-top {
   display: flex;
+  min-width: 0;
+  gap: 8px;
   align-items: center;
   justify-content: space-between;
+}
+
+.window-date {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
 }
 
 .window-date strong {
@@ -786,12 +834,14 @@ defineExpose({
 
 .factors-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
   gap: 8px;
 }
 
 .factor-item {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   gap: 2px;
   padding: 8px 10px;
@@ -836,6 +886,8 @@ defineExpose({
 
 .card-actions {
   display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   margin-top: auto;
@@ -843,6 +895,7 @@ defineExpose({
 
 .btn-convert {
   display: inline-flex;
+  min-width: 0;
   align-items: center;
   justify-content: center;
   gap: 6px;
@@ -925,6 +978,8 @@ defineExpose({
 
 .timeline-row {
   display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -936,6 +991,7 @@ defineExpose({
 
 .timeline-dates {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   flex: 1;
 }
@@ -982,13 +1038,128 @@ defineExpose({
   z-index: 9999;
 }
 
+@media (max-width: 900px) {
+  .radar-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .radar-mobile-back {
+    display: inline-flex;
+    align-items: center;
+    align-self: flex-start;
+    gap: 7px;
+    min-height: 40px;
+    padding: 0 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--panel);
+    color: var(--ink);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .radar-mobile-back svg {
+    display: block;
+    flex-shrink: 0;
+  }
+}
+
 @media (max-width: 600px) {
+  .travel-radar-view {
+    padding: 16px;
+  }
   .monitor-cards-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .radar-header {
     flex-direction: column;
     align-items: stretch;
+  }
+  .btn-create-monitor {
+    width: 100%;
+    justify-content: center;
+    white-space: normal;
+  }
+  .radar-highlight-banner {
+    align-items: flex-start;
+    gap: 8px;
+    padding: 12px;
+  }
+  .banner-body {
+    flex-basis: 100%;
+  }
+  .banner-action-btn {
+    margin-left: auto;
+  }
+  .filter-pills {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .filter-btn {
+    min-width: 0;
+    white-space: normal;
+    padding-inline: 8px;
+    line-height: 1.2;
+  }
+  .monitor-card {
+    padding: 14px;
+    gap: 12px;
+  }
+  .card-header {
+    align-items: flex-start;
+  }
+  .card-title-group {
+    flex-basis: 100%;
+  }
+  .card-status-badge {
+    white-space: normal;
+  }
+  .window-top {
+    align-items: flex-start;
+  }
+  .window-date strong {
+    font-size: 14px;
+  }
+  .window-score {
+    flex: 0 0 auto;
+  }
+  .factors-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .factor-item {
+    padding: 8px;
+  }
+  .factor-item strong,
+  .factor-item small {
+    overflow-wrap: anywhere;
+  }
+  .card-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) repeat(3, 40px);
+    gap: 6px;
+  }
+  .card-actions .btn-convert {
+    grid-column: 1 / -1;
+    width: 100%;
+    white-space: normal;
+    padding-inline: 8px;
+  }
+  .card-actions .btn-sec {
+    min-width: 0;
+    width: 100%;
+    padding-inline: 5px;
+    white-space: normal;
+    line-height: 1.15;
+  }
+  .timeline-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+  .timeline-convert-btn {
+    grid-column: 1 / -1;
+    width: 100%;
   }
 }
 </style>
