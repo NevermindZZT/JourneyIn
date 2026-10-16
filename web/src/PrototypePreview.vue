@@ -396,20 +396,20 @@ function toggleMapTools() {
 }
 
 .prototype-dark {
-  --proto-bg: #101817;
-  --proto-surface: #18211f;
-  --proto-surface-alt: #22302c;
-  --proto-surface-raised: #1d2926;
-  --proto-ink: #f4f0e8;
-  --proto-muted: #b5c1bc;
-  --proto-line: #53625e;
+  --proto-bg: #191a1d;
+  --proto-surface: #272a2f;
+  --proto-surface-alt: #30333a;
+  --proto-surface-raised: #202226;
+  --proto-ink: #e4e5e8;
+  --proto-muted: #aeb2b9;
+  --proto-line: #737781;
   --proto-primary: #8bcdb5;
   --proto-primary-dark: #62ad96;
-  --proto-on-primary: #10201c;
+  --proto-on-primary: #16181b;
   --proto-accent: #ff9a78;
   --proto-sky: #8bb5ff;
   --proto-route: #94baff;
-  --proto-map: #243c3a;
+  --proto-map: #282b30;
   --proto-water: #326567;
   --proto-shadow: 0 22px 70px rgba(0, 0, 0, .38);
 }

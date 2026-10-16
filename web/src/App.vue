@@ -26,6 +26,8 @@ import { shortMarkdownPreview } from './planningPointPreview'
 import { collaborationAPIPath, collaborationTokenFromHash } from './collaborationShare.mjs'
 
 type Theme = 'system' | 'light' | 'dark'
+type LightPalette = 'paper' | 'cloud' | 'mist'
+type DarkPalette = 'graphite' | 'near-black' | 'soft-charcoal'
 type Coord = { lat: number; lng: number }
 type LocationData = { preferred?: string; coordinates?: Record<string, Coord & { crs?: string }>; source?: string; provider_refs?: Record<string, unknown>; citycode?: string; adcode?: string; geocoded_at?: string; precision?: string; confidence?: number }
 type LinkData = { id?: string; title: string; url: string; kind?: string }
@@ -573,6 +575,10 @@ const canShareBundles = computed(() => shareableTrips.value.length > 0)
 const authTokenInput = ref(localStorage.getItem('journeyin.apiToken') || '')
 const serverURL = ref(window.location.origin)
 const theme = ref<Theme>((localStorage.getItem('journeyin.theme') as Theme) || 'system')
+const storedLightPalette = localStorage.getItem('journeyin.lightPalette')
+const lightPalette = ref<LightPalette>(storedLightPalette === 'cloud' || storedLightPalette === 'mist' ? storedLightPalette : 'paper')
+const storedDarkPalette = localStorage.getItem('journeyin.darkPalette')
+const darkPalette = ref<DarkPalette>(storedDarkPalette === 'near-black' || storedDarkPalette === 'soft-charcoal' ? storedDarkPalette : 'graphite')
 const newTitle = ref('我的旅行规划')
 const newStartDate = ref(new Date().toISOString().slice(0, 10))
 const newEndDate = ref(new Date().toISOString().slice(0, 10))
@@ -6808,8 +6814,19 @@ async function login() {
 function saveAuth() { authTokenInput.value = authTokenInput.value.trim(); if (authTokenInput.value) localStorage.setItem('journeyin.apiToken', authTokenInput.value); else localStorage.removeItem('journeyin.apiToken'); authOpen.value = false; settingsMessage.value = '兼容 API Token 已保存'; void loadCurrentUser().then(() => loadTrips())
   void loadRadarSummary() }
 async function logout() { authTokenInput.value = ''; localStorage.removeItem('journeyin.apiToken'); await fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => undefined); currentUser.value = null; authOpen.value = false; settingsMessage.value = '已退出登录'; await loadCurrentUser(); await loadTrips() }
-function applyTheme() { const actual = theme.value === 'system' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : theme.value; document.documentElement.dataset.theme = actual; localStorage.setItem('journeyin.theme', theme.value) }
+function applyTheme() {
+  const actual = theme.value === 'system' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : theme.value
+  const root = document.documentElement
+  root.dataset.theme = actual
+  root.dataset.lightPalette = lightPalette.value
+  root.dataset.darkPalette = darkPalette.value
+  localStorage.setItem('journeyin.theme', theme.value)
+  localStorage.setItem('journeyin.lightPalette', lightPalette.value)
+  localStorage.setItem('journeyin.darkPalette', darkPalette.value)
+}
 function setTheme(value: Theme) { theme.value = value; applyTheme() }
+function setLightPalette(value: LightPalette) { lightPalette.value = value; applyTheme() }
+function setDarkPalette(value: DarkPalette) { darkPalette.value = value; applyTheme() }
 function systemThemeChanged() { if (theme.value === 'system') applyTheme() }
 watch(selectedDay, () => { void renderMap() })
 watch(tripDocument, () => { void renderMap({ preserveView: true }) }, { deep: true })
@@ -7566,7 +7583,23 @@ onUnmounted(() => {
             <div class="settings-body">
               <section v-if="settingsSection === 'appearance'" class="settings-page-section">
                 <div class="settings-section-heading"><span class="eyebrow">APPEARANCE</span><h3>外观与主题</h3><p>主题默认跟随系统，也可以在这里固定为浅色或深色。</p></div>
-                <div class="settings-choice-grid"><button type="button" :class="{ selected: theme === 'system' }" @click="setTheme('system')"><strong>跟随系统</strong><small>根据设备的浅色/深色偏好自动切换</small></button><button type="button" :class="{ selected: theme === 'light' }" @click="setTheme('light')"><strong>浅色</strong><small>适合白天规划和桌面编辑</small></button><button type="button" :class="{ selected: theme === 'dark' }" @click="setTheme('dark')"><strong>深色</strong><small>降低夜间地图工作区的视觉亮度</small></button></div>
+                <div class="settings-choice-grid"><button type="button" :class="{ selected: theme === 'system' }" :aria-pressed="theme === 'system'" @click="setTheme('system')"><strong>跟随系统</strong><small>根据设备的浅色/深色偏好自动切换</small></button><button type="button" :class="{ selected: theme === 'light' }" :aria-pressed="theme === 'light'" @click="setTheme('light')"><strong>浅色</strong><small>固定使用浅色主题</small></button><button type="button" :class="{ selected: theme === 'dark' }" :aria-pressed="theme === 'dark'" @click="setTheme('dark')"><strong>深色</strong><small>固定使用深色主题</small></button></div>
+                <section class="appearance-palette-group" aria-label="浅色背景预设">
+                  <div class="appearance-palette-heading"><strong>浅色背景</strong><small>跟随系统或固定浅色时生效</small></div>
+                  <div class="appearance-palette-grid">
+                    <button type="button" class="appearance-palette-card" :class="{ selected: lightPalette === 'paper' }" :aria-pressed="lightPalette === 'paper'" @click="setLightPalette('paper')"><span class="appearance-palette-swatch palette-paper"><i></i><b></b></span><span class="appearance-palette-copy"><strong>暖纸白</strong><small>保留当前暖白风格</small></span></button>
+                    <button type="button" class="appearance-palette-card" :class="{ selected: lightPalette === 'cloud' }" :aria-pressed="lightPalette === 'cloud'" @click="setLightPalette('cloud')"><span class="appearance-palette-swatch palette-cloud"><i></i><b></b></span><span class="appearance-palette-copy"><strong>云雾白</strong><small>中性、清爽的浅白</small></span></button>
+                    <button type="button" class="appearance-palette-card" :class="{ selected: lightPalette === 'mist' }" :aria-pressed="lightPalette === 'mist'" @click="setLightPalette('mist')"><span class="appearance-palette-swatch palette-mist"><i></i><b></b></span><span class="appearance-palette-copy"><strong>浅雾灰</strong><small>稍深一档的中性灰</small></span></button>
+                  </div>
+                </section>
+                <section class="appearance-palette-group" aria-label="深色背景预设">
+                  <div class="appearance-palette-heading"><strong>深色背景</strong><small>跟随系统或固定深色时生效</small></div>
+                  <div class="appearance-palette-grid">
+                    <button type="button" class="appearance-palette-card" :class="{ selected: darkPalette === 'graphite' }" :aria-pressed="darkPalette === 'graphite'" @click="setDarkPalette('graphite')"><span class="appearance-palette-swatch palette-graphite"><i></i><b></b></span><span class="appearance-palette-copy"><strong>石墨灰</strong><small>推荐 · 均衡的中性深灰</small></span></button>
+                    <button type="button" class="appearance-palette-card" :class="{ selected: darkPalette === 'near-black' }" :aria-pressed="darkPalette === 'near-black'" @click="setDarkPalette('near-black')"><span class="appearance-palette-swatch palette-near-black"><i></i><b></b></span><span class="appearance-palette-copy"><strong>近黑灰</strong><small>更接近黑色，适合暗环境</small></span></button>
+                    <button type="button" class="appearance-palette-card" :class="{ selected: darkPalette === 'soft-charcoal' }" :aria-pressed="darkPalette === 'soft-charcoal'" @click="setDarkPalette('soft-charcoal')"><span class="appearance-palette-swatch palette-soft-charcoal"><i></i><b></b></span><span class="appearance-palette-copy"><strong>柔和炭灰</strong><small>亮度稍高的深灰背景</small></span></button>
+                  </div>
+                </section>
                 <div class="settings-note"><span class="settings-note-mark">i</span><span>当前主题：<strong>{{ themeLabel }}</strong>。地图 Provider 的底图会保持各自的官方样式，JourneyIn 只对周围的工作区控件做主题适配。</span></div>
               </section>
 

@@ -12,6 +12,7 @@
   --md-warning: #a66228;
   --md-success: #2f7d68;
   --md-map: #dbe8e2;
+  --md-scrim: rgba(0, 0, 0, .62);
   --accent: #e56a4d;
   --map-kind-poi: #d9485f;
   --map-kind-lodging: #7252a5;
@@ -30,21 +31,67 @@
   --panel: var(--md-surface-container);
 }
 
+/* The paper palette preserves the current light appearance by default. */
+:root[data-theme="light"][data-light-palette="cloud"] {
+  --md-surface: #f7f8fa;
+  --md-surface-container-low: #f1f3f5;
+  --md-surface-container: #eceef1;
+  --md-surface-container-high: #e3e6ea;
+  --md-on-surface: #22252a;
+  --md-on-surface-variant: #5c626b;
+  --md-outline: #858b94;
+  --md-map: #e7ebf0;
+}
+
+:root[data-theme="light"][data-light-palette="mist"] {
+  --md-surface: #f0f2f4;
+  --md-surface-container-low: #e9ecef;
+  --md-surface-container: #e2e5e9;
+  --md-surface-container-high: #d8dce1;
+  --md-on-surface: #22262b;
+  --md-on-surface-variant: #565d66;
+  --md-outline: #7c838c;
+  --md-map: #dfe4e9;
+}
+
 :root[data-theme="dark"] {
+  /* Neutral graphite is the default dark background to reduce color cast and long-session fatigue. */
   --md-primary: #8bcdb5;
-  --md-on-primary: #10201c;
-  --md-surface: #101817;
-  --md-surface-container-low: #151e1c;
-  --md-surface-container: #18211f;
-  --md-surface-container-high: #22302c;
-  --md-on-surface: #f4f0e8;
-  --md-on-surface-variant: #b5c1bc;
-  --md-outline: #53625e;
+  --md-on-primary: #16181b;
+  --md-surface: #191a1d;
+  --md-surface-container-low: #202226;
+  --md-surface-container: #272a2f;
+  --md-surface-container-high: #30333a;
+  --md-on-surface: #e4e5e8;
+  --md-on-surface-variant: #aeb2b9;
+  --md-outline: #737781;
   --md-error: #ffb4ab;
   --md-warning: #ffb86b;
   --md-success: #8bd3b2;
-  --md-map: #243c3a;
+  --md-map: #282b30;
   --accent: #ff9a78;
+}
+
+:root[data-theme="dark"][data-dark-palette="near-black"] {
+  --md-surface: #101113;
+  --md-surface-container-low: #17191d;
+  --md-surface-container: #1e2024;
+  --md-surface-container-high: #2a2d33;
+  --md-on-surface: #e1e3e6;
+  --md-on-surface-variant: #a5aab2;
+  --md-outline: #6e737c;
+  --md-map: #181a1e;
+}
+
+:root[data-theme="dark"][data-dark-palette="soft-charcoal"] {
+  --md-surface: #202124;
+  --md-surface-container-low: #27292d;
+  --md-surface-container: #2f3237;
+  --md-surface-container-high: #383b41;
+  --md-on-surface: #f0f1f2;
+  --md-on-surface-variant: #b7bbc2;
+  --md-outline: #777c85;
+  --md-map: #292b30;
 }
 
 * { box-sizing: border-box; }
@@ -508,7 +555,7 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .share-actions button { min-height: 30px; padding: 5px 7px; border: 1px solid color-mix(in srgb, var(--p) 48%, var(--line)); border-radius: 8px; color: var(--p); font-size: 10px; }
 .share-copy-feedback { color: var(--p) !important; font-weight: 800; }
 
-.modal-backdrop { position: fixed; z-index: 70; inset: 0; display: grid; place-items: center; overflow: hidden; padding: 20px; background: color-mix(in srgb, #101817 62%, transparent); }
+.modal-backdrop { position: fixed; z-index: 70; inset: 0; display: grid; place-items: center; overflow: hidden; padding: 20px; background: var(--md-scrim); }
 .modal-panel { position: relative; width: min(560px, calc(100vw - 32px)); max-height: min(760px, calc(100dvh - 32px)); overflow: auto; overscroll-behavior: contain; padding: 28px; border: 1px solid var(--line); border-radius: 24px; color: var(--ink); background: var(--surface); box-shadow: 0 24px 80px color-mix(in srgb, #000 34%, transparent); scrollbar-color: var(--line) transparent; scrollbar-width: thin; }
 .modal-panel::-webkit-scrollbar { width: 8px; }
 .modal-panel::-webkit-scrollbar-thumb { border-radius: 99px; background: var(--line); }
@@ -985,11 +1032,11 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .editor-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
 
 /* Reuse the existing modal markup, but keep the new surface and spacing language. */
-.redesign-page ~ .modal-backdrop, .redesign-page .modal-backdrop { background: color-mix(in srgb, #101817 60%, transparent); }
+.redesign-page ~ .modal-backdrop, .redesign-page .modal-backdrop { background: var(--md-scrim); }
 .modal-panel { border-color: var(--line); border-radius: 22px; color: var(--ink); background: var(--surface); box-shadow: 0 24px 80px color-mix(in srgb, #000 34%, transparent); }
 .modal-panel h2 { color: var(--ink); }
 .modal-panel input, .modal-panel textarea, .modal-panel select { border-color: var(--line); color: var(--ink); background: var(--md-surface-container-low); }
-.trip-details-backdrop { position: fixed; z-index: 75; inset: 0; display: grid; place-items: center; overflow: hidden; padding: 20px; background: color-mix(in srgb, #101817 62%, transparent); }
+.trip-details-backdrop { position: fixed; z-index: 75; inset: 0; display: grid; place-items: center; overflow: hidden; padding: 20px; background: var(--md-scrim); }
 .trip-details-panel { width: min(520px, calc(100vw - 32px)); padding: 0; }
 .trip-details-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 27px 30px 18px; border-bottom: 1px solid var(--line); }
 .trip-details-header > div { min-width: 0; }
@@ -1229,7 +1276,7 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 
 
 /* Settings workspace: navigation and content are separate, just like the desktop Rail. */
-.settings-backdrop { position: fixed; z-index: 70; inset: 0; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, #101817 62%, transparent); }
+.settings-backdrop { position: fixed; z-index: 70; inset: 0; display: grid; place-items: center; padding: 24px; background: var(--md-scrim); }
 .settings-window { position: relative; display: flex; width: min(980px, calc(100vw - 48px)); max-height: min(760px, calc(100dvh - 48px)); flex-direction: column; overflow: hidden; border: 1px solid color-mix(in srgb, var(--line) 82%, transparent); border-radius: 26px; color: var(--ink); background: var(--surface); box-shadow: 0 28px 90px color-mix(in srgb, #000 30%, transparent); }
 .settings-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 30px 34px 24px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 92%, var(--p)); }
 .settings-header > div { min-width: 0; }
@@ -1262,6 +1309,29 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .settings-note { display: flex; gap: 8px; margin-top: 16px; padding: 12px; border-radius: 13px; color: var(--muted); background: var(--md-surface-container-low); font-size: 11px; line-height: 1.55; }
 .settings-note-mark { display: grid; flex: 0 0 20px; width: 20px; height: 20px; place-items: center; border-radius: 50%; color: var(--md-on-primary); background: var(--p); font-size: 11px; font-weight: 900; }
 .settings-note strong { color: var(--p); }
+
+
+.appearance-palette-group { margin-top: 24px; }
+.appearance-palette-heading { display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-bottom:9px; }
+.appearance-palette-heading strong { color:var(--ink); font-size:13px; font-weight:850; }
+.appearance-palette-heading small { color:var(--muted); font-size:10px; }
+.appearance-palette-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:9px; }
+.appearance-palette-card { display:flex; min-width:0; min-height:70px; align-items:center; gap:10px; padding:9px; border:1px solid var(--line); border-radius:13px; color:var(--ink); background:var(--surface); text-align:left; cursor:pointer; transition:border-color .16s ease,box-shadow .16s ease,background .16s ease; }
+.appearance-palette-card:hover,.appearance-palette-card:focus-visible { border-color:var(--p); }
+.appearance-palette-card.selected { border-color:var(--p); box-shadow:0 0 0 2px color-mix(in srgb,var(--p) 16%,transparent); background:color-mix(in srgb,var(--p) 5%,var(--surface)); }
+.appearance-palette-swatch { position:relative; display:block; width:40px; height:40px; flex:0 0 40px; overflow:hidden; border:1px solid color-mix(in srgb,var(--palette-ink) 25%,var(--palette-surface)); border-radius:10px; background:var(--palette-surface); }
+.appearance-palette-swatch i { position:absolute; right:4px; bottom:4px; left:4px; height:15px; border:1px solid color-mix(in srgb,var(--palette-ink) 15%,var(--palette-container)); border-radius:5px; background:var(--palette-container); }
+.appearance-palette-swatch b { position:absolute; top:5px; left:5px; width:9px; height:9px; border-radius:50%; background:var(--palette-ink); }
+.palette-paper { --palette-surface:#f6f3ed; --palette-container:#ebe8df; --palette-ink:#252724; }
+.palette-cloud { --palette-surface:#f7f8fa; --palette-container:#eceef1; --palette-ink:#22252a; }
+.palette-mist { --palette-surface:#f0f2f4; --palette-container:#e2e5e9; --palette-ink:#22262b; }
+.palette-graphite { --palette-surface:#191a1d; --palette-container:#272a2f; --palette-ink:#e4e5e8; }
+.palette-near-black { --palette-surface:#101113; --palette-container:#1e2024; --palette-ink:#e1e3e6; }
+.palette-soft-charcoal { --palette-surface:#202124; --palette-container:#2f3237; --palette-ink:#f0f1f2; }
+.appearance-palette-copy { display:grid; min-width:0; gap:3px; }
+.appearance-palette-copy strong { overflow:hidden; color:var(--ink); font-size:11px; font-weight:850; text-overflow:ellipsis; white-space:nowrap; }
+.appearance-palette-copy small { display:-webkit-box; overflow:hidden; color:var(--muted); font-size:9px; line-height:1.35; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+@media (max-width: 760px) { .appearance-palette-grid { grid-template-columns:1fr; } .appearance-palette-card { min-height:58px; } }
 .settings-form-grid { display: grid; gap: 12px; }
 .settings-form-grid label, .settings-card label { display: grid; gap: 6px; color: var(--muted); font-size: 11px; font-weight: 800; }
 .settings-form-grid input, .settings-card input, .settings-card select { width: 100%; min-height: 42px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 11px; outline: none; color: var(--ink); background: var(--md-surface-container-low); font-size: 12px; }
@@ -1440,12 +1510,12 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .ui-select-check { display: grid; flex: 0 0 20px; width: 20px; height: 20px; place-items: center; border-radius: 50%; color: var(--md-on-primary); background: var(--p); font-size: 11px; font-weight: 900; }
 
 /* New journey workspace modal. */
-.new-trip-backdrop { position: fixed; z-index: 70; inset: 0; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, #101817 62%, transparent); }
+.new-trip-backdrop { position: fixed; z-index: 70; inset: 0; display: grid; place-items: center; padding: 24px; background: var(--md-scrim); }
 .new-trip-window { display: grid; width: min(840px, calc(100vw - 48px)); max-height: min(720px, calc(100dvh - 48px)); grid-template-columns: 255px minmax(0, 1fr); overflow: hidden; border: 1px solid color-mix(in srgb, var(--line) 82%, transparent); border-radius: 26px; color: var(--ink); background: var(--surface); box-shadow: 0 28px 90px color-mix(in srgb, #000 30%, transparent); }
 .new-trip-hero { position: relative; display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden; padding: 28px 24px; color: #f7f4ea; background: linear-gradient(155deg, #245f56, #183c39 55%, #e36f51); }
 .new-trip-hero::before { position: absolute; top: -62px; right: -80px; width: 245px; height: 245px; border: 20px solid #f7ddb578; border-radius: 50%; content: ""; }
 .new-trip-hero::after { position: absolute; right: -22px; bottom: 38px; width: 142px; height: 142px; border: 1px solid #ffffff5c; border-radius: 50%; content: ""; }
-.new-trip-mark { position: absolute; z-index: 1; top: 27px; left: 24px; display: grid; width: 38px; height: 38px; place-items: center; border-radius: 13px; color: #10201c; background: #8bcdb5; font-size: 19px; font-weight: 900; }
+.new-trip-mark { position: absolute; z-index: 1; top: 27px; left: 24px; display: grid; width: 38px; height: 38px; place-items: center; border-radius: 13px; color: var(--md-on-primary); background: var(--p); font-size: 19px; font-weight: 900; }
 .new-trip-hero .eyebrow { position: relative; z-index: 1; color: #d8eee4; }
 .new-trip-hero h2 { position: relative; z-index: 1; margin: 7px 0 12px; color: #ffffff; font-size: 26px; line-height: 1.2; letter-spacing: -.05em; }
 .new-trip-hero p:last-child { position: relative; z-index: 1; margin: 0; color: #d7e7df; font-size: 11px; line-height: 1.65; }
