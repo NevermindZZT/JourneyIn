@@ -547,6 +547,15 @@ const managedPasswordDraft = ref('')
 const managedNewPasswordDraft = ref('')
 const managedRoleDraft = ref<'admin' | 'user'>('user')
 const managedAccessModeDraft = ref<UserAccessMode>('read_only')
+const managedRoleOptions = [
+  { value: 'user', label: '普通用户' },
+  { value: 'admin', label: '管理员' },
+]
+const managedAccessModeOptions = [
+  { value: 'read_only', label: '只读（查看所有行程）' },
+  { value: 'selected_trip_edit', label: '指定行程可编辑（其他行程只读）' },
+  { value: 'all_trips_edit', label: '所有行程可编辑' },
+]
 const managedEnabledDraft = ref(true)
 const managedEditableTripIDsDraft = ref<string[]>([])
 const managedTripSearchDraft = ref('')
@@ -1972,9 +1981,17 @@ function onManagedRoleChange() {
   if (managedRoleDraft.value === 'admin') { managedAccessModeDraft.value = 'all_trips_edit'; managedEditableTripIDsDraft.value = []; managedTripSearchDraft.value = '' }
   else if (managedAccessModeDraft.value === 'all_trips_edit') managedAccessModeDraft.value = 'read_only'
 }
+function handleManagedRoleSelect(role: string) {
+  managedRoleDraft.value = role as 'admin' | 'user'
+  onManagedRoleChange()
+}
 
 function onManagedAccessModeChange() {
   if (managedAccessModeDraft.value !== 'selected_trip_edit') { managedEditableTripIDsDraft.value = []; managedTripSearchDraft.value = '' }
+}
+function handleManagedAccessModeSelect(mode: string) {
+  managedAccessModeDraft.value = mode as UserAccessMode
+  onManagedAccessModeChange()
 }
 
 function toggleManagedTripGrant(tripID: string) {
@@ -8022,8 +8039,8 @@ onUnmounted(() => {
               <label>用户名<input v-model="managedUsernameDraft" maxlength="80" required autocomplete="off" /></label>
               <label v-if="!editingManagedUserID">初始密码<input v-model="managedPasswordDraft" type="password" required minlength="12" autocomplete="new-password" placeholder="至少 12 个字符" /></label>
               <label v-else>重置密码 <span class="optional-label">留空保持不变</span><input v-model="managedNewPasswordDraft" type="password" minlength="12" autocomplete="new-password" placeholder="至少 12 个字符" /></label>
-              <label>账户角色<select v-model="managedRoleDraft" @change="onManagedRoleChange"><option value="user">普通用户</option><option value="admin">管理员</option></select></label>
-              <label>行程权限<select v-model="managedAccessModeDraft" :disabled="managedRoleDraft === 'admin'" @change="onManagedAccessModeChange"><option value="read_only">只读（查看所有行程）</option><option value="selected_trip_edit">指定行程可编辑（其他行程只读）</option><option value="all_trips_edit">所有行程可编辑</option></select></label>
+              <label class="select-field">账户角色<UiSelect :model-value="managedRoleDraft" aria-label="账户角色" :options="managedRoleOptions" @update:model-value="handleManagedRoleSelect" /></label>
+              <label class="select-field">行程权限<UiSelect :model-value="managedAccessModeDraft" aria-label="行程权限" :options="managedAccessModeOptions" :disabled="managedRoleDraft === 'admin'" @update:model-value="handleManagedAccessModeSelect" /></label>
               <div v-if="managedRoleDraft === 'user' && managedAccessModeDraft === 'selected_trip_edit'" class="settings-user-trip-grants" role="group" aria-labelledby="managed-trip-grants-label">
                 <div class="settings-user-trip-grant-heading"><div><strong id="managed-trip-grants-label">允许编辑的行程</strong><small>已选 {{ managedEditableTripIDsDraft.length }} 条 · 可查看全部 {{ trips.length }} 条</small></div><div class="settings-user-trip-grant-actions"><button type="button" class="text-action" :disabled="!managedEditableTripOptions.length" @click="selectFilteredManagedTrips">选择当前结果</button><button type="button" class="text-action" :disabled="!managedEditableTripIDsDraft.length" @click="clearManagedTripGrants">清空</button></div></div>
                 <label class="settings-user-trip-search"><span class="visually-hidden">搜索行程</span><input v-model="managedTripSearchDraft" type="search" placeholder="搜索行程名称或日期" aria-label="搜索可编辑行程" /><span>{{ managedEditableTripOptions.length }} 条结果</span></label>

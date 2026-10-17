@@ -3,10 +3,10 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { IonIcon } from '@ionic/vue'
 import { chevronDownOutline } from 'ionicons/icons'
 
-type SelectOption = { value: string; label: string; description?: string; disabled?: boolean }
+export type SelectOption = { value: string | number; label: string; description?: string; disabled?: boolean }
 
 const props = withDefaults(defineProps<{
-  modelValue: string
+  modelValue: string | number
   options: SelectOption[]
   ariaLabel?: string
   placeholder?: string
@@ -17,18 +17,33 @@ const props = withDefaults(defineProps<{
   disabled: false,
 })
 
-const emit = defineEmits<{ (event: 'update:modelValue', value: string): void }>()
+const emit = defineEmits<{ (event: 'update:modelValue', value: any): void }>()
 const root = ref<HTMLElement | null>(null)
 const open = ref(false)
+const opensUp = ref(false)
 const activeIndex = ref(-1)
 const listboxID = 'journeyin-select-' + Math.random().toString(36).slice(2)
 
-const selectedOption = computed(() => props.options.find(option => option.value === props.modelValue) || null)
+function matchesValue(val: string | number | undefined | null): boolean {
+  if (val === props.modelValue) return true
+  if (props.modelValue !== undefined && props.modelValue !== null && val !== undefined && val !== null) {
+    return String(val) === String(props.modelValue)
+  }
+  return false
+}
+
+const selectedOption = computed(() => props.options.find(option => matchesValue(option.value)) || null)
 
 function openMenu() {
   if (props.disabled) return
+  if (root.value) {
+    const rect = root.value.getBoundingClientRect()
+    const spaceBelow = window.innerHeight - rect.bottom
+    const spaceAbove = rect.top
+    opensUp.value = spaceBelow < 220 && spaceAbove > spaceBelow
+  }
   open.value = true
-  activeIndex.value = Math.max(0, props.options.findIndex(option => option.value === props.modelValue))
+  activeIndex.value = Math.max(0, props.options.findIndex(option => matchesValue(option.value)))
   void nextTick(() => root.value?.querySelector<HTMLElement>('.ui-select-option.active')?.scrollIntoView({ block: 'nearest' }))
 }
 
@@ -81,7 +96,7 @@ function handleKeydown(event: KeyboardEvent) {
 }
 
 watch(() => props.modelValue, () => {
-  if (open.value) activeIndex.value = props.options.findIndex(option => option.value === props.modelValue)
+  if (open.value) activeIndex.value = props.options.findIndex(option => matchesValue(option.value))
 })
 
 onMounted(() => {
@@ -95,7 +110,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div ref="root" class="ui-select" :class="{ open, disabled }">
+  <div ref="root" class="ui-select" :class="{ open, disabled, 'opens-up': opensUp }">
     <button
       class="ui-select-trigger"
       type="button"
@@ -114,15 +129,15 @@ onUnmounted(() => {
         v-for="(option, index) in options"
         :key="option.value"
         class="ui-select-option"
-        :class="{ active: index === activeIndex, selected: option.value === modelValue }"
+        :class="{ active: index === activeIndex, selected: matchesValue(option.value) }"
         type="button"
         role="option"
-        :aria-selected="option.value === modelValue"
+        :aria-selected="matchesValue(option.value)"
         :disabled="option.disabled"
         @click="choose(option)"
       >
         <span><strong>{{ option.label }}</strong><small v-if="option.description">{{ option.description }}</small></span>
-        <span v-if="option.value === modelValue" class="ui-select-check" aria-hidden="true">✓</span>
+        <span v-if="matchesValue(option.value)" class="ui-select-check" aria-hidden="true">✓</span>
       </button>
     </div>
   </div>

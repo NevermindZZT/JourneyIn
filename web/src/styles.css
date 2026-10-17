@@ -1535,12 +1535,14 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .ui-select.disabled .ui-select-trigger { cursor: not-allowed; opacity: .48; }
 .ui-select-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ui-select-chevron { display: grid; flex: 0 0 20px; width: 20px; height: 20px; place-items: center; color: var(--p); font-size: 17px; line-height: 1; transition: transform .16s ease; }
+.ui-select.open { z-index: 50; }
 .ui-select.open .ui-select-chevron { transform: rotate(180deg); }
 .ui-select-menu { position: absolute; z-index: 90; top: calc(100% + 6px); right: 0; left: 0; max-height: 250px; overflow: auto; padding: 5px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); box-shadow: 0 16px 36px color-mix(in srgb, var(--ink) 22%, transparent); }
+.ui-select.opens-up .ui-select-menu { top: auto; bottom: calc(100% + 6px); box-shadow: 0 -16px 36px color-mix(in srgb, var(--ink) 22%, transparent); }
 .ui-select-option { display: flex; width: 100%; min-height: 40px; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 8px; border: 0; border-radius: 9px; text-align: left; color: var(--ink); background: transparent; }
 .ui-select-option > span:first-child { display: grid; min-width: 0; gap: 2px; }
-.ui-select-option strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.ui-select-option small { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.ui-select-option strong { overflow: hidden; font-size: 12px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.ui-select-option small { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .ui-select-option.active, .ui-select-option.selected { color: var(--p); background: color-mix(in srgb, var(--p) 10%, var(--surface)); }
 @media (hover: hover) and (pointer: fine) { .ui-select-option:hover { color: var(--p); background: color-mix(in srgb, var(--p) 10%, var(--surface)); } }
 .ui-select-option:disabled { cursor: not-allowed; opacity: .45; }

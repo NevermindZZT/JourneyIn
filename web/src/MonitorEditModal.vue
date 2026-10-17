@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import UiSelect from './UiSelect.vue'
 
 export interface MonitorCriteriaData {
   months?: number[]
@@ -109,6 +110,19 @@ const monthsList = [
   { val: 1, label: '1月' }, { val: 2, label: '2月' }, { val: 3, label: '3月' }, { val: 4, label: '4月' },
   { val: 5, label: '5月' }, { val: 6, label: '6月' }, { val: 7, label: '7月' }, { val: 8, label: '8月' },
   { val: 9, label: '9月' }, { val: 10, label: '10月' }, { val: 11, label: '11月' }, { val: 12, label: '12月' },
+]
+
+const crsOptions = [
+  { value: 'gcj02', label: 'GCJ-02 (高德/腾讯)' },
+  { value: 'bd09ll', label: 'BD-09LL (百度)' },
+  { value: 'wgs84', label: 'WGS-84 (GPS标准)' },
+]
+
+const maxLeaveDaysOptions = [
+  { value: 0, label: '0 天 (仅限周末/法定假无需请假)' },
+  { value: 1, label: '最多请假 1 天 (如请周五休3天)' },
+  { value: 2, label: '最多请假 2 天 (拼假连休4-5天)' },
+  { value: 3, label: '最多请假 3 天 (长假探险)' },
 ]
 
 watch(() => props.isOpen, (open) => {
@@ -374,11 +388,7 @@ function submit() {
             </label>
             <label class="field-label crs-field">
               <span>坐标系</span>
-              <select v-model="crs">
-                <option value="gcj02">GCJ-02 (高德/腾讯)</option>
-                <option value="bd09ll">BD-09LL (百度)</option>
-                <option value="wgs84">WGS-84 (GPS标准)</option>
-              </select>
+              <UiSelect v-model="crs" aria-label="坐标系" :options="crsOptions" />
             </label>
           </div>
         </section>
@@ -406,7 +416,7 @@ function submit() {
         <!-- 4. 天文与气象要求 -->
         <section class="form-section">
           <label class="section-title">天文与气象条件</label>
-          <label class="toggle-card">
+          <label class="toggle-card" :class="{ active: stargazingMode }">
             <input v-model="stargazingMode" type="checkbox" />
             <div class="toggle-info">
               <strong>开启星空/银河摄影模式</strong>
@@ -431,12 +441,7 @@ function submit() {
           <div class="form-row">
             <label class="field-label">
               <span>可接受请假天数</span>
-              <select v-model.number="maxLeaveDays">
-                <option :value="0">0 天 (仅限周末/法定假无需请假)</option>
-                <option :value="1">最多请假 1 天 (如请周五休3天)</option>
-                <option :value="2">最多请假 2 天 (拼假连休4-5天)</option>
-                <option :value="3">最多请假 3 天 (长假探险)</option>
-              </select>
+              <UiSelect v-model="maxLeaveDays" aria-label="可接受请假天数" :options="maxLeaveDaysOptions" />
             </label>
             <label class="field-label">
               <span>期望游玩天数</span>
@@ -484,7 +489,7 @@ function submit() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: color-mix(in srgb, #000 68%, transparent);
+  background: var(--md-scrim);
   backdrop-filter: blur(8px);
   padding: 16px;
   box-sizing: border-box;
@@ -639,21 +644,23 @@ function submit() {
   color: var(--ink);
 }
 
-.field-label input, .field-label select {
+.field-label input:not([type="range"]):not([type="checkbox"]) {
   width: 100%;
-  min-height: 38px;
+  min-height: 42px;
   padding: 8px 12px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 11px;
   background: var(--surface);
   color: var(--ink);
   font: inherit;
   box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.field-label input:focus, .field-label select:focus {
-  outline: 2px solid var(--p);
+.field-label input:not([type="range"]):not([type="checkbox"]):focus {
+  outline: none;
   border-color: var(--p);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--p) 14%, transparent);
 }
 
 .inline-duration {
@@ -663,7 +670,7 @@ function submit() {
 }
 
 .inline-duration input {
-  width: 60px;
+  width: 66px;
   text-align: center;
 }
 
@@ -686,6 +693,16 @@ function submit() {
   transition: all 0.15s ease;
 }
 
+.month-btn:hover:not(.selected) {
+  border-color: var(--p);
+  background: color-mix(in srgb, var(--p) 8%, var(--surface));
+}
+
+.month-btn:focus-visible {
+  outline: 2px solid var(--p);
+  outline-offset: 1px;
+}
+
 .month-btn.selected {
   background: var(--p);
   color: var(--md-on-primary, #ffffff);
@@ -696,11 +713,21 @@ function submit() {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  padding: 12px;
+  padding: 12px 14px;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 12px;
   cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.toggle-card:hover {
+  border-color: color-mix(in srgb, var(--p) 45%, var(--line));
+}
+
+.toggle-card.active {
+  border-color: var(--p);
+  background: color-mix(in srgb, var(--p) 8%, var(--panel));
 }
 
 .toggle-card input {
@@ -738,6 +765,12 @@ function submit() {
 }
 
 .sliders-row input[type="range"] {
+  width: 100%;
+  height: 28px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
   accent-color: var(--p);
   cursor: pointer;
 }
@@ -754,9 +787,9 @@ function submit() {
 }
 
 .btn-cancel, .btn-submit {
-  min-height: 38px;
-  padding: 0 18px;
-  border-radius: 10px;
+  min-height: 42px;
+  padding: 0 20px;
+  border-radius: 11px;
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
@@ -769,10 +802,25 @@ function submit() {
   color: var(--ink);
 }
 
+.btn-cancel:hover {
+  border-color: var(--p);
+  color: var(--p);
+  background: color-mix(in srgb, var(--p) 8%, var(--surface));
+}
+
+.btn-cancel:focus-visible, .btn-submit:focus-visible {
+  outline: 2px solid var(--p);
+  outline-offset: 2px;
+}
+
 .btn-submit {
   background: var(--p);
   border: 0;
   color: var(--md-on-primary, #ffffff);
+}
+
+.btn-submit:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--p) 88%, #000);
 }
 
 .btn-submit:disabled {
@@ -805,19 +853,21 @@ function submit() {
 
 .search-input-box input {
   width: 100%;
-  min-height: 40px;
+  min-height: 42px;
   padding: 8px 36px 8px 12px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 11px;
   background: var(--surface);
   color: var(--ink);
   font: inherit;
   box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .search-input-box input:focus {
-  outline: 2px solid var(--p);
+  outline: none;
   border-color: var(--p);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--p) 14%, transparent);
 }
 
 .search-clear-btn {
@@ -832,10 +882,10 @@ function submit() {
 }
 
 .btn-do-search {
-  min-height: 40px;
+  min-height: 42px;
   padding: 0 16px;
   border: 1px solid var(--p);
-  border-radius: 10px;
+  border-radius: 11px;
   background: var(--p);
   color: var(--md-on-primary, #ffffff);
   font-size: 13px;
@@ -847,6 +897,11 @@ function submit() {
 
 .btn-do-search:hover:not(:disabled) {
   background: color-mix(in srgb, var(--p) 86%, #000);
+}
+
+.btn-do-search:focus-visible {
+  outline: 2px solid var(--p);
+  outline-offset: 2px;
 }
 
 .btn-do-search:disabled {
@@ -974,5 +1029,12 @@ function submit() {
   color: var(--ink);
   font-size: 11px;
   cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-clear-place:hover {
+  border-color: var(--p);
+  color: var(--p);
+  background: color-mix(in srgb, var(--p) 8%, var(--surface));
 }
 </style>
