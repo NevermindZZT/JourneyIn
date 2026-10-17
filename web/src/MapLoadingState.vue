@@ -383,7 +383,7 @@ const gradId = 'mlp_' + Math.random().toString(36).slice(2, 9)
   }
 
   .atlas-workspace .map-loading-container.sheet-peek {
-    padding-bottom: calc(74px + max(8px, env(safe-area-inset-bottom)));
+    padding-bottom: calc(116px + max(8px, env(safe-area-inset-bottom)));
   }
 
   .map-loading-container.sheet-peek .map-loading-backdrop {

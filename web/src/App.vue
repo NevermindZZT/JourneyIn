@@ -1138,12 +1138,12 @@ function ensureNavigationHistory() {
 }
 
 const SHEET_PEEK_HEIGHT = 154
-const ATLAS_PEEK_HEIGHT = 74
+const ATLAS_PEEK_HEIGHT = 116
 const SHEET_TOP_OFFSET = 60
 const SHEET_BOTTOM_OFFSET = 8
 function sheetViewportHeight() { return window.visualViewport?.height || window.innerHeight }
 function currentSheetPeekHeight() {
-  return tripView.value === 'atlas' ? ATLAS_PEEK_HEIGHT : SHEET_PEEK_HEIGHT
+  return (tripView.value === 'atlas' || tripView.value === 'radar') ? ATLAS_PEEK_HEIGHT : SHEET_PEEK_HEIGHT
 }
 function sheetHeightBounds() {
   const viewportHeight = sheetViewportHeight()
@@ -1241,6 +1241,18 @@ function cycleSheetBreakpoint(event: MouseEvent) {
     return
   }
   setSheetBreakpoint(sheetBreakpoint.value === 'peek' ? 'half' : 'peek')
+}
+
+function handleAtlasHeaderPointerDown(event: PointerEvent) {
+  if (sheetBreakpoint.value !== 'peek') return
+  if ((event.target as HTMLElement | null)?.closest('button, a, input')) return
+  startSheetDrag(event)
+}
+
+function handleAtlasHeaderClick(event: MouseEvent) {
+  if (sheetBreakpoint.value !== 'peek') return
+  if ((event.target as HTMLElement | null)?.closest('button, a, input')) return
+  cycleSheetBreakpoint(event)
 }
 
 function toggleDetailSheet() {
@@ -7100,7 +7112,7 @@ onUnmounted(() => {
                 <span></span>
               </button>
 
-              <header class="workspace-panel-head atlas-panel-head">
+              <header class="workspace-panel-head atlas-panel-head" @pointerdown="handleAtlasHeaderPointerDown" @click="handleAtlasHeaderClick">
                 <div class="atlas-brand-badge">
                   <div class="atlas-badge-icon-wrap">
                     <IonIcon :icon="footstepsOutline" />

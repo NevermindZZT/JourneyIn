@@ -491,8 +491,8 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
   }
 
   .atlas-floating-panel.sheet-peek {
-    height: 74px;
-    max-height: 74px;
+    height: 116px;
+    max-height: 116px;
   }
 
   .atlas-floating-panel.sheet-half {
@@ -832,8 +832,34 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 @media (hover: hover) and (pointer: fine) { .journey-day-tabs button:hover { border-color: var(--p); color: var(--md-on-primary); background: var(--p); } }
 .workspace-panel.sheet-peek .journey-view-tabs { display: none; }
 .workspace-panel.sheet-peek .journey-day-tabs { display: none; }
-.sheet-handle { display: none; width: 100%; height: 25px; place-items: center; padding: 0; border: 0; background: transparent; touch-action: none; }
-.sheet-handle span { display: block; width: 40px; height: 4px; border-radius: 999px; background: color-mix(in srgb, var(--muted) 45%, transparent); }
+.sheet-handle {
+  position: relative;
+  display: none;
+  width: 100%;
+  height: 32px;
+  min-height: 32px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  touch-action: none;
+  cursor: grab;
+}
+.sheet-handle::before {
+  position: absolute;
+  top: -8px;
+  right: 0;
+  bottom: -8px;
+  left: 0;
+  content: "";
+}
+.sheet-handle span {
+  display: block;
+  width: 44px;
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 45%, transparent);
+}
 .panel-scroll { min-height: 0; flex: 1; overflow-x: hidden; overflow-y: auto; padding: 15px 17px 20px; scrollbar-color: var(--line) transparent; scrollbar-width: thin; }
 .panel-scroll::-webkit-scrollbar { width: 8px; }
 .panel-scroll::-webkit-scrollbar-thumb { border: 2px solid var(--panel); border-radius: 99px; background: var(--line); }
@@ -1220,7 +1246,7 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
   .redesign-notices { top: 106px; right: 10px; left: 10px; width: auto; }
   .workspace-panel { top: auto; right: 8px; bottom: max(8px, env(safe-area-inset-bottom)); left: 8px; width: auto; height: 53%; max-height: 53%; border-radius: 24px; }
   .workspace-panel.sheet-peek { height: 154px; max-height: 154px; }
-  .workspace-panel.atlas-floating-panel.sheet-peek { height: 74px; max-height: 74px; }
+  .workspace-panel.atlas-floating-panel.sheet-peek { height: 116px; max-height: 116px; }
   .workspace-panel.atlas-floating-panel.radar-floating-panel.sheet-peek { height: 116px; max-height: 116px; }
    .workspace-panel.sheet-peek .journey-day-tabs { display: flex; padding: 7px 15px 8px; border-bottom: 0; }
   .workspace-panel.sheet-expanded { top: 60px; bottom: max(8px, env(safe-area-inset-bottom)); height: calc(100% - 68px); max-height: none; }
@@ -1233,7 +1259,9 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
   .workspace-panel-head .panel-head-actions { top: 8px; right: 15px; gap: 4px; }
   .workspace-panel-head h1 { font-size: 18px; }
   .workspace-panel-head p { font-size: 10px; }
-  .workspace-panel-head .panel-action-button:first-child { display: none; }
+  .itinerary-panel .workspace-panel-head .panel-action-button:first-child { display: none; }
+  .atlas-floating-panel .panel-head-actions .collapse-action { display: inline-flex; }
+  .atlas-floating-panel.sheet-peek .atlas-panel-head { cursor: pointer; }
   .panel-scroll { padding: 12px 15px 16px; }
   .redesign-overview { padding: 12px; }
   .redesign-plan-controls { align-items: stretch; flex-wrap: wrap; }
@@ -1252,9 +1280,10 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .stop-detail-panel.sheet-peek .detail-date-edit { display: none; }
    .stop-detail-panel.sheet-peek .detail-location, .stop-detail-panel.sheet-peek .detail-primary-actions, .stop-detail-panel.sheet-peek .detail-weather, .stop-detail-panel.sheet-peek .detail-section, .stop-detail-panel.sheet-peek .detail-parent-button, .stop-detail-panel.sheet-peek .detail-danger-button { display: none; }
   .detail-sheet-toggle { display: grid; }
-  .detail-sheet-handle { display: grid; height: 25px; place-items: center; }
-  .detail-sheet-handle button { display: grid; width: 100%; height: 25px; place-items: center; border: 0; background: transparent; touch-action: none; }
-  .detail-sheet-handle span { display: block; width: 40px; height: 4px; border-radius: 999px; background: color-mix(in srgb, var(--muted) 45%, transparent); }
+  .detail-sheet-handle { display: grid; height: 32px; place-items: center; }
+  .detail-sheet-handle button { position: relative; display: grid; width: 100%; height: 32px; min-height: 32px; place-items: center; border: 0; background: transparent; touch-action: none; cursor: grab; }
+  .detail-sheet-handle button::before { position: absolute; top: -8px; right: 0; bottom: -8px; left: 0; content: ""; }
+  .detail-sheet-handle span { display: block; width: 44px; height: 4px; border-radius: 999px; background: color-mix(in srgb, var(--muted) 45%, transparent); }
   .detail-sticky-header { padding: 10px 16px 9px; }
   .detail-sticky-header > h1 { font-size: 23px; }
   .detail-sticky-header .detail-kicker { margin-top: 6px; }
@@ -2563,16 +2592,16 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
   .atlas-workspace.sheet-peek #map .amap-logo,
   .atlas-workspace.sheet-peek #map .journeyin-baidu-logo,
   .atlas-workspace.sheet-peek #map .anchorBL:has(img) {
-    bottom: calc(74px + 10px) !important;
+    bottom: calc(116px + 10px) !important;
   }
   .atlas-workspace.sheet-peek .journey-map-scale-chip {
-    bottom: calc(74px + 10px);
+    bottom: calc(116px + 10px);
   }
   .atlas-workspace.sheet-peek #map .amap-copyright,
   .atlas-workspace.sheet-peek #map .journeyin-baidu-copyright,
   .atlas-workspace.sheet-peek #map .anchorBL:not(:has(img)),
   .atlas-workspace.sheet-peek #map .BMap_cpyCtrl_w {
-    bottom: calc(74px + 10px) !important;
+    bottom: calc(116px + 10px) !important;
   }
 
   /* 抽屉展开至 expanded 全屏时整行渐隐 */
