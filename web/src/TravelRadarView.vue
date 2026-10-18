@@ -68,8 +68,8 @@ async function loadMonitors() {
   } catch (err) { loadError.value = err instanceof Error ? err.message : '读取监控列表失败' }
   finally { loading.value = false }
 }
-async function loadEvaluations(monitorID: string) {
-  if (evaluationsByMonitor.value[monitorID]) return evaluationsByMonitor.value[monitorID]
+async function loadEvaluations(monitorID: string, force = false) {
+  if (!force && evaluationsByMonitor.value[monitorID]) return evaluationsByMonitor.value[monitorID]
   try {
     const res = await props.apiFetch('/api/v1/monitors/' + encodeURIComponent(monitorID) + '/evaluations?limit=100')
     if (!res.ok) throw new Error('无法读取未来机会窗口')
@@ -78,6 +78,21 @@ async function loadEvaluations(monitorID: string) {
     evaluationsByMonitor.value = { ...evaluationsByMonitor.value, [monitorID]: items }
     return items
   } catch (err) { loadError.value = err instanceof Error ? err.message : '读取机会窗口失败'; return [] }
+}
+async function refreshMonitor(targetID?: string) {
+  const idToRefresh = targetID || selectedMonitorID.value
+  if (idToRefresh) {
+    const next = { ...evaluationsByMonitor.value }
+    delete next[idToRefresh]
+    evaluationsByMonitor.value = next
+  }
+  await loadMonitors()
+  if (idToRefresh && selectedMonitorID.value === idToRefresh) {
+    const freshEvals = await loadEvaluations(idToRefresh, true)
+    const currentMon = monitors.value.find(item => item.id === idToRefresh)
+    selectedEvaluationID.value = currentMon?.latest_evaluation?.id || (freshEvals[0]?.id ?? null)
+    emit('windowSelected', { monitorID: idToRefresh, evaluation: selectedEvaluation.value })
+  }
 }
 async function openMonitorDetails(monitorID: string) {
   const item = monitors.value.find(candidate => candidate.id === monitorID)
@@ -120,7 +135,7 @@ async function triggerEvaluate(item: MonitorItem) {
     if (!res.ok) throw new Error('重新评估失败')
     const data = await res.json() as { evaluations?: EvaluationItem[] }
     if (data.evaluations) evaluationsByMonitor.value = { ...evaluationsByMonitor.value, [item.id]: data.evaluations }
-    await loadMonitors(); showToast('时机评估已更新')
+    await refreshMonitor(item.id); showToast('时机评估已更新')
   } catch (err) { loadError.value = err instanceof Error ? err.message : '重新评估失败' }
   finally { evaluatingID.value = null }
 }
@@ -150,7 +165,7 @@ async function convertToTrip(item: MonitorItem, evaluation: EvaluationItem | nul
   } catch (err) { loadError.value = err instanceof Error ? err.message : '创建行程草稿失败' }
   finally { convertingID.value = null }
 }
-defineExpose({ loadMonitors, selectMonitorFromMap })
+defineExpose({ loadMonitors, refreshMonitor, selectMonitorFromMap })
 </script>
 
 <template>

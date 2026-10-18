@@ -173,6 +173,9 @@ func (s *Server) updateMonitor(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "update_error", err.Error(), nil)
 		return
 	}
+	if updated, err := s.monitorService.GetMonitor(r.Context(), id); err == nil {
+		m = updated
+	}
 	writeJSON(w, http.StatusOK, m)
 }
 

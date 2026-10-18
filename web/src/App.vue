@@ -4317,11 +4317,20 @@ async function handleSaveMonitor(data: MonitorFormData) {
       const err = await res.json() as { error?: { message?: string } }
       throw new Error(err.error?.message || '保存监控规则失败')
     }
+    const saved = await res.json().catch(() => null) as MonitorItem | null
     monitorEditModalOpen.value = false
     monitorEditInitialData.value = null
     await loadRadarSummary()
+    const targetID = data.id || saved?.id
     if (travelRadarViewRef.value) {
-      await travelRadarViewRef.value.loadMonitors()
+      if (targetID) {
+        await travelRadarViewRef.value.refreshMonitor(targetID)
+      } else {
+        await travelRadarViewRef.value.loadMonitors()
+      }
+    }
+    if (tripView.value === 'radar') {
+      void renderMap({ preserveView: true })
     }
     settingsMessage.value = isEdit ? '监控规则已更新' : '已添加新的景点时机监控规则'
   } catch (err) {

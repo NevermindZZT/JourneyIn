@@ -69,14 +69,12 @@ func (s *Service) CreateMonitor(ctx context.Context, m Monitor) (Monitor, error)
 		return Monitor{}, err
 	}
 
-	// Trigger initial evaluation immediately
-	go func() {
-		bgCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancel()
-		_ = s.EvaluateOne(bgCtx, m.ID)
-	}()
+	// Trigger initial evaluation synchronously so the new monitor has its evaluation immediately
+	if err := s.EvaluateOne(ctx, m.ID); err != nil {
+		s.logger.Error("evaluate monitor after create failed", "id", m.ID, "error", err)
+	}
 
-	return m, nil
+	return s.store.GetMonitor(ctx, m.ID)
 }
 
 func (s *Service) GetMonitor(ctx context.Context, id string) (Monitor, error) {
@@ -92,12 +90,10 @@ func (s *Service) UpdateMonitor(ctx context.Context, m Monitor) error {
 	if err := s.store.UpdateMonitor(ctx, m); err != nil {
 		return err
 	}
-	// Re-evaluate asynchronously
-	go func() {
-		bgCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancel()
-		_ = s.EvaluateOne(bgCtx, m.ID)
-	}()
+	// Re-evaluate synchronously so callers get fresh evaluation data immediately
+	if err := s.EvaluateOne(ctx, m.ID); err != nil {
+		s.logger.Error("evaluate monitor after update failed", "id", m.ID, "error", err)
+	}
 	return nil
 }
 

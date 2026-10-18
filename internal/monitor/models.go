@@ -15,12 +15,12 @@ const (
 
 type MonitorCriteria struct {
 	Months          []int `json:"months,omitempty"`            // 适游月份 1-12
-	StargazingMode  bool  `json:"stargazing_mode,omitempty"`  // 是否开启星空/银河摄影模式
-	MaxLeaveDays    int   `json:"max_leave_days,omitempty"`    // 可接受请假天数 (0=纯周末/节假日)
-	MaxCloudCover   int   `json:"max_cloud_cover,omitempty"`   // 最高允许云量百分比 (0-100, 默认30)
-	MaxRainProb     int   `json:"max_rain_prob,omitempty"`     // 最高允许降水概率百分比 (0-100, 默认20)
-	MinDurationDays int   `json:"min_duration_days,omitempty"` // 期望最短行程天数 (默认2)
-	MaxDurationDays int   `json:"max_duration_days,omitempty"` // 期望最长行程天数 (默认4)
+	StargazingMode  bool  `json:"stargazing_mode"`            // 是否开启星空/银河摄影模式
+	MaxLeaveDays    int   `json:"max_leave_days"`              // 可接受请假天数 (0=纯周末/节假日)
+	MaxCloudCover   int   `json:"max_cloud_cover"`             // 最高允许云量百分比 (0-100, 默认30)
+	MaxRainProb     int   `json:"max_rain_prob"`               // 最高允许降水概率百分比 (0-100, 默认20)
+	MinDurationDays int   `json:"min_duration_days"`           // 期望最短行程天数 (默认2)
+	MaxDurationDays int   `json:"max_duration_days"`           // 期望最长行程天数 (默认4)
 }
 
 type FactorScores struct {

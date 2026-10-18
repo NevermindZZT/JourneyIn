@@ -135,11 +135,11 @@ watch(() => props.isOpen, (open) => {
       crs.value = props.initialData.crs || 'gcj02'
       selectedMonths.value = props.initialData.criteria?.months?.length ? [...props.initialData.criteria.months] : [5, 6, 7, 8, 9, 10]
       stargazingMode.value = props.initialData.criteria?.stargazing_mode ?? false
-      maxLeaveDays.value = props.initialData.criteria?.max_leave_days ?? 1
-      maxCloudCover.value = props.initialData.criteria?.max_cloud_cover ?? 30
-      maxRainProb.value = props.initialData.criteria?.max_rain_prob ?? 20
-      minDuration.value = props.initialData.criteria?.min_duration_days ?? 2
-      maxDuration.value = props.initialData.criteria?.max_duration_days ?? 4
+      maxLeaveDays.value = typeof props.initialData.criteria?.max_leave_days === 'number' ? props.initialData.criteria.max_leave_days : 1
+      maxCloudCover.value = typeof props.initialData.criteria?.max_cloud_cover === 'number' ? props.initialData.criteria.max_cloud_cover : 30
+      maxRainProb.value = typeof props.initialData.criteria?.max_rain_prob === 'number' ? props.initialData.criteria.max_rain_prob : 20
+      minDuration.value = typeof props.initialData.criteria?.min_duration_days === 'number' ? props.initialData.criteria.min_duration_days : 2
+      maxDuration.value = typeof props.initialData.criteria?.max_duration_days === 'number' ? props.initialData.criteria.max_duration_days : 4
       originCity.value = props.initialData.origin_city || ''
       maxBudget.value = props.initialData.max_budget || ''
       templateMode.value = stargazingMode.value ? 'stargazing' : 'custom'

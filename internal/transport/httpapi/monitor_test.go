@@ -170,3 +170,83 @@ func TestMonitorCRUDAndEvaluate(t *testing.T) {
 	}
 	t.Logf("Successfully created monitor, evaluated, and converted to Trip %s", tripID)
 }
+func TestMonitorUpdate_ZeroLeaveDaysAndSynchronousRefresh(t *testing.T) {
+	ts, _, _ := testMonitorHTTPServer(t)
+
+	// 1. Create a monitor with max_leave_days: 1
+	createBody := map[string]any{
+		"title":      "元阳梯田",
+		"place_name": "元阳梯田",
+		"lat":        23.11891,
+		"lng":        102.78035,
+		"crs":        "gcj02",
+		"criteria": map[string]any{
+			"months":            []int{11},
+			"max_leave_days":    1,
+			"min_duration_days": 2,
+			"max_duration_days": 2,
+		},
+	}
+	createBytes, _ := json.Marshal(createBody)
+	createResp, err := http.Post(ts.URL+"/api/v1/monitors", "application/json", bytes.NewReader(createBytes))
+	if err != nil {
+		t.Fatalf("post monitor: %v", err)
+	}
+	defer createResp.Body.Close()
+	var created monitor.Monitor
+	_ = json.NewDecoder(createResp.Body).Decode(&created)
+
+	// 2. PATCH update with max_leave_days = 0
+	patchBody := map[string]any{
+		"criteria": map[string]any{
+			"months":            []int{11},
+			"max_leave_days":    0,
+			"min_duration_days": 2,
+			"max_duration_days": 2,
+		},
+	}
+	patchBytes, _ := json.Marshal(patchBody)
+	patchReq, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/v1/monitors/"+created.ID, bytes.NewReader(patchBytes))
+	patchReq.Header.Set("Content-Type", "application/json")
+	patchResp, err := http.DefaultClient.Do(patchReq)
+	if err != nil {
+		t.Fatalf("patch monitor: %v", err)
+	}
+	defer patchResp.Body.Close()
+
+	if patchResp.StatusCode != http.StatusOK {
+		t.Fatalf("patch failed with code: %d", patchResp.StatusCode)
+	}
+patchRawBytes, _ := io.ReadAll(patchResp.Body)
+	if !bytes.Contains(patchRawBytes, []byte(`"max_leave_days":0`)) {
+		t.Errorf("expected PATCH response JSON to explicitly contain max_leave_days:0, got: %s", string(patchRawBytes))
+	}
+
+	// 3. GET /api/v1/monitors to verify listed criteria serializes max_leave_days: 0
+	getResp, err := http.Get(ts.URL + "/api/v1/monitors")
+	if err != nil {
+		t.Fatalf("get monitors: %v", err)
+	}
+	defer getResp.Body.Close()
+	getRawBytes, _ := io.ReadAll(getResp.Body)
+	if !bytes.Contains(getRawBytes, []byte(`"max_leave_days":0`)) {
+		t.Errorf("expected list monitors JSON to explicitly contain max_leave_days:0, got: %s", string(getRawBytes))
+	}
+
+	// 4. Verify evaluations were synchronously updated to leave_days_required == 0
+	evalsResp, err := http.Get(ts.URL + "/api/v1/monitors/" + created.ID + "/evaluations")
+	if err != nil {
+		t.Fatalf("get evaluations: %v", err)
+	}
+	defer evalsResp.Body.Close()
+	var evals []monitor.Evaluation
+	_ = json.NewDecoder(evalsResp.Body).Decode(&evals)
+	if len(evals) == 0 {
+		t.Fatalf("expected evaluations to be computed, got 0")
+	}
+	for _, ev := range evals {
+		if ev.Details.LeaveDaysRequired != 0 {
+			t.Errorf("expected evaluation leave_days_required to be 0 after update, got %d", ev.Details.LeaveDaysRequired)
+		}
+	}
+}
