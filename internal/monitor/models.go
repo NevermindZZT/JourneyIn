@@ -24,10 +24,10 @@ type MonitorCriteria struct {
 }
 
 type FactorScores struct {
-	AstroScore    float64 `json:"astro_score"`
-	WeatherScore  float64 `json:"weather_score"`
-	CalendarScore float64 `json:"calendar_score"`
-	BudgetScore   float64 `json:"budget_score"`
+	AstroScore    float64  `json:"astro_score"`
+	WeatherScore  *float64 `json:"weather_score,omitempty"`
+	CalendarScore float64  `json:"calendar_score"`
+	BudgetScore   float64  `json:"budget_score"`
 }
 
 type EvaluationDetails struct {
@@ -40,11 +40,10 @@ type EvaluationDetails struct {
 	WeatherCondition  string       `json:"weather_condition,omitempty"`
 	TempMinC          *float64     `json:"temp_min_c,omitempty"`
 	TempMaxC          *float64     `json:"temp_max_c,omitempty"`
-	CloudCoverAvg     float64      `json:"cloud_cover_avg"`
-	RainProbAvg       float64      `json:"rain_prob_avg"`
+	CloudCoverAvg     *float64     `json:"cloud_cover_avg,omitempty"`
+	RainProbAvg       *float64     `json:"rain_prob_avg,omitempty"`
 	Scores            FactorScores `json:"scores"`
 }
-
 type Monitor struct {
 	ID         string          `json:"id"`
 	Title      string          `json:"title"`

@@ -108,7 +108,7 @@ function formatLeaveDays(days?: number) { return days == null || days <= 0 ? '�
 function levelLabel(level?: EvaluationItem['level']) {
   if (level === 'strongly_recommended') return '强烈推荐'
   if (level === 'acceptable') return '备选时机'
-  if (level === 'waiting') return '继续等待'
+  if (level === 'waiting') return '待观察'
   return '等待评估'
 }
 function levelClass(level?: EvaluationItem['level']) { return level === 'strongly_recommended' ? 'strongly_recommended' : level === 'acceptable' ? 'acceptable' : 'waiting' }

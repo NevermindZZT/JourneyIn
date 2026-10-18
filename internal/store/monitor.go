@@ -57,7 +57,8 @@ func (s *Store) GetMonitor(ctx context.Context, id string) (monitor.Monitor, err
 
 	// Fetch latest evaluation
 	evalQuery := `SELECT id, monitor_id, window_start, window_end, score, level, details_json, evaluated_at
-		FROM monitor_evaluations WHERE monitor_id = ? ORDER BY score DESC, window_start ASC LIMIT 1`
+		FROM monitor_evaluations WHERE monitor_id = ?
+		ORDER BY CASE level WHEN 'strongly_recommended' THEN 3 WHEN 'acceptable' THEN 2 WHEN 'waiting' THEN 1 ELSE 0 END DESC, score DESC, window_start ASC LIMIT 1`
 	evalRow := s.db.QueryRowContext(ctx, evalQuery, id)
 	var ev monitor.Evaluation
 	var detailsRaw, evalDateText string
@@ -100,7 +101,8 @@ func (s *Store) ListMonitors(ctx context.Context, enabledOnly bool) ([]monitor.M
 
 		// Fetch top recommendation snapshot for card
 		evalQuery := `SELECT id, monitor_id, window_start, window_end, score, level, details_json, evaluated_at
-			FROM monitor_evaluations WHERE monitor_id = ? ORDER BY score DESC, window_start ASC LIMIT 1`
+			FROM monitor_evaluations WHERE monitor_id = ?
+			ORDER BY CASE level WHEN 'strongly_recommended' THEN 3 WHEN 'acceptable' THEN 2 WHEN 'waiting' THEN 1 ELSE 0 END DESC, score DESC, window_start ASC LIMIT 1`
 		evalRow := s.db.QueryRowContext(ctx, evalQuery, m.ID)
 		var ev monitor.Evaluation
 		var detailsRaw, evalDateText string

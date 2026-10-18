@@ -124,14 +124,17 @@ func (e *Evaluator) EvaluateMonitor(
 			calendarScore = math.Min(100, calendarScore+5)
 		}
 
-		// 5. Weather evaluation (within 15-day forecast horizon)
-		var weatherScore float64 = 75 // Default neutral for long-range
-		weatherSummary := "远期窗口 (按季节气候推算)"
-		var cloudAvg float64 = 25
-		var rainAvg float64 = 10
+		// 5. Weather evaluation (strictly based on confirmed real weather forecast <= 15 days)
+		hasRealWeather := false
+		var weatherScore *float64
+		var cloudAvg *float64
+		var rainAvg *float64
+		var tempMin *float64
+		var tempMax *float64
+		weatherSummary := "超出预报范围 (待临近观测)"
 
 		daysFromNow := int(win.StartDate.Sub(now).Hours() / 24)
-		if daysFromNow <= 15 && e.weatherSvc != nil {
+		if daysFromNow >= 0 && daysFromNow <= 15 && e.weatherSvc != nil {
 			// Query weather for the first night/day of window
 			wReq := weather.WeatherRequest{
 				Location: weather.GeoPoint{
@@ -144,26 +147,44 @@ func (e *Evaluator) EvaluateMonitor(
 			}
 			snap, err := e.weatherSvc.Weather(ctx, weather.ProviderAuto, wReq)
 			if err == nil && snap.Available {
+				hasRealWeather = true
+				if snap.TempMinC != nil {
+					tMin := *snap.TempMinC
+					tempMin = &tMin
+				}
+				if snap.TempMaxC != nil {
+					tMax := *snap.TempMaxC
+					tempMax = &tMax
+				}
+				ws := 70.0
 				cond := strings.ToLower(snap.Condition)
 				if strings.Contains(cond, "晴") || strings.Contains(cond, "clear") || strings.Contains(cond, "sunny") {
-					weatherScore = 95
-					cloudAvg = 10
-					rainAvg = 5
+					ws = 95.0
+					c := 10.0
+					r := 5.0
+					cloudAvg = &c
+					rainAvg = &r
 					weatherSummary = fmt.Sprintf("晴空少云 (%s)", snap.Condition)
 				} else if strings.Contains(cond, "多云") || strings.Contains(cond, "cloud") {
-					weatherScore = 75
-					cloudAvg = 40
-					rainAvg = 15
+					ws = 75.0
+					c := 40.0
+					r := 15.0
+					cloudAvg = &c
+					rainAvg = &r
 					weatherSummary = fmt.Sprintf("多云适宜 (%s)", snap.Condition)
 				} else if strings.Contains(cond, "雨") || strings.Contains(cond, "rain") || strings.Contains(cond, "雪") || strings.Contains(cond, "snow") {
-					weatherScore = 20
-					cloudAvg = 90
-					rainAvg = 75
+					ws = 20.0
+					c := 90.0
+					r := 75.0
+					cloudAvg = &c
+					rainAvg = &r
 					weatherSummary = fmt.Sprintf("有降水 (%s)", snap.Condition)
 				} else {
-					weatherScore = 70
 					weatherSummary = snap.Condition
 				}
+				weatherScore = &ws
+			} else {
+				weatherSummary = "气象暂不可用 (待临近观测)"
 			}
 		}
 
@@ -171,22 +192,48 @@ func (e *Evaluator) EvaluateMonitor(
 
 		// 6. Multi-factor weighted composite scoring
 		var finalScore float64
-		if m.Criteria.StargazingMode {
-			finalScore = 0.40*astroScore + 0.35*weatherScore + 0.25*calendarScore
+		if hasRealWeather && weatherScore != nil {
+			if m.Criteria.StargazingMode {
+				finalScore = 0.40*astroScore + 0.35*(*weatherScore) + 0.25*calendarScore
+			} else {
+				finalScore = 0.40*calendarScore + 0.35*(*weatherScore) + 0.15*astroScore + 0.10*budgetScore
+			}
 		} else {
-			finalScore = 0.40*calendarScore + 0.35*weatherScore + 0.15*astroScore + 0.10*budgetScore
+			// No real weather data: compute preliminary score based on known calendar/astronomy/budget
+			// without fabricating weather. Capped at 55 so it remains strictly within LevelWaiting (< 60).
+			if m.Criteria.StargazingMode {
+				finalScore = 0.50*astroScore + 0.50*calendarScore
+			} else {
+				finalScore = 0.50*calendarScore + 0.30*astroScore + 0.20*budgetScore
+			}
+			if finalScore > 55 {
+				finalScore = 55.0
+			}
 		}
 		finalScore = math.Round(math.Max(0, math.Min(100, finalScore))*10) / 10
 
 		// 7. Level determination
+		// As per user specification: without reliable real weather, all candidate windows are strictly LevelWaiting ("待观察").
 		var level EvaluationLevel
-		switch {
-		case finalScore >= 80:
-			level = LevelStronglyRecommended
-		case finalScore >= 60:
-			level = LevelAcceptable
-		default:
+		if !hasRealWeather {
 			level = LevelWaiting
+		} else {
+			// Adverse weather (rain/snow/severe, weatherScore <= 35) or exceeding user limits enforces LevelWaiting
+			isAdverseWeather := weatherScore != nil && *weatherScore <= 35
+			if isAdverseWeather ||
+				(cloudAvg != nil && m.Criteria.MaxCloudCover > 0 && int(*cloudAvg) > m.Criteria.MaxCloudCover) ||
+				(rainAvg != nil && m.Criteria.MaxRainProb > 0 && int(*rainAvg) > m.Criteria.MaxRainProb) {
+				level = LevelWaiting
+			} else {
+				switch {
+				case finalScore >= 80:
+					level = LevelStronglyRecommended
+				case finalScore >= 60:
+					level = LevelAcceptable
+				default:
+					level = LevelWaiting
+				}
+			}
 		}
 
 		// 8. Build human-readable summary
@@ -227,6 +274,8 @@ func (e *Evaluator) EvaluateMonitor(
 				HolidayName:       win.HolidayName,
 				LeaveDaysRequired: win.LeaveDays,
 				WeatherCondition:  weatherSummary,
+				TempMinC:          tempMin,
+				TempMaxC:          tempMax,
 				CloudCoverAvg:     cloudAvg,
 				RainProbAvg:       rainAvg,
 				Scores: FactorScores{
@@ -241,10 +290,13 @@ func (e *Evaluator) EvaluateMonitor(
 		evaluations = append(evaluations, eval)
 	}
 
-	// Sort evaluations: strongly recommended first, then highest score, then earliest date
+	// Sort evaluations: strongly recommended first, then acceptable, then highest score, then earliest date
 	sort.Slice(evaluations, func(i, j int) bool {
 		if (evaluations[i].Level == LevelStronglyRecommended) != (evaluations[j].Level == LevelStronglyRecommended) {
 			return evaluations[i].Level == LevelStronglyRecommended
+		}
+		if (evaluations[i].Level == LevelAcceptable) != (evaluations[j].Level == LevelAcceptable) {
+			return evaluations[i].Level == LevelAcceptable
 		}
 		if evaluations[i].Score != evaluations[j].Score {
 			return evaluations[i].Score > evaluations[j].Score
