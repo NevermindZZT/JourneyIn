@@ -491,8 +491,9 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
   }
 
   .atlas-floating-panel.sheet-peek {
-    height: 116px;
-    max-height: 116px;
+    top: auto !important;
+    height: auto !important;
+    max-height: none !important;
   }
 
   .atlas-floating-panel.sheet-half {
@@ -833,32 +834,23 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .workspace-panel.sheet-peek .journey-view-tabs { display: none; }
 .workspace-panel.sheet-peek .journey-day-tabs { display: none; }
 .sheet-handle {
-  position: relative;
   display: none;
   width: 100%;
-  height: 32px;
-  min-height: 32px;
+  height: 14px;
+  min-height: 14px;
   place-items: center;
-  padding: 0;
+  padding: 5px 0 0;
   border: 0;
   background: transparent;
   touch-action: none;
   cursor: grab;
 }
-.sheet-handle::before {
-  position: absolute;
-  top: -8px;
-  right: 0;
-  bottom: -8px;
-  left: 0;
-  content: "";
-}
 .sheet-handle span {
   display: block;
-  width: 44px;
+  width: 36px;
   height: 4px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--muted) 45%, transparent);
+  background: color-mix(in srgb, var(--muted) 40%, transparent);
 }
 .panel-scroll { min-height: 0; flex: 1; overflow-x: hidden; overflow-y: auto; padding: 15px 17px 20px; scrollbar-color: var(--line) transparent; scrollbar-width: thin; }
 .panel-scroll::-webkit-scrollbar { width: 8px; }
@@ -989,13 +981,15 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 @media (hover: hover) and (pointer: fine) { .detail-more-menu button:hover { color: var(--p); background: color-mix(in srgb, var(--p) 9%, var(--surface)); } }
 .detail-more-menu .danger-menu-item { color: var(--md-error); }
 @media (hover: hover) and (pointer: fine) { .detail-more-menu .danger-menu-item:hover { background: color-mix(in srgb, var(--md-error) 9%, transparent); } }
-.detail-back-button, .detail-more-button { position: relative; display: inline-flex; min-height: 44px; align-items: center; gap: 3px; border: 0; border-radius: 10px; color: var(--p); background: transparent; font-size: 11px; font-weight: 900; }
-.detail-back-button::before, .detail-more-button::before { position: absolute; inset: 4px 0; border: 1px solid var(--line); border-radius: 9px; content: ''; pointer-events: none; }
+.detail-back-button, .detail-more-button { position: relative; display: inline-flex; min-height: 44px; align-items: center; justify-content: center; border: 0; border-radius: 10px; color: var(--p); background: transparent; font-size: 11px; font-weight: 900; }
+.detail-back-button { width: auto; min-width: 0; gap: 3px; padding: 6px 10px 6px 7px; }
+.detail-back-button::before { position: absolute; inset: 4px 0; border: 1px solid var(--line); border-radius: 8px; content: ''; pointer-events: none; }
 .detail-back-button > span, .detail-back-label { position: relative; z-index: 1; }
-.detail-back-button { min-width: 76px; justify-content: flex-start; padding: 6px 11px 6px 8px; }
 .detail-back-button > span:first-child { font-size: 23px; line-height: 14px; }
 .detail-back-label { font-size: 11px; line-height: 1; white-space: nowrap; }
-.detail-more-button { width: 44px; justify-content: center; color: var(--muted); font-size: 20px; }
+.detail-more-button { width: 44px; min-width: 44px; height: 44px; padding: 0; color: var(--muted); font-size: 20px; }
+.detail-more-button::before { position: absolute; inset: 4px; border: 1px solid var(--line); border-radius: 8px; content: ''; pointer-events: none; }
+.detail-more-button span, .detail-more-button ion-icon { position: relative; z-index: 1; }
 .detail-topbar-actions { display: flex; min-width: 0; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 5px; }
 .detail-point-switcher { display: inline-flex; min-height: 44px; align-items: center; gap: 2px; padding: 0; border: 0; color: var(--muted); background: transparent; }
 .detail-point-switcher button { position: relative; display: grid; width: 44px; height: 44px; place-items: center; padding: 0; border: 0; border-radius: 10px; color: var(--p); background: transparent; }
@@ -1245,23 +1239,58 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
   .workspace-status { top: 65px; right: auto; left: 14px; width: fit-content; max-width: calc(100vw - 28px); justify-content: flex-start; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .redesign-notices { top: 106px; right: 10px; left: 10px; width: auto; }
   .workspace-panel { top: auto; right: 8px; bottom: max(8px, env(safe-area-inset-bottom)); left: 8px; width: auto; height: 53%; max-height: 53%; border-radius: 24px; }
-  .workspace-panel.sheet-peek { height: 154px; max-height: 154px; }
-  .workspace-panel.atlas-floating-panel.sheet-peek { height: 116px; max-height: 116px; }
-  .workspace-panel.atlas-floating-panel.radar-floating-panel.sheet-peek { height: 116px; max-height: 116px; }
+  .workspace-panel.sheet-peek,
+  .workspace-panel.atlas-floating-panel.sheet-peek,
+  .workspace-panel.atlas-floating-panel.radar-floating-panel.sheet-peek {
+    top: auto !important;
+    height: auto !important;
+    max-height: none !important;
+  }
    .workspace-panel.sheet-peek .journey-day-tabs { display: flex; padding: 7px 15px 8px; border-bottom: 0; }
   .workspace-panel.sheet-expanded { top: 60px; bottom: max(8px, env(safe-area-inset-bottom)); height: calc(100% - 68px); max-height: none; }
   .workspace-panel .sheet-handle { display: grid; }
   .workspace-panel.sheet-peek .itinerary-scroll { display: none; }
   .workspace-panel.sheet-peek .peek-summary { display: flex; }
   .workspace-panel.sheet-half .peek-summary, .workspace-panel.sheet-expanded .peek-summary { display: none; }
-  .workspace-panel-head { position: relative; padding: 8px 15px 11px; }
+  .workspace-panel-head { position: relative; padding: 6px 15px 11px; }
   .workspace-panel-head > div:first-child { width: 100%; padding-right: 178px; }
   .workspace-panel-head .panel-head-actions { top: 8px; right: 15px; gap: 4px; }
   .workspace-panel-head h1 { font-size: 18px; }
   .workspace-panel-head p { font-size: 10px; }
   .itinerary-panel .workspace-panel-head .panel-action-button:first-child { display: none; }
   .atlas-floating-panel .panel-head-actions .collapse-action { display: inline-flex; }
-  .atlas-floating-panel.sheet-peek .atlas-panel-head { cursor: pointer; }
+  .workspace-panel-head,
+  .atlas-panel-head,
+  .detail-sticky-header,
+  .radar-panel-header {
+    touch-action: none;
+    cursor: grab;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .is-sheet-dragging .workspace-panel-head,
+  .is-sheet-dragging .atlas-panel-head,
+  .is-sheet-dragging .detail-sticky-header,
+  .is-sheet-dragging .radar-panel-header {
+    cursor: grabbing;
+  }
+  .workspace-panel-head button,
+  .workspace-panel-head a,
+  .workspace-panel-head input,
+  .atlas-panel-head button,
+  .atlas-panel-head a,
+  .atlas-panel-head input,
+  .detail-sticky-header button,
+  .detail-sticky-header a,
+  .detail-sticky-header input,
+  .radar-panel-header button,
+  .radar-panel-header a,
+  .radar-panel-header input {
+    touch-action: manipulation;
+    cursor: pointer;
+    user-select: auto;
+    -webkit-user-select: auto;
+  }
   .panel-scroll { padding: 12px 15px 16px; }
   .redesign-overview { padding: 12px; }
   .redesign-plan-controls { align-items: stretch; flex-wrap: wrap; }
@@ -1269,21 +1298,20 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
   .plan-button { flex: 1 1 100%; }
   .redesign-stop-main { padding-block: 7px; }
   .stop-detail-panel { top: 60px; right: 8px; bottom: max(8px, env(safe-area-inset-bottom)); left: 8px; width: auto; max-height: none; border-radius: 24px; }
-  .stop-detail-panel.sheet-peek { top: auto; height: 154px; max-height: 154px; }
-   .stop-detail-panel.sheet-half { top: auto; height: 53%; max-height: 53%; }
+  .stop-detail-panel.sheet-peek { top: auto !important; height: auto !important; max-height: none !important; }
+  .stop-detail-panel.sheet-half { top: auto; height: 53%; max-height: 53%; }
   .stop-detail-panel.sheet-expanded { top: 60px; height: calc(100% - 68px); max-height: none; }
-   .stop-detail-panel.sheet-peek .redesign-detail-scroll { overflow: hidden; padding: 0 16px 12px; }
-   .stop-detail-panel.sheet-peek .detail-kicker, .stop-detail-panel.sheet-peek .detail-address { display: none; }
+  .stop-detail-panel.sheet-peek .redesign-detail-scroll { display: none !important; }
+  .stop-detail-panel.sheet-peek .detail-sticky-header { border-bottom: 0 !important; padding-bottom: 14px; }
    .stop-detail-panel.sheet-peek .detail-sticky-header > h1 { margin-top: 2px; font-size: 22px; }
    .stop-detail-panel.sheet-peek .detail-date-row { display: flex; margin-top: 2px; }
 .stop-detail-panel.sheet-peek .detail-date-row .detail-date { color: var(--muted); font-size: 11px; line-height: 1.3; }
 .stop-detail-panel.sheet-peek .detail-date-edit { display: none; }
    .stop-detail-panel.sheet-peek .detail-location, .stop-detail-panel.sheet-peek .detail-primary-actions, .stop-detail-panel.sheet-peek .detail-weather, .stop-detail-panel.sheet-peek .detail-section, .stop-detail-panel.sheet-peek .detail-parent-button, .stop-detail-panel.sheet-peek .detail-danger-button { display: none; }
   .detail-sheet-toggle { display: grid; }
-  .detail-sheet-handle { display: grid; height: 32px; place-items: center; }
-  .detail-sheet-handle button { position: relative; display: grid; width: 100%; height: 32px; min-height: 32px; place-items: center; border: 0; background: transparent; touch-action: none; cursor: grab; }
-  .detail-sheet-handle button::before { position: absolute; top: -8px; right: 0; bottom: -8px; left: 0; content: ""; }
-  .detail-sheet-handle span { display: block; width: 44px; height: 4px; border-radius: 999px; background: color-mix(in srgb, var(--muted) 45%, transparent); }
+  .detail-sheet-handle { display: grid; height: 14px; min-height: 14px; place-items: center; padding: 5px 0 0; }
+  .detail-sheet-handle button { display: grid; width: 100%; height: 14px; min-height: 14px; place-items: center; padding: 0; border: 0; background: transparent; touch-action: none; cursor: grab; }
+  .detail-sheet-handle span { display: block; width: 36px; height: 4px; border-radius: 999px; background: color-mix(in srgb, var(--muted) 40%, transparent); }
   .detail-sticky-header { padding: 10px 16px 9px; }
   .detail-sticky-header > h1 { font-size: 23px; }
   .detail-sticky-header .detail-kicker { margin-top: 6px; }
@@ -1303,6 +1331,7 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 
 @media (max-width: 360px) {
   .detail-back-button { width: 44px; min-width: 44px; justify-content: center; padding: 0; }
+  .detail-back-button::before { inset: 4px; }
   .detail-back-label { display: none; }
   .detail-topbar-actions { gap: 3px; }
   .detail-point-switcher { padding-inline: 0; }
@@ -2577,31 +2606,31 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
   .journey-workspace.sheet-peek #map .amap-logo,
   .journey-workspace.sheet-peek #map .journeyin-baidu-logo,
   .journey-workspace.sheet-peek #map .anchorBL:has(img) {
-    bottom: calc(154px + 10px) !important;
+    bottom: calc(var(--sheet-peek-height, 120px) + 10px) !important;
   }
   .journey-workspace.sheet-peek .journey-map-scale-chip {
-    bottom: calc(154px + 10px);
+    bottom: calc(var(--sheet-peek-height, 120px) + 10px);
   }
   .journey-workspace.sheet-peek #map .amap-copyright,
   .journey-workspace.sheet-peek #map .journeyin-baidu-copyright,
   .journey-workspace.sheet-peek #map .anchorBL:not(:has(img)),
   .journey-workspace.sheet-peek #map .BMap_cpyCtrl_w {
-    bottom: calc(154px + 10px) !important;
+    bottom: calc(var(--sheet-peek-height, 120px) + 10px) !important;
   }
 
   .atlas-workspace.sheet-peek #map .amap-logo,
   .atlas-workspace.sheet-peek #map .journeyin-baidu-logo,
   .atlas-workspace.sheet-peek #map .anchorBL:has(img) {
-    bottom: calc(116px + 10px) !important;
+    bottom: calc(var(--sheet-peek-height, 120px) + 10px) !important;
   }
   .atlas-workspace.sheet-peek .journey-map-scale-chip {
-    bottom: calc(116px + 10px);
+    bottom: calc(var(--sheet-peek-height, 120px) + 10px);
   }
   .atlas-workspace.sheet-peek #map .amap-copyright,
   .atlas-workspace.sheet-peek #map .journeyin-baidu-copyright,
   .atlas-workspace.sheet-peek #map .anchorBL:not(:has(img)),
   .atlas-workspace.sheet-peek #map .BMap_cpyCtrl_w {
-    bottom: calc(116px + 10px) !important;
+    bottom: calc(var(--sheet-peek-height, 120px) + 10px) !important;
   }
 
   /* 抽屉展开至 expanded 全屏时整行渐隐 */

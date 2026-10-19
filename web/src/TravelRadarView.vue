@@ -20,6 +20,8 @@ const emit = defineEmits<{
   (e: 'visibleMonitorsChanged', monitorIDs: string[]): void
   (e: 'monitorSelected', monitorID: string | null): void
   (e: 'windowSelected', value: { monitorID: string; evaluation: EvaluationItem | null }): void
+  (e: 'sheetDragStart', event: PointerEvent): void
+  (e: 'sheetHeaderClick', event: MouseEvent): void
 }>()
 
 const monitors = ref<MonitorItem[]>([])
@@ -165,12 +167,22 @@ async function convertToTrip(item: MonitorItem, evaluation: EvaluationItem | nul
   } catch (err) { loadError.value = err instanceof Error ? err.message : '创建行程草稿失败' }
   finally { convertingID.value = null }
 }
+function onHeaderPointerDown(event: PointerEvent) {
+  if ((event.target as HTMLElement | null)?.closest('button, a, input, select, textarea, [role="button"]')) return
+  emit('sheetDragStart', event)
+}
+
+function onHeaderClick(event: MouseEvent) {
+  if ((event.target as HTMLElement | null)?.closest('button, a, input, select, textarea, [role="button"]')) return
+  emit('sheetHeaderClick', event)
+}
+
 defineExpose({ loadMonitors, refreshMonitor, selectMonitorFromMap })
 </script>
 
 <template>
   <div class="travel-radar-view is-panel">
-    <header class="radar-panel-header">
+    <header class="radar-panel-header" @pointerdown="onHeaderPointerDown" @click="onHeaderClick">
       <div class="radar-panel-heading">
         <button v-if="selectedMonitor" type="button" class="radar-detail-back" aria-label="返回监控列表" @click="returnToList">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/><path d="M9 12h12"/></svg>

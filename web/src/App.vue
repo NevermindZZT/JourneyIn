@@ -1137,13 +1137,51 @@ function ensureNavigationHistory() {
   syncNavigationURL('replace', readNavigationURL())
 }
 
-const SHEET_PEEK_HEIGHT = 154
-const ATLAS_PEEK_HEIGHT = 116
 const SHEET_TOP_OFFSET = 60
 const SHEET_BOTTOM_OFFSET = 8
 function sheetViewportHeight() { return window.visualViewport?.height || window.innerHeight }
+
+function measureActiveSheetPeekHeight(): number {
+  if (typeof document === 'undefined') return 116
+  const panel = document.querySelector<HTMLElement>('.stop-detail-panel:not([style*="display: none"]), .workspace-panel:not([style*="display: none"]), .atlas-floating-panel:not([style*="display: none"])')
+  if (!panel) return tripView.value === 'atlas' ? 84 : 116
+
+  if (panel.classList.contains('sheet-peek') && !sheetDragActive.value && sheetDragHeight.value === null) {
+    const rendered = panel.getBoundingClientRect().height
+    if (rendered > 30) return Math.round(rendered)
+  }
+
+  const handle = panel.querySelector<HTMLElement>('.sheet-handle, .detail-sheet-handle')
+  const head = panel.querySelector<HTMLElement>('.workspace-panel-head, .atlas-panel-head, .radar-panel-header, .detail-sticky-header')
+  let h = 0
+  if (handle && window.getComputedStyle(handle).display !== 'none') {
+    h += handle.offsetHeight || 14
+  }
+  if (head && window.getComputedStyle(head).display !== 'none') {
+    h += head.offsetHeight || 58
+  }
+  if (panel.classList.contains('itinerary-panel')) {
+    const dayTabs = panel.querySelector<HTMLElement>('.journey-day-tabs')
+    if (dayTabs && window.getComputedStyle(dayTabs).display !== 'none') {
+      h += dayTabs.offsetHeight || 42
+    }
+  }
+  return h > 30 ? Math.round(h) : 116
+}
+
+const dynamicSheetPeekHeight = ref(116)
+
+function updateDynamicSheetPeekHeight() {
+  if (typeof document === 'undefined') return
+  const h = measureActiveSheetPeekHeight()
+  if (h > 30 && Math.abs(h - dynamicSheetPeekHeight.value) >= 1) {
+    dynamicSheetPeekHeight.value = h
+    document.documentElement.style.setProperty('--sheet-peek-height', `${h}px`)
+  }
+}
+
 function currentSheetPeekHeight() {
-  return (tripView.value === 'atlas' || tripView.value === 'radar') ? ATLAS_PEEK_HEIGHT : SHEET_PEEK_HEIGHT
+  return measureActiveSheetPeekHeight()
 }
 function sheetHeightBounds() {
   const viewportHeight = sheetViewportHeight()
@@ -1163,10 +1201,22 @@ function nearestSheetBreakpoint(height: number) {
 }
 
 function setSheetBreakpoint(next: SheetBreakpoint, mode: 'push' | 'replace' = 'replace', sync = true) {
+  const previous = sheetBreakpoint.value
   sheetBreakpoint.value = next
   panelCollapsed.value = next === 'peek'
   detailCollapsed.value = next === 'peek'
   if (sync) syncNavigationURL(mode)
+  if (previous !== next && !sheetDragActive.value && typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches) {
+    const targetH = sheetHeightForBreakpoint(next)
+    sheetDragHeight.value = targetH
+    if (sheetDragReleaseTimer !== null) window.clearTimeout(sheetDragReleaseTimer)
+    sheetDragReleaseTimer = window.setTimeout(() => {
+      sheetDragHeight.value = null
+      sheetDragReleaseTimer = null
+      updateDynamicSheetPeekHeight()
+    }, 220)
+  }
+  updateDynamicSheetPeekHeight()
   void nextTick().then(() => {
     mapInstance?.resize?.()
     if (tripView.value !== 'atlas') {
@@ -1243,16 +1293,19 @@ function cycleSheetBreakpoint(event: MouseEvent) {
   setSheetBreakpoint(sheetBreakpoint.value === 'peek' ? 'half' : 'peek')
 }
 
-function handleAtlasHeaderPointerDown(event: PointerEvent) {
-  if (sheetBreakpoint.value !== 'peek') return
-  if ((event.target as HTMLElement | null)?.closest('button, a, input')) return
+function handleSheetHeaderPointerDown(event: PointerEvent) {
+  if (window.matchMedia('(min-width: 901px)').matches) return
+  if ((event.target as HTMLElement | null)?.closest('button, a, input, select, textarea, .ui-select, [role="button"], [role="combobox"]')) return
   startSheetDrag(event)
 }
 
-function handleAtlasHeaderClick(event: MouseEvent) {
-  if (sheetBreakpoint.value !== 'peek') return
-  if ((event.target as HTMLElement | null)?.closest('button, a, input')) return
-  cycleSheetBreakpoint(event)
+function handleSheetHeaderClick(event: MouseEvent) {
+  if (window.matchMedia('(min-width: 901px)').matches) return
+  if (suppressSheetClick) return
+  if ((event.target as HTMLElement | null)?.closest('button, a, input, select, textarea, .ui-select, [role="button"], [role="combobox"]')) return
+  if (sheetBreakpoint.value === 'peek') {
+    setSheetBreakpoint('half')
+  }
 }
 
 function toggleDetailSheet() {
@@ -1284,7 +1337,8 @@ function startSheetDrag(event: PointerEvent) {
     window.clearTimeout(sheetDragReleaseTimer)
     sheetDragReleaseTimer = null
   }
-  const panel = (event.currentTarget as HTMLElement | null)?.closest<HTMLElement>('.workspace-panel, .stop-detail-panel, .atlas-floating-panel')
+  const targetEl = (event.currentTarget || event.target) as HTMLElement | null
+  const panel = targetEl?.closest<HTMLElement>('.workspace-panel, .stop-detail-panel, .atlas-floating-panel')
   const startHeight = panel?.getBoundingClientRect().height || sheetHeightForBreakpoint(sheetBreakpoint.value)
   const startY = event.clientY
   let moved = false
@@ -6903,17 +6957,22 @@ function setDarkPalette(value: DarkPalette) { darkPalette.value = value; applyTh
 function systemThemeChanged() { if (theme.value === 'system') applyTheme() }
 watch(selectedDay, () => { void renderMap() })
 watch(tripDocument, () => { void renderMap({ preserveView: true }) }, { deep: true })
+watch([sheetBreakpoint, tripView, selectedStopId, selectedSubStopId], () => {
+  void nextTick(() => updateDynamicSheetPeekHeight())
+})
 onMounted(() => {
   if (prototypeMode) return
   ensureNavigationHistory()
   window.addEventListener('popstate', handleNavigationPopState)
   window.addEventListener('keydown', handleGlobalKeyDown)
   window.addEventListener('resize', handleViewportResize)
+  window.addEventListener('resize', updateDynamicSheetPeekHeight)
   window.addEventListener('pointerdown', handleTouchPointerDown, true)
   window.addEventListener('pointermove', handleTouchPointerMove, true)
   window.addEventListener('pointerup', finishTouchPointer, true)
   window.addEventListener('pointercancel', finishTouchPointer, true)
   applyTheme(); mediaQuery = window.matchMedia('(prefers-color-scheme: dark)'); mediaQuery.addEventListener?.('change', systemThemeChanged); if (shareMode) void loadSharedTrip(); else if (collaborationMode) void loadCollaborativeTrip(); else void loadCurrentUser().then(() => loadTrips())
+  updateDynamicSheetPeekHeight()
 })
 onUnmounted(() => {
   clearWeatherLabelExpiryTimer()
@@ -6921,6 +6980,7 @@ onUnmounted(() => {
   window.removeEventListener('popstate', handleNavigationPopState)
   window.removeEventListener('keydown', handleGlobalKeyDown)
   window.removeEventListener('resize', handleViewportResize)
+  window.removeEventListener('resize', updateDynamicSheetPeekHeight)
   window.removeEventListener('pointerdown', handleTouchPointerDown, true)
   window.removeEventListener('pointermove', handleTouchPointerMove, true)
   window.removeEventListener('pointerup', finishTouchPointer, true)
@@ -7121,7 +7181,7 @@ onUnmounted(() => {
                 <span></span>
               </button>
 
-              <header class="workspace-panel-head atlas-panel-head" @pointerdown="handleAtlasHeaderPointerDown" @click="handleAtlasHeaderClick">
+              <header class="workspace-panel-head atlas-panel-head" @pointerdown="handleSheetHeaderPointerDown" @click="handleSheetHeaderClick">
                 <div class="atlas-brand-badge">
                   <div class="atlas-badge-icon-wrap">
                     <IonIcon :icon="footstepsOutline" />
@@ -7338,6 +7398,8 @@ onUnmounted(() => {
               <TravelRadarView
                 ref="travelRadarViewRef"
                 :api-fetch="apiFetch"
+                @sheet-drag-start="startSheetDrag"
+                @sheet-header-click="handleSheetHeaderClick"
                 @new-monitor="openNewMonitor"
                 @edit-monitor="openEditMonitor"
                 @open-trip="handleRadarOpenTrip"
@@ -7399,7 +7461,7 @@ onUnmounted(() => {
 </div>
 <aside v-if="tripDocument" class="floating-panel workspace-panel itinerary-panel" :class="['sheet-' + sheetBreakpoint, { 'panel-search-mode': panelMode === 'search', 'is-sheet-dragging': sheetDragActive, 'has-photo-drawer-open': Boolean(selectedPhotoCluster) }]" :style="sheetDragStyle" aria-label="行程时间线">
               <button class="sheet-handle" type="button" :aria-label="sheetBreakpoint === 'peek' ? '展开行程' : '收起行程'" @pointerdown="startSheetDrag" @click="cycleSheetBreakpoint"><span></span></button>
-              <header class="workspace-panel-head">
+              <header class="workspace-panel-head" @pointerdown="handleSheetHeaderPointerDown" @click="handleSheetHeaderClick">
                 <div><div class="workspace-panel-kicker"><p class="eyebrow">{{ historyView ? 'HISTORY VERSION' : shareMode ? 'SHARED JOURNEY' : collaborationMode ? 'COLLABORATION EDIT' : 'CURRENT JOURNEY' }}</p><span v-if="historyView" class="history-status-tag">只读</span><span v-else-if="shareURL" class="share-status-tag">已分享</span><span v-else-if="collaborationMode" class="share-status-tag">共创编辑</span></div><h1>{{ historyTitle }}</h1><p>{{ historyDateRange || '选择一条行程查看详情' }}</p></div>
                 <div class="panel-head-actions"><button v-if="ownerWorkspace" class="panel-action-button" type="button" aria-label="返回行程列表" @click="navigateBackToList"><span>‹</span><small>行程</small></button><button v-if="ownerWorkspace" class="panel-action-button history-action" type="button" aria-label="打开版本历史" @click="openTripHistory"><span>↶</span><small>版本</small></button><button v-if="!readOnlyView" class="panel-action-button edit-trip-action" type="button" aria-label="编辑行程信息" @click="beginEditTripDetails"><IonIcon :icon="createOutline" /><small>编辑</small></button><button class="panel-action-button collapse-action" type="button" :aria-label="sheetBreakpoint === 'peek' ? '展开行程' : '收起到 Peek'" @click="setSheetBreakpoint(sheetBreakpoint === 'peek' ? 'half' : 'peek')"><IonIcon :icon="sheetBreakpoint === 'peek' ? chevronUpOutline : chevronDownOutline" /></button></div>
               </header>
@@ -7442,7 +7504,7 @@ onUnmounted(() => {
 
             <aside v-if="selectedStop" class="details-drawer stop-detail-panel" :class="['sheet-' + sheetBreakpoint, { 'is-child-detail': Boolean(selectedSubStop), 'is-sheet-dragging': sheetDragActive }]" :style="sheetDragStyle" aria-label="规划点详情">
               <div class="detail-sheet-handle"><button type="button" :aria-label="sheetBreakpoint === 'expanded' ? '收起规划点详情到最低' : sheetBreakpoint === 'peek' ? '展开规划点详情到半屏' : '收起规划点详情到最低'" @pointerdown="startSheetDrag" @click="cycleSheetBreakpoint"><span></span></button></div>
-              <header class="detail-sticky-header">
+              <header class="detail-sticky-header" @pointerdown="handleSheetHeaderPointerDown" @click="handleSheetHeaderClick">
                 <div class="detail-topbar">
                   <button type="button" class="detail-back-button" @click="selectedSubStop ? navigateBackFromSubStop() : navigateBackFromStop()"><span>‹</span><span class="detail-back-label">{{ selectedSubStop ? '主规划点' : selectedDay === 'all' ? '行程' : 'D' + selectedDay + ' 行程' }}</span></button>
                   <div class="detail-topbar-actions">
