@@ -655,7 +655,7 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .journey-redesign ion-icon { pointer-events: none; }
 
 .journey-rail { position: relative; z-index: 45; display: flex; width: 78px; min-width: 78px; flex-direction: column; align-items: center; gap: 10px; padding: 18px 9px; border-right: 1px solid color-mix(in srgb, var(--line) 58%, transparent); background: var(--md-surface-container-low); }
-.mobile-primary-nav { display: none; }
+.mobile-feature-cards { display: none; }
 .rail-brand { display: grid; width: 58px; min-height: 62px; place-items: center; gap: 5px; padding: 0; border: 0; color: var(--ink); background: transparent; }
 .rail-brand-mark-logo { transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1); }
 .rail-brand:hover .rail-brand-mark-logo { transform: scale(1.08); }
@@ -1160,68 +1160,126 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
   .journey-redesign.is-list-view { display: block; overflow: visible; }
   .trip-list-scroll { position: fixed; inset: 0; width: auto; height: auto; }
   .journey-rail { display: none; }
-  .mobile-primary-nav {
-    position: fixed;
-    z-index: 110;
-    right: max(12px, env(safe-area-inset-right));
-    bottom: max(8px, env(safe-area-inset-bottom));
-    left: max(12px, env(safe-area-inset-left));
+  .mobile-feature-cards {
     display: grid;
-    height: 66px;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 4px;
-    padding: 5px;
-    border: 1px solid var(--line);
-    border-radius: 18px;
-    background: color-mix(in srgb, var(--surface) 92%, transparent);
-    box-shadow: 0 8px 28px color-mix(in srgb, #000 28%, transparent);
-    backdrop-filter: blur(18px);
-    box-sizing: border-box;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin: 2px 0 16px;
   }
-  .mobile-primary-nav button {
+  .feature-launch-card {
     position: relative;
     display: flex;
     min-width: 0;
-    min-height: 0;
-    flex-direction: column;
     align-items: center;
-    justify-content: center;
-    gap: 3px;
-    padding: 4px 2px;
-    border: 0;
-    border-radius: 12px;
-    color: var(--muted);
-    background: transparent;
-    font-size: 10px;
-    font-weight: 800;
-    line-height: 1.1;
-    touch-action: manipulation;
+    gap: 10px;
+    padding: 10px 11px;
+    border: 1px solid var(--line);
+    border-radius: 15px;
+    color: var(--ink);
+    background: var(--surface);
+    text-align: left;
+    cursor: pointer;
+    box-shadow: 0 4px 16px color-mix(in srgb, var(--ink) 5%, transparent);
+    transition: all 0.15s ease;
   }
-  .mobile-primary-nav button.selected {
+  .feature-launch-card:hover, .feature-launch-card:focus-visible {
+    border-color: var(--p);
+    background: color-mix(in srgb, var(--p) 6%, var(--surface));
+  }
+  .feature-launch-card.feature-radar:hover, .feature-launch-card.feature-radar:focus-visible {
+    border-color: #ff6b35;
+    background: color-mix(in srgb, #ff6b35 6%, var(--surface));
+  }
+  .feature-card-icon-wrap {
+    position: relative;
+    display: grid;
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    place-items: center;
+    border-radius: 11px;
+  }
+  .feature-atlas .feature-card-icon-wrap {
     color: var(--p);
     background: color-mix(in srgb, var(--p) 14%, var(--surface));
   }
-  .mobile-primary-nav button:disabled {
-    cursor: not-allowed;
-    opacity: .42;
+  .feature-radar .feature-card-icon-wrap {
+    color: #ff6b35;
+    background: color-mix(in srgb, #ff6b35 14%, var(--surface));
   }
-  .mobile-primary-nav ion-icon {
-    font-size: 20px;
+  .feature-card-icon-wrap ion-icon {
+    font-size: 19px;
   }
-  .mobile-primary-nav button > span {
-    white-space: nowrap;
-  }
-  .mobile-primary-nav .rail-badge {
+  .feature-radar-badge {
     position: absolute;
-    top: 2px;
-    left: calc(50% + 7px);
+    top: -4px;
+    right: -4px;
     min-width: 15px;
     height: 15px;
-    margin: 0;
-    padding-inline: 3px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: #ff6b35;
+    color: #ffffff;
     font-size: 9px;
+    font-weight: 800;
+    line-height: 15px;
+    text-align: center;
+    font-style: normal;
   }
-  .trip-list-scroll { padding: 28px 24px calc(100px + env(safe-area-inset-bottom)); }
+  .feature-card-main {
+    display: grid;
+    min-width: 0;
+    flex: 1;
+    gap: 2px;
+  }
+  .feature-card-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+  }
+  .feature-card-title-row strong {
+    overflow: hidden;
+    color: var(--ink);
+    font-size: 13px;
+    font-weight: 850;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .feature-tag {
+    padding: 1px 6px;
+    border-radius: 999px;
+    color: var(--muted);
+    background: color-mix(in srgb, var(--muted) 16%, transparent);
+    font-size: 9px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+  .feature-tag.highlight {
+    color: #ffffff;
+    background: #ff6b35;
+  }
+  .feature-card-desc {
+    margin: 0;
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 10px;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .feature-card-chevron {
+    flex-shrink: 0;
+    color: var(--muted);
+    font-size: 16px;
+    line-height: 1;
+  }
+  @media (max-width: 480px) {
+    .feature-card-desc { display: none; }
+    .feature-launch-card { padding: 9px 10px; }
+  }
+  .home-radar-banner { display: none; }
+  .trip-list-scroll { padding: 24px 20px calc(24px + env(safe-area-inset-bottom)); }
   .list-page-header { align-items: flex-start; flex-direction: column; }
   .list-page-actions {
     display: grid;
@@ -1339,7 +1397,7 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 }
 
 @media (max-width: 560px) {
-  .trip-list-scroll { padding: max(22px, env(safe-area-inset-top)) 16px calc(100px + env(safe-area-inset-bottom)); }
+  .trip-list-scroll { padding: max(20px, env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom)); }
   .list-page-header { margin-bottom: 21px; }
   .list-page-header h1 { font-size: 34px; }
   .list-page-subtitle { font-size: 12px; }

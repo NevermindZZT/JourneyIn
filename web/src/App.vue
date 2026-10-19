@@ -7013,32 +7013,7 @@ onUnmounted(() => {
             <button v-if="ownerWorkspace && isAdmin" class="rail-nav-item" type="button" @click="openSettings()"><IonIcon :icon="settingsOutline" /><span>设置</span></button><button v-if="ownerWorkspace && currentUser && !isAdmin" class="rail-nav-item" type="button" @click="logout"><IonIcon :icon="logInOutline" /><span>退出</span></button>
           </aside>
 
-          <nav v-if="ownerWorkspace && tripView === 'list'" class="mobile-primary-nav" aria-label="JourneyIn 主功能">
-            <button
-              type="button"
-              :class="{ selected: tripView === 'list' }"
-              :aria-current="tripView === 'list' ? 'page' : undefined"
-              @click="navigateToList()"
-            >
-              <IonIcon :icon="menuOutline" />
-              <span>行程</span>
-            </button>
-            <button
-              type="button"
-              @click="navigateToAtlas()"
-            >
-              <IonIcon :icon="footstepsOutline" />
-              <span>足迹</span>
-            </button>
-            <button
-              type="button"
-              @click="navigateToRadar()"
-            >
-              <IonIcon :icon="radioOutline" />
-              <span>雷达</span>
-              <em v-if="radarSummary?.recommended_count" class="rail-badge">{{ radarSummary.recommended_count }}</em>
-            </button>
-          </nav>
+
 
           <section v-if="tripView === 'list' && ownerWorkspace" class="trip-list-view" aria-labelledby="trip-list-title">
             <div ref="tripListScroll" class="trip-list-scroll" tabindex="0" role="region" aria-label="行程列表" @pointerdown="focusTripListScroll">
@@ -7053,6 +7028,39 @@ onUnmounted(() => {
                 <button v-if="canCreateTrips" class="primary-action" type="button" @click="newTripOpen = true"><IonIcon :icon="addOutline" /> 新建行程</button>
               </div>
             </header>
+
+            <!-- 移动端主功能快捷入口卡片 (足迹漫游与时机雷达) -->
+            <nav class="mobile-feature-cards" aria-label="全景与监控">
+              <button type="button" class="feature-launch-card feature-atlas" @click="navigateToAtlas">
+                <div class="feature-card-icon-wrap">
+                  <IonIcon :icon="footstepsOutline" />
+                </div>
+                <div class="feature-card-main">
+                  <div class="feature-card-title-row">
+                    <strong>足迹漫游</strong>
+                    <span class="feature-tag">全景</span>
+                  </div>
+                  <p class="feature-card-desc">汇总全部行程轨迹与图集</p>
+                </div>
+                <span class="feature-card-chevron" aria-hidden="true">›</span>
+              </button>
+
+              <button type="button" class="feature-launch-card feature-radar" @click="navigateToRadar">
+                <div class="feature-card-icon-wrap">
+                  <IonIcon :icon="radioOutline" />
+                  <em v-if="radarSummary?.recommended_count" class="feature-radar-badge">{{ radarSummary.recommended_count }}</em>
+                </div>
+                <div class="feature-card-main">
+                  <div class="feature-card-title-row">
+                    <strong>时机雷达</strong>
+                    <span v-if="radarSummary?.recommended_count" class="feature-tag highlight">{{ radarSummary.recommended_count }}个推荐</span>
+                    <span v-else class="feature-tag">监控</span>
+                  </div>
+                  <p class="feature-card-desc">{{ radarSummary?.recommended_count ? (radarSummary.top_place_name ? radarSummary.top_place_name + '迎来良机' : '迎来绝佳出行时机') : '心愿景点最佳出行时机' }}</p>
+                </div>
+                <span class="feature-card-chevron" aria-hidden="true">›</span>
+              </button>
+            </nav>
 
             <!-- 首页时机推荐横幅 (大屏独立成行，不与标题和操作按钮争抢同一行) -->
             <div v-if="radarSummary?.top_opportunity && radarSummary.recommended_count > 0" class="home-radar-banner" @click="navigateToRadar">
