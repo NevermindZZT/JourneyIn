@@ -53,34 +53,47 @@ const templateMode = ref<'custom' | 'stargazing' | 'weekend' | 'holiday'>('custo
 
 // 地点搜索相关状态
 const searchQuery = ref('')
+const searchRegion = ref('')
+const searchMessage = ref('')
+let searchVersion = 0
+
+function invalidateSearch() {
+  searchVersion++
+  searchLoading.value = false
+  searchResults.value = []
+  searchMessage.value = ''
+}
+watch([searchQuery, searchRegion], invalidateSearch, { flush: 'sync' })
 const searchResults = ref<any[]>([])
 const searchLoading = ref(false)
 const showManualCoords = ref(false)
 
 async function doSearchPlaces() {
   const q = searchQuery.value.trim()
-  if (!q) return
+  const region = searchRegion.value.trim()
+  if (!q || searchLoading.value) return
+  const version = ++searchVersion
   searchLoading.value = true
   searchResults.value = []
+  searchMessage.value = ''
   try {
     const fetchFn = props.apiFetch || window.fetch
     const res = await fetchFn('/api/v1/maps/pois/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        query: q,
-        page: 1,
-        page_size: 8,
-      }),
+      body: JSON.stringify({ query: q, region, page: 1, page_size: 10 }),
     })
-    if (res.ok) {
-      const data = (await res.json()) as { items?: any[] }
-      searchResults.value = data.items || []
-    }
+    if (!res.ok) throw new Error('地点搜索失败，请检查网络或地图服务配置后重试')
+    const data = (await res.json()) as { items?: any[] }
+    if (version !== searchVersion) return
+    searchResults.value = Array.isArray(data.items) ? data.items : []
+    searchMessage.value = searchResults.value.length
+      ? (region ? '搜索地区：' + region + '，请核对候选地址后选择。' : '未限定地区，请核对候选地址；同名地点较多时可填写城市/地区缩小范围。')
+      : '没有找到匹配地点，请调整景点名称或城市/地区后重试。'
   } catch (err) {
-    console.error('search POIs error:', err)
+    if (version === searchVersion) searchMessage.value = err instanceof Error ? err.message : '地点搜索失败，请重试'
   } finally {
-    searchLoading.value = false
+    if (version === searchVersion) searchLoading.value = false
   }
 }
 
@@ -126,6 +139,9 @@ const maxLeaveDaysOptions = [
 ]
 
 watch(() => props.isOpen, (open) => {
+  invalidateSearch()
+  searchQuery.value = ''
+  searchRegion.value = ''
   if (open) {
     if (props.initialData) {
       title.value = props.initialData.title || props.initialData.place_name || ''
@@ -303,11 +319,18 @@ function submit() {
             </button>
           </div>
 
+          <label class="field-label search-region-field">
+            <span>城市/地区（可选）</span>
+            <input v-model="searchRegion" type="text" maxlength="100" placeholder="例如：云南省元阳县、杭州、深圳南山区" autocomplete="address-level2" @keydown.enter.prevent="doSearchPlaces" />
+            <small>留空不限地区；用于目标景点搜索，与下方出发城市无关。</small>
+          </label>
+
           <!-- 地点快速搜索输入条 -->
           <div class="poi-search-bar">
             <div class="search-input-box">
               <input
                 v-model="searchQuery"
+                aria-label="目标景点名称"
                 type="text"
                 placeholder="输入景点名称搜索 (如：冷嘎措、西湖、莫尔格勒河)"
                 @keydown.enter.prevent="doSearchPlaces"
@@ -331,6 +354,8 @@ function submit() {
               {{ searchLoading ? '搜索中…' : '搜索地点' }}
             </button>
           </div>
+
+          <p v-if="searchMessage" class="poi-search-message" role="status">{{ searchMessage }}</p>
 
           <!-- 搜索候选结果列表 (下拉展开) -->
           <div v-if="searchResults.length > 0" class="poi-candidate-dropdown">
@@ -839,6 +864,8 @@ function submit() {
 }
 
 /* 搜索输入条与候选结果样式 */
+.search-region-field small, .poi-search-message { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+
 .poi-search-bar {
   display: flex;
   gap: 8px;
