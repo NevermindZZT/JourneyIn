@@ -6429,7 +6429,7 @@ function isPastWeatherDay(stop: Stop | SubStop) {
 function weatherDetails(stop: Stop | SubStop) {
   const currentOnly = isPastWeatherDay(stop)
   const weather = stop.weather || {}
-  const provider = weather.provider === 'openmeteo' ? 'Open-Meteo' : weather.provider === 'qweather' ? '和风天气' : weather.provider === 'caiyun' ? '彩云天气' : weather.provider === 'amap' ? '高德天气' : weather.provider === 'baidu' ? '百度天气' : ''
+  const provider = weather.provider === 'openmeteo' ? 'Open-Meteo' : weather.provider === '7timer' ? '7Timer! 晴天钟' : weather.provider === 'qweather' ? '和风天气' : weather.provider === 'caiyun' ? '彩云天气' : weather.provider === 'amap' ? '高德天气' : weather.provider === 'baidu' ? '百度天气' : ''
   if (Object.keys(weather).length === 0) {
     return currentOnly ? { condition: '', rangeText: '', liveText: '', metricsText: '', provider, unavailable: true, currentOnly: true } : null
   }
@@ -6462,8 +6462,20 @@ function weatherDetails(stop: Stop | SubStop) {
   }
   if (currentOnly) return { condition: '', rangeText: '', liveText, metricsText: '', provider, unavailable: false, currentOnly: true }
 
-  // 更多气象指标：湿度、风向、风力、气压
+  // 更多气象指标：体感、能见度、云量、降水率、湿度、风力、气压、紫外线、空气质量与气溶胶
   const metrics: string[] = []
+  if (weather.apparent_temp_c !== undefined && weather.apparent_temp_c !== null) {
+    metrics.push('体感 ' + Math.round(Number(weather.apparent_temp_c)) + '°C')
+  }
+  if (weather.visibility_km !== undefined && weather.visibility_km !== null) {
+    metrics.push('能见度 ' + Math.round(Number(weather.visibility_km)) + 'km')
+  }
+  if (weather.cloud_cover_pct !== undefined && weather.cloud_cover_pct !== null) {
+    metrics.push('云量 ' + weather.cloud_cover_pct + '%')
+  }
+  if (weather.rain_prob_pct !== undefined && weather.rain_prob_pct !== null) {
+    metrics.push('降水概率 ' + weather.rain_prob_pct + '%')
+  }
   if (weather.humidity_percent !== undefined && weather.humidity_percent !== null) {
     metrics.push('湿度 ' + Math.round(Number(weather.humidity_percent)) + '%')
   }
@@ -6478,6 +6490,24 @@ function weatherDetails(stop: Stop | SubStop) {
   }
   if (weather.pressure_hpa !== undefined && weather.pressure_hpa !== null) {
     metrics.push(Math.round(Number(weather.pressure_hpa)) + ' hPa')
+  }
+  if (weather.uv_index !== undefined && weather.uv_index !== null) {
+    metrics.push('紫外线 UV ' + Number(weather.uv_index).toFixed(1))
+  }
+  if (weather.aqi !== undefined && weather.aqi !== null) {
+    metrics.push('AQI ' + weather.aqi)
+  }
+  if (weather.pm25 !== undefined && weather.pm25 !== null) {
+    metrics.push('PM2.5 ' + Number(weather.pm25).toFixed(1))
+  }
+  if (weather.aod !== undefined && weather.aod !== null) {
+    metrics.push('气溶胶 AOD ' + Number(weather.aod).toFixed(2))
+  }
+  if (weather.seeing !== undefined && weather.seeing !== null) {
+    metrics.push('晴天钟视宁度 ' + Number(weather.seeing).toFixed(1) + '级')
+  }
+  if (weather.transparency !== undefined && weather.transparency !== null) {
+    metrics.push('晴天钟透明度 ' + Number(weather.transparency).toFixed(1) + '级')
   }
 
   return { condition: condition || '天气预报', rangeText, liveText, metricsText: metrics.join(' · '), provider, unavailable: false, currentOnly: false }
@@ -7887,11 +7917,30 @@ onUnmounted(() => {
                     默认天气服务商
                     <UiSelect v-model="defaultWeatherProvider" aria-label="默认天气服务商" :options="weatherProviderOptions" />
                   </label>
-                  <p class="settings-help">智能自动模式下，配置和风或彩云后优先调用；未配置任何 Key 时，系统将自动使用 Open-Meteo 提供最高 16 天的免费全球逐日预报与降水数据。</p>
+                  <p class="settings-help">智能自动模式下，配置和风或彩云后优先调用；未配置任何 Key 时，系统将自动使用 Open-Meteo 提供最高 16 天的免费全球逐日预报与降水数据。<br />🌟 <strong>专业天文气象增强</strong>：系统已内建集成 <strong>7Timer!（晴天钟）</strong> 作为自动伴随补充源。在查询主天气时，系统会自动连带获取前 3 天的高精大气视宁度（Seeing）与透明度（Transparency），无需在主天气源中二选一。</p>
                   <button class="primary-action" type="button" :disabled="settingsSaving" @click="saveDefaultWeatherProvider">{{ settingsSaving ? '保存中…' : '保存默认天气' }}</button>
                 </div>
 
                 <div class="settings-provider-grid">
+                  <article class="settings-card provider-card">
+                    <div class="settings-card-heading">
+                      <div>
+                        <strong>7Timer! (晴天钟)</strong>
+                        <small>中科院/NOAA GFS · 伴随天文增强源</small>
+                      </div>
+                      <span class="provider-status" style="border-color: #24695c; color: #24695c;">自动并联增强</span>
+                    </div>
+                    <p class="settings-status-line">
+                      工作模式：<strong>伴生增强源 (与主数据源并发查询)</strong><br />
+                      核心维度：<strong>视宁度 (Seeing) · 透明度 (Transparency)</strong><br />
+                      生效场景：<strong>临近 3 天行程点气象与星空摄影时机雷达</strong>
+                    </p>
+                    <p class="settings-help" style="margin-top: 0; min-height: 48px;">
+                      作为专业补充信息源，在查询主天气时系统自动连带请求 7Timer ASTRO 产品，为规划点和观星雷达注入高精天文观测指标，免 Key 开箱即用。
+                    </p>
+                    <a href="http://www.7timer.info" target="_blank" rel="noopener noreferrer">访问 7Timer! 官网 ↗</a>
+                  </article>
+
                   <article class="settings-card provider-card">
                     <div class="settings-card-heading">
                       <div>

@@ -42,6 +42,10 @@ type EvaluationDetails struct {
 	TempMaxC          *float64     `json:"temp_max_c,omitempty"`
 	CloudCoverAvg     *float64     `json:"cloud_cover_avg,omitempty"`
 	RainProbAvg       *float64     `json:"rain_prob_avg,omitempty"`
+	VisibilityKm      *float64     `json:"visibility_km,omitempty"`
+	AOD               *float64     `json:"aod,omitempty"`
+	Seeing            *float64     `json:"seeing,omitempty"`
+	Transparency      *float64     `json:"transparency,omitempty"`
 	Scores            FactorScores `json:"scores"`
 }
 type Monitor struct {

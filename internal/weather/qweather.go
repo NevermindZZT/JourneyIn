@@ -90,6 +90,8 @@ type qweatherDaily struct {
 	Humidity     string `json:"humidity"`
 	Precip       string `json:"precip"`
 	Pressure     string `json:"pressure"`
+	Cloud        string `json:"cloud"`
+	UvIndex      string `json:"uvIndex"`
 }
 
 type qweatherNowResponse struct {
@@ -104,6 +106,9 @@ type qweatherNow struct {
 	WindScale string `json:"windScale"`
 	Humidity  string `json:"humidity"`
 	Pressure  string `json:"pressure"`
+	Vis       string `json:"vis"`
+	Cloud     string `json:"cloud"`
+	FeelsLike string `json:"feelsLike"`
 }
 
 func (p *QWeatherProvider) Weather(ctx context.Context, request WeatherRequest) (WeatherSnapshot, error) {
@@ -161,6 +166,9 @@ func (p *QWeatherProvider) Weather(ctx context.Context, request WeatherRequest) 
 	var currentHumidity *float64
 	var currentWindDir string
 	var currentWindPower string
+	var currentVisKm *float64
+	var currentCloudPct *int
+	var currentFeelsLike *float64
 
 	nowURL := fmt.Sprintf("%s/v7/weather/now?location=%s", baseURL, url.QueryEscape(locationParam))
 	if nReq, nErr := http.NewRequestWithContext(ctx, http.MethodGet, nowURL, nil); nErr == nil {
@@ -181,6 +189,15 @@ func (p *QWeatherProvider) Weather(ctx context.Context, request WeatherRequest) 
 					scale = scale + "级"
 				}
 				currentWindPower = scale
+				if vVal, err := strconv.ParseFloat(nowPayload.Now.Vis, 64); err == nil && vVal >= 0 {
+					currentVisKm = &vVal
+				}
+				if cVal, err := strconv.Atoi(nowPayload.Now.Cloud); err == nil && cVal >= 0 {
+					currentCloudPct = &cVal
+				}
+				if flVal, err := strconv.ParseFloat(nowPayload.Now.FeelsLike, 64); err == nil {
+					currentFeelsLike = &flVal
+				}
 			}
 			_ = nResp.Body.Close()
 		}
@@ -234,6 +251,18 @@ func (p *QWeatherProvider) Weather(ctx context.Context, request WeatherRequest) 
 			pressure = &pVal
 		}
 
+		var cloudCoverPct *int
+		if cVal, err := strconv.Atoi(cast.Cloud); err == nil && cVal >= 0 {
+			cloudCoverPct = &cVal
+		} else {
+			cloudCoverPct = currentCloudPct
+		}
+
+		var uvIndex *float64
+		if uvVal, err := strconv.ParseFloat(cast.UvIndex, 64); err == nil && uvVal >= 0 {
+			uvIndex = &uvVal
+		}
+
 		return WeatherSnapshot{
 			Provider:         p.ID(),
 			LocalDate:        request.LocalDate,
@@ -247,6 +276,10 @@ func (p *QWeatherProvider) Weather(ctx context.Context, request WeatherRequest) 
 			WindDirection:    windDir,
 			WindPower:        windPower,
 			PressureHPa:      pressure,
+			VisibilityKm:     currentVisKm,
+			CloudCoverPct:    cloudCoverPct,
+			UVIndex:          uvIndex,
+			ApparentTempC:    currentFeelsLike,
 			FetchedAt:        now,
 			ExpiresAt:        now.Add(weatherSnapshotTTL),
 			Available:        true,

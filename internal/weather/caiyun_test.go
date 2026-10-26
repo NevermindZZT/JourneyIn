@@ -78,6 +78,37 @@ func TestCaiyunProvider_Forecast15DaysSuccess(t *testing.T) {
 						{Date: "2026-09-25T00:00+08:00", Avg: 100850.0},
 						{Date: "2026-10-02T00:00+08:00", Avg: 101500.0},
 					},
+					Visibility: []caiyunDailyScalar{
+						{Date: "2026-09-20T00:00+08:00", Avg: 20.0},
+						{Date: "2026-09-25T00:00+08:00", Avg: 12.5},
+						{Date: "2026-10-02T00:00+08:00", Avg: 25.0},
+					},
+					Cloudrate: []caiyunDailyScalar{
+						{Date: "2026-09-20T00:00+08:00", Avg: 0.20},
+						{Date: "2026-09-25T00:00+08:00", Avg: 0.75},
+						{Date: "2026-10-02T00:00+08:00", Avg: 0.40},
+					},
+					Precipitation: []caiyunDailyPrecip{
+						{Date: "2026-09-20T00:00+08:00", Probability: 5.0},
+						{Date: "2026-09-25T00:00+08:00", Probability: 80.0},
+						{Date: "2026-10-02T00:00+08:00", Probability: 15.0},
+					},
+					AirQuality: &caiyunDailyAirQuality{
+						AQI: []caiyunDailyAQI{
+							{Date: "2026-09-25T00:00+08:00", Avg: caiyunAQIAvg{Chn: 42}},
+						},
+						PM25: []caiyunDailyScalar{
+							{Date: "2026-09-25T00:00+08:00", Avg: 18.0},
+						},
+					},
+					LifeIndex: &caiyunDailyLifeIndex{
+						Ultraviolet: []struct {
+							Date  string  `json:"date"`
+							Index float64 `json:"index"`
+						}{
+							{Date: "2026-09-25T00:00+08:00", Index: 5.5},
+						},
+					},
 				},
 			},
 		}
@@ -129,6 +160,24 @@ func TestCaiyunProvider_Forecast15DaysSuccess(t *testing.T) {
 	}
 	if snapshot.PressureHPa == nil || *snapshot.PressureHPa != 1008.5 {
 		t.Errorf("expected PressureHPa 1008.5, got %v", snapshot.PressureHPa)
+	}
+	if snapshot.VisibilityKm == nil || *snapshot.VisibilityKm != 12.5 {
+		t.Errorf("expected VisibilityKm 12.5, got %v", snapshot.VisibilityKm)
+	}
+	if snapshot.CloudCoverPct == nil || *snapshot.CloudCoverPct != 75 {
+		t.Errorf("expected CloudCoverPct 75, got %v", snapshot.CloudCoverPct)
+	}
+	if snapshot.RainProbPct == nil || *snapshot.RainProbPct != 80 {
+		t.Errorf("expected RainProbPct 80, got %v", snapshot.RainProbPct)
+	}
+	if snapshot.AQI == nil || *snapshot.AQI != 42 {
+		t.Errorf("expected AQI 42, got %v", snapshot.AQI)
+	}
+	if snapshot.PM25 == nil || *snapshot.PM25 != 18.0 {
+		t.Errorf("expected PM25 18.0, got %v", snapshot.PM25)
+	}
+	if snapshot.UVIndex == nil || *snapshot.UVIndex != 5.5 {
+		t.Errorf("expected UVIndex 5.5, got %v", snapshot.UVIndex)
 	}
 
 	// 查询第 13 天 (2026-10-02)

@@ -117,6 +117,20 @@ type WeatherSnapshot struct {
 	WindDirection    string     `json:"wind_direction,omitempty"`
 	WindPower        string     `json:"wind_power,omitempty"`
 	PressureHPa      *float64   `json:"pressure_hpa,omitempty"`
+	VisibilityKm     *float64   `json:"visibility_km,omitempty"`
+	CloudCoverPct    *int       `json:"cloud_cover_pct,omitempty"`
+	CloudCoverLow    *int       `json:"cloud_cover_low,omitempty"`
+	CloudCoverMid    *int       `json:"cloud_cover_mid,omitempty"`
+	CloudCoverHigh   *int       `json:"cloud_cover_high,omitempty"`
+	RainProbPct      *int       `json:"rain_prob_pct,omitempty"`
+	UVIndex          *float64   `json:"uv_index,omitempty"`
+	ApparentTempC    *float64   `json:"apparent_temp_c,omitempty"`
+	AQI              *int       `json:"aqi,omitempty"`
+	PM25             *float64   `json:"pm25,omitempty"`
+	PM10             *float64   `json:"pm10,omitempty"`
+	AOD              *float64   `json:"aod,omitempty"`
+	Seeing           *float64   `json:"seeing,omitempty"`
+	Transparency     *float64   `json:"transparency,omitempty"`
 	FetchedAt        time.Time  `json:"fetched_at"`
 	ExpiresAt        time.Time  `json:"expires_at"`
 	Available        bool       `json:"available"`

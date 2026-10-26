@@ -301,6 +301,11 @@ func (p *BaiduProvider) Weather(ctx context.Context, request WeatherRequest) (We
 			if pressure == nil {
 				pressure = forecast.Pressure
 			}
+			var visKm *float64
+			if response.Result.Now.Vis != nil && *response.Result.Now.Vis > 0 {
+				v := *response.Result.Now.Vis / 1000.0
+				visKm = &v
+			}
 			return WeatherSnapshot{
 				Provider:         p.ID(),
 				LocalDate:        request.LocalDate,
@@ -314,6 +319,12 @@ func (p *BaiduProvider) Weather(ctx context.Context, request WeatherRequest) (We
 				WindDirection:    windDirection,
 				WindPower:        windPower,
 				PressureHPa:      pressure,
+				VisibilityKm:     visKm,
+				CloudCoverPct:    response.Result.Now.Clouds,
+				UVIndex:          response.Result.Now.UvIndex,
+				AQI:              response.Result.Now.Aqi,
+				PM25:             response.Result.Now.Pm25,
+				PM10:             response.Result.Now.Pm10,
 				FetchedAt:        now,
 				ExpiresAt:        now.Add(weatherSnapshotTTL),
 				Available:        true,
@@ -512,6 +523,12 @@ type baiduWeatherResponse struct {
 			WindDir   string   `json:"wind_dir"`
 			WindClass string   `json:"wind_class"`
 			Pressure  *float64 `json:"pressure"`
+			Vis       *float64 `json:"vis,omitempty"`
+			Clouds    *int     `json:"clouds,omitempty"`
+			Aqi       *int     `json:"aqi,omitempty"`
+			Pm25      *float64 `json:"pm25,omitempty"`
+			Pm10      *float64 `json:"pm10,omitempty"`
+			UvIndex   *float64 `json:"uv_index,omitempty"`
 		} `json:"now"`
 		Forecasts []struct {
 			Date      string  `json:"date"`

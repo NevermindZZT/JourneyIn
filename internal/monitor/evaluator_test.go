@@ -189,3 +189,122 @@ func TestEvaluator_NearHorizonRainyWeatherClassifiedAsWaiting(t *testing.T) {
 		t.Errorf("expected low weather score for rain, got %v", top.Details.Scores.WeatherScore)
 	}
 }
+
+func TestEvaluator_NearHorizonWithRealCloudAndVisibility(t *testing.T) {
+	cloud10 := 10
+	rain0 := 0
+	vis20 := 20.0
+	mock := &mockWeatherProvider{
+		id: weather.ProviderOpenMeteo,
+		response: weather.WeatherSnapshot{
+			Condition:     "晴间多云",
+			Available:     true,
+			CloudCoverPct: &cloud10,
+			RainProbPct:   &rain0,
+			VisibilityKm:  &vis20,
+		},
+	}
+	reg := weather.NewRegistry()
+	reg.Register(mock)
+	weatherSvc := weather.NewService(reg, nil, nil, nil, nil, weather.ProviderOpenMeteo)
+	evaluator := NewEvaluator(weatherSvc)
+
+	now := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
+	m := Monitor{
+		ID:        "mon_vis",
+		Title:     "西湖通透晴天",
+		PlaceName: "西湖",
+		Lat:       30.25,
+		Lng:       120.15,
+		CRS:       "gcj02",
+		Criteria: MonitorCriteria{
+			Months:          []int{10},
+			MaxLeaveDays:    0,
+			MinDurationDays: 2,
+			MaxDurationDays: 2,
+			MaxCloudCover:   20,
+			MaxRainProb:     10,
+		},
+	}
+
+	evals, err := evaluator.EvaluateMonitor(context.Background(), m, nil, now, 15)
+	if err != nil {
+		t.Fatalf("EvaluateMonitor failed: %v", err)
+	}
+	if len(evals) == 0 {
+		t.Fatalf("expected near window, got 0")
+	}
+	top := evals[0]
+	if top.Level != LevelStronglyRecommended && top.Level != LevelAcceptable {
+		t.Errorf("expected sunny & high visibility window to be recommended, got %s", top.Level)
+	}
+	if top.Details.VisibilityKm == nil || *top.Details.VisibilityKm != 20.0 {
+		t.Errorf("expected VisibilityKm 20.0, got %v", top.Details.VisibilityKm)
+	}
+	if top.Details.CloudCoverAvg == nil || *top.Details.CloudCoverAvg != 10.0 {
+		t.Errorf("expected CloudCoverAvg 10.0, got %v", top.Details.CloudCoverAvg)
+	}
+	if !strings.Contains(top.Details.WeatherCondition, "能见度20km") {
+		t.Errorf("expected WeatherCondition to mention visibility 20km, got %s", top.Details.WeatherCondition)
+	}
+}
+
+func TestEvaluator_StargazingModeHighAODInterceptedAsWaiting(t *testing.T) {
+	cloud0 := 0
+	rain0 := 0
+	vis15 := 15.0
+	heavyAOD := 0.75 // 重度气溶胶/雾霾消光
+	mock := &mockWeatherProvider{
+		id: weather.ProviderOpenMeteo,
+		response: weather.WeatherSnapshot{
+			Condition:     "晴",
+			Available:     true,
+			CloudCoverPct: &cloud0,
+			RainProbPct:   &rain0,
+			VisibilityKm:  &vis15,
+			AOD:           &heavyAOD,
+		},
+	}
+	reg := weather.NewRegistry()
+	reg.Register(mock)
+	weatherSvc := weather.NewService(reg, nil, nil, nil, nil, weather.ProviderOpenMeteo)
+	evaluator := NewEvaluator(weatherSvc)
+
+	now := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
+	m := Monitor{
+		ID:        "mon_star_aod",
+		Title:     "高气溶胶星空监控",
+		PlaceName: "星空观赏点",
+		Lat:       30.25,
+		Lng:       120.15,
+		CRS:       "gcj02",
+		Criteria: MonitorCriteria{
+			Months:          []int{10},
+			StargazingMode:  true, // 开启星空摄影模式
+			MaxLeaveDays:    0,
+			MinDurationDays: 2,
+			MaxDurationDays: 2,
+			MaxCloudCover:   30,
+			MaxRainProb:     20,
+		},
+	}
+
+	evals, err := evaluator.EvaluateMonitor(context.Background(), m, nil, now, 15)
+	if err != nil {
+		t.Fatalf("EvaluateMonitor failed: %v", err)
+	}
+	if len(evals) == 0 {
+		t.Fatalf("expected near window, got 0")
+	}
+	top := evals[0]
+	// 即使是晴天且0云量，由于气溶胶 AOD=0.75 严重浑浊，必须被安全拦截为 LevelWaiting
+	if top.Level != LevelWaiting {
+		t.Errorf("expected heavy AOD in stargazing mode to be classified as 'waiting', got '%s'", top.Level)
+	}
+	if top.Details.AOD == nil || *top.Details.AOD != 0.75 {
+		t.Errorf("expected AOD 0.75, got %v", top.Details.AOD)
+	}
+	if !strings.Contains(top.Details.Summary, "气溶胶偏重") {
+		t.Errorf("expected summary to indicate heavy aerosol, got %s", top.Details.Summary)
+	}
+}

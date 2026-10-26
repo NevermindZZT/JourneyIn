@@ -2,6 +2,9 @@ package weather
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -180,5 +183,73 @@ func TestWeatherService_QWeatherAndOpenMeteoFallback(t *testing.T) {
 	}
 	if !snapQW.Available || snapQW.Condition != "和风晴空万里" {
 		t.Errorf("expected qweather priority, got provider=%s, cond=%s", snapQW.Provider, snapQW.Condition)
+	}
+}
+
+func TestWeatherService_EnrichWithSevenTimerSupplementary(t *testing.T) {
+	reg := NewRegistry()
+	store := &inMemoryCacheStore{cache: make(map[string][]byte)}
+
+	// 主数据源：只有基础天气 (无 Seeing 和 Transparency)
+	temp := 22.0
+	mainMock := &mockWeatherProvider{
+		id: ProviderAMap,
+		response: WeatherSnapshot{
+			Condition:    "晴",
+			TemperatureC: &temp,
+			Available:    true,
+		},
+	}
+	reg.Register(mainMock)
+
+	// 启动一个 mock 7Timer server
+	sevenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := sevenTimerResponse{
+			Product: "astro",
+			Init:    time.Now().UTC().Format("2006010215"),
+			Dataseries: []sevenTimerPoint{
+				{
+					Timepoint:    0,
+					Cloudcover:   2,
+					Seeing:       4, // 3.5 四舍五入对应
+					Transparency: 2,
+					Temp2m:       20,
+					PrecType:     "none",
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer sevenServer.Close()
+
+	sevenProvider := NewSevenTimerProvider()
+	sevenProvider.SetBaseURL(sevenServer.URL)
+
+	svc := NewService(reg, nil, nil, nil, store, ProviderAMap)
+	svc.SetSevenTimerProvider(sevenProvider)
+
+	// 查询今天 (<= 3 天)
+	today := time.Now().UTC().Format("2006-01-02")
+	snap, err := svc.Weather(context.Background(), ProviderAMap, WeatherRequest{
+		Location:  GeoPoint{Lat: 30.25, Lng: 120.15, CRS: CRSWGS84},
+		LocalDate: today,
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !snap.Available {
+		t.Fatal("expected snapshot to be available")
+	}
+	// 验证主数据源保持不变
+	if snap.Provider != ProviderAMap || snap.Condition != "晴" {
+		t.Errorf("expected primary provider amap with 晴, got %s, %s", snap.Provider, snap.Condition)
+	}
+	// 验证补充数据成功注入！
+	if snap.Seeing == nil || *snap.Seeing != 4.0 {
+		t.Errorf("expected supplementary Seeing 4.0, got %v", snap.Seeing)
+	}
+	if snap.Transparency == nil || *snap.Transparency != 2.0 {
+		t.Errorf("expected supplementary Transparency 2.0, got %v", snap.Transparency)
 	}
 }

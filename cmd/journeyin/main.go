@@ -142,10 +142,13 @@ func main() {
 	caiyunToken := settingValue(ctx, database, "weather.caiyun.token", os.Getenv("JOURNEYIN_CAIYUN_TOKEN"))
 	caiyunProvider := weather.NewCaiyunProvider(caiyunToken)
 
+	sevenTimerProvider := weather.NewSevenTimerProvider()
+
 	weatherRegistry := weather.NewRegistry()
 	weatherRegistry.Register(openmeteoProvider)
 	weatherRegistry.Register(qweatherProvider)
 	weatherRegistry.Register(caiyunProvider)
+	weatherRegistry.Register(sevenTimerProvider)
 
 	if baidu, ok := mapRegistry.Get(journeymaps.ProviderBaidu); ok {
 		weatherRegistry.Register(weather.NewMapWeatherAdapter(weather.ProviderBaidu, func(ctx context.Context, req weather.WeatherRequest) (weather.WeatherSnapshot, error) {
@@ -379,6 +382,20 @@ func convertMapWeatherToWeather(snap journeymaps.WeatherSnapshot) weather.Weathe
 		WindDirection:    snap.WindDirection,
 		WindPower:        snap.WindPower,
 		PressureHPa:      snap.PressureHPa,
+		VisibilityKm:     snap.VisibilityKm,
+		CloudCoverPct:    snap.CloudCoverPct,
+		CloudCoverLow:    snap.CloudCoverLow,
+		CloudCoverMid:    snap.CloudCoverMid,
+		CloudCoverHigh:   snap.CloudCoverHigh,
+		RainProbPct:      snap.RainProbPct,
+		UVIndex:          snap.UVIndex,
+		ApparentTempC:    snap.ApparentTempC,
+		AQI:              snap.AQI,
+		PM25:             snap.PM25,
+		PM10:             snap.PM10,
+		AOD:              snap.AOD,
+		Seeing:           snap.Seeing,
+		Transparency:     snap.Transparency,
 		FetchedAt:        snap.FetchedAt,
 		ExpiresAt:        snap.ExpiresAt,
 		Available:        snap.Available,

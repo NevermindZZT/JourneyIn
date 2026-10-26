@@ -25,6 +25,9 @@ func TestQWeatherProvider_Success(t *testing.T) {
 					WindScale: "2",
 					Humidity:  "60",
 					Pressure:  "1012",
+					Vis:       "15",
+					Cloud:     "30",
+					FeelsLike: "25",
 				},
 			}
 			_ = json.NewEncoder(w).Encode(resp)
@@ -44,6 +47,8 @@ func TestQWeatherProvider_Success(t *testing.T) {
 						WindScaleDay: "3",
 						Humidity:     "70",
 						Pressure:     "1010",
+						Cloud:        "40",
+						UvIndex:      "6",
 					},
 					{
 						FxDate:       "2026-09-27", // 第 8 天预报
@@ -55,6 +60,8 @@ func TestQWeatherProvider_Success(t *testing.T) {
 						WindScaleDay: "4",
 						Humidity:     "85",
 						Pressure:     "1008",
+						Cloud:        "80",
+						UvIndex:      "2",
 					},
 				},
 			}
@@ -96,5 +103,14 @@ func TestQWeatherProvider_Success(t *testing.T) {
 	}
 	if snap.WindPower != "4级" {
 		t.Errorf("expected windPower 4级, got %s", snap.WindPower)
+	}
+	if snap.VisibilityKm == nil || *snap.VisibilityKm != 15.0 {
+		t.Errorf("expected VisibilityKm 15.0, got %v", snap.VisibilityKm)
+	}
+	if snap.CloudCoverPct == nil || *snap.CloudCoverPct != 80 {
+		t.Errorf("expected CloudCoverPct 80, got %v", snap.CloudCoverPct)
+	}
+	if snap.UVIndex == nil || *snap.UVIndex != 2.0 {
+		t.Errorf("expected UVIndex 2.0, got %v", snap.UVIndex)
 	}
 }

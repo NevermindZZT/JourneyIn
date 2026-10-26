@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
 	"sync"
@@ -71,12 +72,33 @@ type caiyunResult struct {
 }
 
 type caiyunRealtime struct {
-	Status      string     `json:"status"`
-	Temperature float64    `json:"temperature"`
-	Humidity    float64    `json:"humidity"`
-	Skycon      string     `json:"skycon"`
-	Pressure    float64    `json:"pressure"`
-	Wind        caiyunWind `json:"wind"`
+	Status              string            `json:"status"`
+	Temperature         float64           `json:"temperature"`
+	Humidity            float64           `json:"humidity"`
+	Skycon              string            `json:"skycon"`
+	Pressure            float64           `json:"pressure"`
+	Visibility          float64           `json:"visibility"`
+	Cloudrate           float64           `json:"cloudrate"`
+	ApparentTemperature float64           `json:"apparent_temperature"`
+	Wind                caiyunWind        `json:"wind"`
+	AirQuality          *caiyunRealAir    `json:"air_quality,omitempty"`
+	LifeIndex           *caiyunRealLife   `json:"life_index,omitempty"`
+}
+
+type caiyunRealAir struct {
+	PM25 float64 `json:"pm25"`
+	PM10 float64 `json:"pm10"`
+	AQI  struct {
+		Chn int `json:"chn"`
+		USA int `json:"usa"`
+	} `json:"aqi"`
+}
+
+type caiyunRealLife struct {
+	Ultraviolet struct {
+		Index float64 `json:"index"`
+		Desc  string  `json:"desc"`
+	} `json:"ultraviolet"`
 }
 
 type caiyunWind struct {
@@ -85,12 +107,46 @@ type caiyunWind struct {
 }
 
 type caiyunDaily struct {
-	Status      string              `json:"status"`
-	Temperature []caiyunDailyTemp   `json:"temperature"`
-	Skycon      []caiyunDailySkycon `json:"skycon"`
-	Humidity    []caiyunDailyScalar `json:"humidity"`
-	Wind        []caiyunDailyWind   `json:"wind"`
-	Pressure    []caiyunDailyScalar `json:"pressure"`
+	Status        string                `json:"status"`
+	Temperature   []caiyunDailyTemp     `json:"temperature"`
+	Skycon        []caiyunDailySkycon   `json:"skycon"`
+	Humidity      []caiyunDailyScalar   `json:"humidity"`
+	Wind          []caiyunDailyWind     `json:"wind"`
+	Pressure      []caiyunDailyScalar   `json:"pressure"`
+	Visibility    []caiyunDailyScalar   `json:"visibility,omitempty"`
+	Cloudrate     []caiyunDailyScalar   `json:"cloudrate,omitempty"`
+	Precipitation []caiyunDailyPrecip   `json:"precipitation,omitempty"`
+	AirQuality    *caiyunDailyAirQuality `json:"air_quality,omitempty"`
+	LifeIndex     *caiyunDailyLifeIndex `json:"life_index,omitempty"`
+}
+
+type caiyunDailyPrecip struct {
+	Date        string  `json:"date"`
+	Probability float64 `json:"probability"`
+	Max         float64 `json:"max"`
+	Avg         float64 `json:"avg"`
+}
+
+type caiyunDailyAirQuality struct {
+	AQI  []caiyunDailyAQI    `json:"aqi,omitempty"`
+	PM25 []caiyunDailyScalar `json:"pm25,omitempty"`
+	PM10 []caiyunDailyScalar `json:"pm10,omitempty"`
+}
+
+type caiyunDailyAQI struct {
+	Date string       `json:"date"`
+	Avg  caiyunAQIAvg `json:"avg"`
+}
+
+type caiyunAQIAvg struct {
+	Chn int `json:"chn"`
+}
+
+type caiyunDailyLifeIndex struct {
+	Ultraviolet []struct {
+		Date  string  `json:"date"`
+		Index float64 `json:"index"`
+	} `json:"ultraviolet,omitempty"`
 }
 
 type caiyunDailyTemp struct {
@@ -218,6 +274,107 @@ func (p *CaiyunProvider) Weather(ctx context.Context, request WeatherRequest) (W
 			pressure = &p
 		}
 
+		var visKm *float64
+		if len(payload.Result.Daily.Visibility) > 0 {
+			for _, vItem := range payload.Result.Daily.Visibility {
+				if strings.HasPrefix(vItem.Date, targetDate) && vItem.Avg > 0 {
+					v := vItem.Avg
+					visKm = &v
+					break
+				}
+			}
+		}
+		if visKm == nil && payload.Result.Realtime.Visibility > 0 {
+			v := payload.Result.Realtime.Visibility
+			visKm = &v
+		}
+
+		var cloudCoverPct *int
+		if len(payload.Result.Daily.Cloudrate) > 0 {
+			for _, cItem := range payload.Result.Daily.Cloudrate {
+				if strings.HasPrefix(cItem.Date, targetDate) {
+					c := int(math.Round(cItem.Avg * 100))
+					cloudCoverPct = &c
+					break
+				}
+			}
+		}
+		if cloudCoverPct == nil && payload.Result.Realtime.Cloudrate > 0 {
+			c := int(math.Round(payload.Result.Realtime.Cloudrate * 100))
+			cloudCoverPct = &c
+		}
+
+		var rainProbPct *int
+		if len(payload.Result.Daily.Precipitation) > 0 {
+			for _, pItem := range payload.Result.Daily.Precipitation {
+				if strings.HasPrefix(pItem.Date, targetDate) {
+					rp := int(math.Round(pItem.Probability))
+					rainProbPct = &rp
+					break
+				}
+			}
+		}
+
+		var apparentTemp *float64
+		if payload.Result.Realtime.ApparentTemperature != 0 {
+			at := payload.Result.Realtime.ApparentTemperature
+			apparentTemp = &at
+		}
+
+		var uvIndex *float64
+		if payload.Result.Daily.LifeIndex != nil && len(payload.Result.Daily.LifeIndex.Ultraviolet) > 0 {
+			for _, uvItem := range payload.Result.Daily.LifeIndex.Ultraviolet {
+				if strings.HasPrefix(uvItem.Date, targetDate) {
+					uv := uvItem.Index
+					uvIndex = &uv
+					break
+				}
+			}
+		}
+		if uvIndex == nil && payload.Result.Realtime.LifeIndex != nil && payload.Result.Realtime.LifeIndex.Ultraviolet.Index > 0 {
+			uv := payload.Result.Realtime.LifeIndex.Ultraviolet.Index
+			uvIndex = &uv
+		}
+
+		var aqiVal *int
+		var pm25Val *float64
+		var pm10Val *float64
+		if payload.Result.Daily.AirQuality != nil {
+			for _, aqiItem := range payload.Result.Daily.AirQuality.AQI {
+				if strings.HasPrefix(aqiItem.Date, targetDate) && aqiItem.Avg.Chn > 0 {
+					aqi := aqiItem.Avg.Chn
+					aqiVal = &aqi
+					break
+				}
+			}
+			for _, p25Item := range payload.Result.Daily.AirQuality.PM25 {
+				if strings.HasPrefix(p25Item.Date, targetDate) {
+					p25 := p25Item.Avg
+					pm25Val = &p25
+					break
+				}
+			}
+			for _, p10Item := range payload.Result.Daily.AirQuality.PM10 {
+				if strings.HasPrefix(p10Item.Date, targetDate) {
+					p10 := p10Item.Avg
+					pm10Val = &p10
+					break
+				}
+			}
+		}
+		if aqiVal == nil && payload.Result.Realtime.AirQuality != nil && payload.Result.Realtime.AirQuality.AQI.Chn > 0 {
+			aqi := payload.Result.Realtime.AirQuality.AQI.Chn
+			aqiVal = &aqi
+		}
+		if pm25Val == nil && payload.Result.Realtime.AirQuality != nil && payload.Result.Realtime.AirQuality.PM25 > 0 {
+			p25 := payload.Result.Realtime.AirQuality.PM25
+			pm25Val = &p25
+		}
+		if pm10Val == nil && payload.Result.Realtime.AirQuality != nil && payload.Result.Realtime.AirQuality.PM10 > 0 {
+			p10 := payload.Result.Realtime.AirQuality.PM10
+			pm10Val = &p10
+		}
+
 		return WeatherSnapshot{
 			Provider:         p.ID(),
 			LocalDate:        request.LocalDate,
@@ -231,6 +388,14 @@ func (p *CaiyunProvider) Weather(ctx context.Context, request WeatherRequest) (W
 			WindDirection:    windDir,
 			WindPower:        windPower,
 			PressureHPa:      pressure,
+			VisibilityKm:     visKm,
+			CloudCoverPct:    cloudCoverPct,
+			RainProbPct:      rainProbPct,
+			UVIndex:          uvIndex,
+			ApparentTempC:    apparentTemp,
+			AQI:              aqiVal,
+			PM25:             pm25Val,
+			PM10:             pm10Val,
 			FetchedAt:        now,
 			ExpiresAt:        now.Add(weatherSnapshotTTL),
 			Available:        true,

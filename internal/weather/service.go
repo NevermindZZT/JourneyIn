@@ -44,6 +44,7 @@ type Service struct {
 	qweather          *QWeatherProvider
 	caiyun            *CaiyunProvider
 	openmeteo         *OpenMeteoProvider
+	sevenTimer        *SevenTimerProvider // 专业补充天文源：提供视宁度 Seeing 与透明度 Transparency
 	store             CacheStore
 	defaultProvider   ProviderID
 	defaultProviderMu sync.RWMutex
@@ -59,9 +60,18 @@ func NewService(registry *Registry, qweather *QWeatherProvider, caiyun *CaiyunPr
 		qweather:        qweather,
 		caiyun:          caiyun,
 		openmeteo:       openmeteo,
+		sevenTimer:      NewSevenTimerProvider(),
 		store:           store,
 		defaultProvider: defaultProvider,
 	}
+}
+
+func (s *Service) SevenTimerProvider() *SevenTimerProvider {
+	return s.sevenTimer
+}
+
+func (s *Service) SetSevenTimerProvider(p *SevenTimerProvider) {
+	s.sevenTimer = p
 }
 
 func (s *Service) Registry() *Registry {
@@ -146,14 +156,49 @@ func (s *Service) WeatherWithCache(ctx context.Context, providerID ProviderID, r
 }
 
 func (s *Service) fetchWeather(ctx context.Context, providerID ProviderID, request WeatherRequest) (WeatherSnapshot, error) {
+	var snap WeatherSnapshot
+	var err error
+
 	if providerID == ProviderAuto {
-		return s.fetchAutoWeather(ctx, request)
+		snap, err = s.fetchAutoWeather(ctx, request)
+	} else {
+		p, ok := s.registry.Get(providerID)
+		if !ok {
+			return WeatherSnapshot{Provider: providerID, LocalDate: request.LocalDate, Available: false}, Unavailable(providerID)
+		}
+		snap, err = p.Weather(ctx, request)
 	}
-	p, ok := s.registry.Get(providerID)
-	if !ok {
-		return WeatherSnapshot{Provider: providerID, LocalDate: request.LocalDate, Available: false}, Unavailable(providerID)
+
+	if err != nil || !snap.Available {
+		return snap, err
 	}
-	return p.Weather(ctx, request)
+
+	// 统一连带请求补充信息源（如 7Timer 专业天文视宁度与透明度），注入到主天气快照中
+	s.enrichSupplementaryWeather(ctx, &snap, request)
+	return snap, nil
+}
+
+func (s *Service) enrichSupplementaryWeather(ctx context.Context, snap *WeatherSnapshot, request WeatherRequest) {
+	if snap == nil || !snap.Available || s.sevenTimer == nil {
+		return
+	}
+
+	// 7Timer! ASTRO 提供临近 3 天的高精天文观测指标 (视宁度与透明度)
+	daysDiff := calcDayDiff(request.LocalDate)
+	if daysDiff >= 0 && daysDiff <= 3 && (snap.Seeing == nil || snap.Transparency == nil) {
+		astroSnap, err := s.sevenTimer.Weather(ctx, request)
+		if err == nil && astroSnap.Available {
+			if snap.Seeing == nil && astroSnap.Seeing != nil {
+				snap.Seeing = astroSnap.Seeing
+			}
+			if snap.Transparency == nil && astroSnap.Transparency != nil {
+				snap.Transparency = astroSnap.Transparency
+			}
+			if snap.CloudCoverPct == nil && astroSnap.CloudCoverPct != nil {
+				snap.CloudCoverPct = astroSnap.CloudCoverPct
+			}
+		}
+	}
 }
 
 func (s *Service) fetchAutoWeather(ctx context.Context, request WeatherRequest) (WeatherSnapshot, error) {
@@ -203,9 +248,9 @@ func (s *Service) fetchAutoWeather(ctx context.Context, request WeatherRequest) 
 		}
 	}
 
-	// 5. 遍历其他任意已注册提供商
+	// 5. 遍历其他任意已注册主天气提供商 (排除补充源 7Timer)
 	for _, p := range s.registry.Providers() {
-		if p.ID() == ProviderAuto || p.ID() == ProviderQWeather || p.ID() == ProviderCaiyun || p.ID() == ProviderAMap || p.ID() == ProviderBaidu || p.ID() == ProviderOpenMeteo {
+		if p.ID() == ProviderAuto || p.ID() == ProviderQWeather || p.ID() == ProviderCaiyun || p.ID() == ProviderAMap || p.ID() == ProviderBaidu || p.ID() == ProviderOpenMeteo || p.ID() == Provider7Timer {
 			continue
 		}
 		if snap, err := p.Weather(ctx, request); err == nil && snap.Available {

@@ -4,7 +4,22 @@ import { computed, onMounted, ref, watch } from 'vue'
 export interface EvaluationItem {
   id: string; monitor_id: string; window_start: string; window_end: string; score: number
   level: 'strongly_recommended' | 'acceptable' | 'waiting'
-  details: { summary?: string; moon_phase_name?: string; moon_illumination?: number; galactic_hours?: number; holiday_name?: string; leave_days_required?: number; weather_condition?: string; cloud_cover_avg?: number; rain_prob_avg?: number; scores?: { astro_score?: number; weather_score?: number; calendar_score?: number; budget_score?: number } }
+  details: {
+    summary?: string
+    moon_phase_name?: string
+    moon_illumination?: number
+    galactic_hours?: number
+    holiday_name?: string
+    leave_days_required?: number
+    weather_condition?: string
+    cloud_cover_avg?: number
+    rain_prob_avg?: number
+    visibility_km?: number
+    aod?: number
+    seeing?: number
+    transparency?: number
+    scores?: { astro_score?: number; weather_score?: number; calendar_score?: number; budget_score?: number }
+  }
 }
 export interface MonitorItem {
   id: string; title: string; place_name: string; lat: number; lng: number; crs: string
@@ -243,7 +258,8 @@ defineExpose({ loadMonitors, refreshMonitor, selectMonitorFromMap })
           <div class="radar-factor-list">
             <div class="radar-factor-row"><span>月相</span><strong>{{ selectedEvaluation.details.moon_phase_name || '未启用' }}</strong><small>{{ selectedEvaluation.details.moon_illumination != null ? '月面照亮 ' + Math.round(selectedEvaluation.details.moon_illumination * 100) + '%' : '暂无月相数据' }} · 天文 {{ selectedEvaluation.details.scores?.astro_score ?? '—' }}分</small></div>
             <div class="radar-factor-row"><span>银河核心</span><strong>{{ selectedEvaluation.details.galactic_hours ? selectedEvaluation.details.galactic_hours + ' 小时' : '不可见' }}</strong><small>纯黑夜有效时段 · 天文 {{ selectedEvaluation.details.scores?.astro_score ?? '—' }}分</small></div>
-            <div class="radar-factor-row"><span>天气</span><strong>{{ selectedEvaluation.details.weather_condition || '暂无预报' }}</strong><small>{{ selectedEvaluation.details.cloud_cover_avg != null ? '云量 ' + selectedEvaluation.details.cloud_cover_avg + '%' : '云量暂无' }} · 气象 {{ selectedEvaluation.details.scores?.weather_score ?? '—' }}分</small></div>
+            <div class="radar-factor-row"><span>天气</span><strong>{{ selectedEvaluation.details.weather_condition || '暂无预报' }}</strong><small>{{ selectedEvaluation.details.cloud_cover_avg != null ? '云量 ' + selectedEvaluation.details.cloud_cover_avg + '%' : '云量暂无' }}{{ selectedEvaluation.details.rain_prob_avg != null ? ' · 降水率 ' + selectedEvaluation.details.rain_prob_avg + '%' : '' }} · 气象 {{ selectedEvaluation.details.scores?.weather_score ?? '—' }}分</small></div>
+            <div v-if="selectedEvaluation.details.visibility_km != null || selectedEvaluation.details.aod != null || selectedEvaluation.details.transparency != null || selectedEvaluation.details.seeing != null" class="radar-factor-row"><span>大气通透 · 天文气象</span><strong>{{ selectedEvaluation.details.visibility_km != null ? '能见度 ' + selectedEvaluation.details.visibility_km + 'km' : (selectedEvaluation.details.transparency != null ? '7Timer 透明度 ' + selectedEvaluation.details.transparency + '级' : '通透良好') }}</strong><small>{{ selectedEvaluation.details.transparency != null ? '7Timer 透明度 ' + selectedEvaluation.details.transparency + '级 · ' : '' }}{{ selectedEvaluation.details.seeing != null ? '视宁度 ' + selectedEvaluation.details.seeing + '级 · ' : '' }}{{ selectedEvaluation.details.aod != null ? '气溶胶 AOD ' + selectedEvaluation.details.aod : (selectedEvaluation.details.visibility_km ? '地表视线极佳' : '') }}</small></div>
             <div class="radar-factor-row"><span>假期</span><strong>{{ selectedEvaluation.details.holiday_name || '周末/工作日窗口' }}</strong><small>{{ selectedEvaluation.details.leave_days_required === 0 ? '无需请假' : '需请假 ' + (selectedEvaluation.details.leave_days_required ?? 0) + ' 天' }} · 日历 {{ selectedEvaluation.details.scores?.calendar_score ?? '—' }}分</small></div>
           </div>
         </section>
