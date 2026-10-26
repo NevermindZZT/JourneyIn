@@ -1505,6 +1505,11 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .photo-match-window { margin-top: 12px; }
 .photo-match-window .ui-select-trigger { min-height: 42px; }
 .settings-provider-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.provider-card { display: flex; flex-direction: column; }
+.provider-card .settings-help { margin: 10px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.provider-card .settings-actions { margin-top: auto; padding-top: 12px; gap: 8px; }
+.provider-card .settings-actions .primary-action,
+.provider-card .settings-actions .secondary-action { min-height: 36px; padding: 7px 12px; font-size: 11px; border-radius: 10px; }
 .provider-status { flex: 0 0 auto; padding: 5px 7px; border-radius: 999px; color: var(--p); background: color-mix(in srgb, var(--p) 11%, var(--surface)); font-size: 9px; font-weight: 900; }
 .settings-status-line { margin: 0 0 13px; color: var(--muted); font-size: 10px; line-height: 1.65; }
 .settings-status-line strong { color: var(--p); }

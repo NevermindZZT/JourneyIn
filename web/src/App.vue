@@ -7991,40 +7991,40 @@ onUnmounted(() => {
                       />
                     </label>
                     <a href="https://console.qweather.com" target="_blank" rel="noopener noreferrer">申请/管理和风天气 Key ↗</a>
-                  </article>
-                </div>
-                <p class="settings-help">保存和风天气 Key 到数据库后，服务端会立即生效；Key 只返回配置状态，不会回显原文。注册和风天气控制台即可免费获得每月 50,000 次调用额度。</p>
-                <div class="settings-actions">
-                  <button class="primary-action" type="button" :disabled="settingsSaving" @click="saveQWeatherSettings">{{ settingsSaving ? '保存中…' : '保存和风天气设置' }}</button>
-                  <button v-if="settingsData?.weather?.qweather?.key_configured" class="secondary-action" type="button" :disabled="settingsSaving" @click="clearQWeatherKey">清除 Key</button>
-                </div>
-
-                <article class="settings-card provider-card" style="margin-top: 14px;">
-                  <div class="settings-card-heading">
-                    <div>
-                      <strong>彩云天气 (ColorfulClouds)</strong>
-                      <small>v2.6 开放平台 API · 个人免费版 3 天 / 付费套餐最高 15 天</small>
+                    <p class="settings-help">保存和风天气 Key 后立即生效；Key 仅存凭据状态不回显。控制台可免费获取每月 50,000 次额度。</p>
+                    <div class="settings-actions">
+                      <button class="primary-action" type="button" :disabled="settingsSaving" @click="saveQWeatherSettings">{{ settingsSaving ? '保存中…' : '保存设置' }}</button>
+                      <button v-if="settingsData?.weather?.qweather?.key_configured" class="secondary-action" type="button" :disabled="settingsSaving" @click="clearQWeatherKey">清除 Key</button>
                     </div>
-                    <span class="provider-status">{{ settingsData?.weather?.caiyun?.token_configured ? 'Token 已配置' : '待配置' }}</span>
-                  </div>
-                  <p class="settings-status-line">
-                    彩云 API 令牌：<strong>{{ settingsData?.weather?.caiyun?.token_configured ? '已配置 (受保护存储)' : '未配置' }}</strong>
-                  </p>
-                  <label>
-                    彩云开放平台 Token
-                    <input
-                      v-model="caiyunTokenInput"
-                      type="password"
-                      :placeholder="settingsData?.weather?.caiyun?.token_configured ? '已配置，输入新 Token 可替换' : '输入彩云天气开放平台 Token'"
-                      autocomplete="off"
-                    />
-                  </label>
-                  <a href="https://platform.caiyunapp.com" target="_blank" rel="noopener noreferrer">申请彩云开放平台 Token ↗</a>
-                </article>
-                <p class="settings-help">保存彩云 Token 到数据库后，服务端会立即生效；Token 只返回配置状态，不会回显原文。注：彩云个人免费版额度限制最多返回 3 天预报。</p>
-                <div class="settings-actions">
-                  <button class="primary-action" type="button" :disabled="settingsSaving" @click="saveCaiyunToken">{{ settingsSaving ? '保存中…' : '保存彩云 Token 到数据库' }}</button>
-                  <button v-if="settingsData?.weather?.caiyun?.token_configured" class="secondary-action" type="button" :disabled="settingsSaving" @click="clearCaiyunToken">清除 Token</button>
+                  </article>
+
+                  <article class="settings-card provider-card">
+                    <div class="settings-card-heading">
+                      <div>
+                        <strong>彩云天气 (ColorfulClouds)</strong>
+                        <small>v2.6 开放平台 API · 个人免费版 3 天 / 付费套餐最高 15 天</small>
+                      </div>
+                      <span class="provider-status">{{ settingsData?.weather?.caiyun?.token_configured ? 'Token 已配置' : '待配置' }}</span>
+                    </div>
+                    <p class="settings-status-line">
+                      彩云 API 令牌：<strong>{{ settingsData?.weather?.caiyun?.token_configured ? '已配置 (受保护存储)' : '未配置' }}</strong>
+                    </p>
+                    <label>
+                      彩云开放平台 Token
+                      <input
+                        v-model="caiyunTokenInput"
+                        type="password"
+                        :placeholder="settingsData?.weather?.caiyun?.token_configured ? '已配置，输入新 Token 可替换' : '输入彩云天气开放平台 Token'"
+                        autocomplete="off"
+                      />
+                    </label>
+                    <a href="https://platform.caiyunapp.com" target="_blank" rel="noopener noreferrer">申请彩云开放平台 Token ↗</a>
+                    <p class="settings-help">保存彩云 Token 后立即生效；Token 仅存凭据状态不回显。注：个人免费版限制返回最多 3 天预报。</p>
+                    <div class="settings-actions">
+                      <button class="primary-action" type="button" :disabled="settingsSaving" @click="saveCaiyunToken">{{ settingsSaving ? '保存中…' : '保存设置' }}</button>
+                      <button v-if="settingsData?.weather?.caiyun?.token_configured" class="secondary-action" type="button" :disabled="settingsSaving" @click="clearCaiyunToken">清除 Token</button>
+                    </div>
+                  </article>
                 </div>
                 <p v-if="settingsMessage" class="settings-feedback">{{ settingsMessage }}</p>
               </section>
