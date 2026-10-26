@@ -7837,7 +7837,70 @@ onUnmounted(() => {
                     />
                   </label>
                 </div>
-                <div class="settings-provider-grid"><article class="settings-card provider-card"><div class="settings-card-heading"><div><strong>高德地图</strong><small>JS API 2.0 / Web Service</small></div><span class="provider-status">{{ settingsData?.map?.amap?.js_key_configured ? 'JS 已配置' : '待配置' }}</span></div><p class="settings-status-line">JS Key：<strong>{{ settingsData?.map?.amap?.js_key_configured ? '已配置' : '未配置' }}</strong><br />服务端 Key：<strong>{{ settingsData?.map?.amap?.server_key_configured ? '已配置' : '未配置' }}</strong><br />安全密钥：<strong>{{ settingsData?.map?.amap?.security_js_code_configured ? '已配置' : '未配置' }}</strong></p><label>JS Key<input v-model="amapJSKeyInput" type="password" placeholder="用于浏览器端地图" autocomplete="off" /></label><label>服务端 Key<input v-model="amapServerKeyInput" type="password" placeholder="留空保持当前值" autocomplete="off" /></label><label>JS 安全密钥<input v-model="amapSecurityJSCodeInput" type="password" placeholder="用于安全代理" autocomplete="off" /></label><a href="https://console.amap.com/dev/key/app" target="_blank" rel="noopener noreferrer">申请/管理高德 Key ↗</a></article><article class="settings-card provider-card"><div class="settings-card-heading"><div><strong>百度地图</strong><small>JSAPI 4.0 / Web Service</small></div><span class="provider-status">{{ baiduKey ? '浏览器已配置' : '待配置' }}</span></div><p class="settings-status-line">浏览器端 Key：<strong>{{ baiduKey ? '已配置' : '未配置' }}</strong><br />服务端 Key：<strong>{{ settingsData?.map?.baidu?.server_key_configured ? '已配置' : '未配置' }}</strong></p><label>浏览器端 Key<input v-model="baiduBrowserKeyInput" type="password" :placeholder="settingsData?.map?.baidu?.browser_key_configured ? '已配置，输入新 Key 可替换' : '用于浏览器端地图'" autocomplete="off" /></label><label>服务端 Key<input v-model="baiduServerKeyInput" type="password" placeholder="留空保持当前值" autocomplete="off" /></label><a href="https://lbsyun.baidu.com/apiconsole/key" target="_blank" rel="noopener noreferrer">申请/管理百度 Key ↗</a></article></div><p class="settings-help">保存地图 Key 到数据库后，浏览器端 Key 会立即生效；服务端 Key 和安全密钥只返回配置状态，不会回显原文。</p><div class="settings-actions"><button class="primary-action" type="button" :disabled="settingsSaving" @click="saveMapKeys">{{ settingsSaving ? '保存中…' : '保存地图 Key 到数据库' }}</button></div><p v-if="settingsMessage" class="settings-feedback">{{ settingsMessage }}</p>
+                <div class="settings-provider-grid">
+                  <article class="settings-card provider-card">
+                    <div class="settings-card-heading">
+                      <div>
+                        <strong>高德地图</strong>
+                        <small>JS API 2.0 / Web Service</small>
+                      </div>
+                      <span class="provider-status">{{ settingsData?.map?.amap?.js_key_configured ? 'JS 已配置' : '待配置' }}</span>
+                    </div>
+                    <p class="settings-status-line">
+                      JS Key：<strong>{{ settingsData?.map?.amap?.js_key_configured ? '已配置' : '未配置' }}</strong><br />
+                      服务端 Key：<strong>{{ settingsData?.map?.amap?.server_key_configured ? '已配置' : '未配置' }}</strong><br />
+                      安全密钥：<strong>{{ settingsData?.map?.amap?.security_js_code_configured ? '已配置' : '未配置' }}</strong>
+                    </p>
+                    <label>
+                      JS Key
+                      <input v-model="amapJSKeyInput" type="password" placeholder="用于浏览器端地图" autocomplete="off" />
+                    </label>
+                    <label>
+                      服务端 Key
+                      <input v-model="amapServerKeyInput" type="password" placeholder="留空保持当前值" autocomplete="off" />
+                    </label>
+                    <label>
+                      JS 安全密钥
+                      <input v-model="amapSecurityJSCodeInput" type="password" placeholder="用于安全代理" autocomplete="off" />
+                    </label>
+                    <a href="https://console.amap.com/dev/key/app" target="_blank" rel="noopener noreferrer">申请/管理高德 Key ↗</a>
+                  </article>
+
+                  <article class="settings-card provider-card">
+                    <div class="settings-card-heading">
+                      <div>
+                        <strong>百度地图</strong>
+                        <small>JSAPI 4.0 / Web Service</small>
+                      </div>
+                      <span class="provider-status">{{ baiduKey ? '浏览器已配置' : '待配置' }}</span>
+                    </div>
+                    <p class="settings-status-line">
+                      浏览器端 Key：<strong>{{ baiduKey ? '已配置' : '未配置' }}</strong><br />
+                      服务端 Key：<strong>{{ settingsData?.map?.baidu?.server_key_configured ? '已配置' : '未配置' }}</strong>
+                    </p>
+                    <label>
+                      浏览器端 Key
+                      <input
+                        v-model="baiduBrowserKeyInput"
+                        type="password"
+                        :placeholder="settingsData?.map?.baidu?.browser_key_configured ? '已配置，输入新 Key 可替换' : '用于浏览器端地图'"
+                        autocomplete="off"
+                      />
+                    </label>
+                    <label>
+                      服务端 Key
+                      <input v-model="baiduServerKeyInput" type="password" placeholder="留空保持当前值" autocomplete="off" />
+                    </label>
+                    <a href="https://lbsyun.baidu.com/apiconsole/key" target="_blank" rel="noopener noreferrer">申请/管理百度 Key ↗</a>
+                  </article>
+                </div>
+
+                <div class="settings-card settings-footer-card">
+                  <p class="settings-help">保存地图 Key 到数据库后，浏览器端 Key 会立即生效；服务端 Key 和安全密钥只返回配置状态，不会回显原文。</p>
+                  <div class="settings-actions">
+                    <button class="primary-action" type="button" :disabled="settingsSaving" @click="saveMapKeys">{{ settingsSaving ? '保存中…' : '保存地图 Key 到数据库' }}</button>
+                  </div>
+                </div><p v-if="settingsMessage" class="settings-feedback">{{ settingsMessage }}</p>
               </section>
 
 
