@@ -540,21 +540,31 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .map-warning button { min-height: 30px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--p); background: var(--surface); font-size: 10px; font-weight: 800; }
 .map-notices { position: absolute; z-index: 1000 !important; top: 18px; right: 18px; width: min(470px, calc(100vw - 36px)); pointer-events: none; }
 .map-notices > * { pointer-events: auto; }
-.global-error, .share-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 13px; box-shadow: 0 12px 30px color-mix(in srgb, var(--ink) 20%, transparent); backdrop-filter: blur(18px); font-size: 11px; }
-.global-error { color: var(--md-error); background: color-mix(in srgb, var(--md-error) 10%, var(--surface)); border-color: color-mix(in srgb, var(--md-error) 40%, var(--line)); }
+.global-error { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; padding: 11px 13px; border: 1px solid color-mix(in srgb, var(--md-error) 40%, var(--line)); border-radius: 13px; box-shadow: 0 12px 30px color-mix(in srgb, var(--ink) 20%, transparent); backdrop-filter: blur(18px); font-size: 11px; color: var(--md-error); background: color-mix(in srgb, var(--md-error) 10%, var(--surface)); }
 .global-error span { min-width: 0; flex: 1; font-weight: 600; line-height: 1.4; }
-.notice-close-btn { display: grid; place-items: center; width: 28px; height: 28px; min-width: 28px; padding: 0; border: 0; border-radius: 50%; color: inherit; background: color-mix(in srgb, var(--ink) 10%, transparent); font-size: 18px; line-height: 1; cursor: pointer; transition: background 0.15s ease, transform 0.15s ease; }
-.notice-close-btn:hover { background: color-mix(in srgb, var(--ink) 20%, transparent); transform: scale(1.1); }
+.notice-close-btn { display: grid; place-items: center; width: 26px; height: 26px; min-width: 26px; padding: 0; border: 0; border-radius: 50%; color: inherit; background: color-mix(in srgb, var(--ink) 10%, transparent); font-size: 17px; line-height: 1; cursor: pointer; transition: background 0.15s ease, transform 0.15s ease; }
+.notice-close-btn:hover { background: color-mix(in srgb, var(--ink) 20%, transparent); transform: scale(1.08); }
 .global-notice { display: flex; align-items: center; justify-content: space-between; gap: 9px; margin-bottom: 8px; padding: 11px 13px; border: 1px solid color-mix(in srgb, var(--p) 35%, var(--line)); border-radius: 13px; color: var(--p); background: color-mix(in srgb, var(--p) 9%, var(--surface)); box-shadow: 0 12px 30px color-mix(in srgb, var(--ink) 18%, transparent); backdrop-filter: blur(18px); font-size: 11px; }
 .global-notice ion-icon { flex: 0 0 auto; font-size: 17px; }
 .global-notice span { min-width: 0; flex: 1; font-weight: 600; line-height: 1.4; }
-.share-banner { color: var(--p); background: color-mix(in srgb, var(--p) 10%, var(--surface)); }
-.share-banner > span { min-width: 0; display: grid; gap: 3px; }
-.share-banner a { overflow-wrap: anywhere; color: var(--p); }
-.share-banner small { color: var(--muted); font-size: 10px; }
-.share-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 5px; }
-.share-actions button { min-height: 30px; padding: 5px 7px; border: 1px solid color-mix(in srgb, var(--p) 48%, var(--line)); border-radius: 8px; color: var(--p); font-size: 10px; }
-.share-copy-feedback { color: var(--p) !important; font-weight: 800; }
+
+.share-banner { display: flex !important; flex-direction: column !important; align-items: stretch !important; gap: 9px; margin-bottom: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; color: var(--ink); background: color-mix(in srgb, var(--panel) 94%, transparent); box-shadow: 0 12px 32px color-mix(in srgb, var(--ink) 22%, transparent); backdrop-filter: blur(20px); font-size: 11px; }
+.share-banner-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.share-banner-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; min-width: 0; }
+.share-banner-meta strong { font-size: 13px; font-weight: 850; color: var(--p); white-space: nowrap; }
+.share-banner-meta .share-expiry-pill, .share-banner-meta .permanent-badge { display: inline-flex; align-items: center; padding: 2px 7px; border-radius: 6px; font-size: 10px; font-weight: 600; color: var(--muted); background: color-mix(in srgb, var(--ink) 6%, transparent); white-space: nowrap; }
+.share-banner-link-row { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.share-banner-link { display: flex; align-items: center; justify-content: space-between; gap: 6px; width: 100%; padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--p) 25%, var(--line)); border-radius: 8px; background: color-mix(in srgb, var(--surface) 90%, transparent); color: var(--p); text-decoration: none; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; cursor: pointer; transition: all 0.15s ease; }
+.share-banner-link:hover { border-color: var(--p); background: var(--surface); }
+.share-banner-link-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.share-banner-open-icon { flex: 0 0 auto; font-size: 12px; opacity: 0.7; }
+.share-banner .share-copy-feedback { font-size: 10px; font-weight: 700; color: var(--md-success, #2f7d68); margin-top: 1px; }
+.share-banner .share-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.share-banner .share-actions button { min-height: 28px; padding: 4px 9px; border: 1px solid color-mix(in srgb, var(--p) 35%, var(--line)); border-radius: 7px; background: var(--surface); color: var(--ink); font-size: 10.5px; font-weight: 700; cursor: pointer; white-space: nowrap; transition: all 0.15s ease; }
+.share-banner .share-actions button:hover { border-color: var(--p); color: var(--p); }
+.share-banner .share-actions button.share-btn-primary { background: var(--p); border-color: var(--p); color: var(--md-on-primary, #ffffff); box-shadow: 0 2px 6px color-mix(in srgb, var(--p) 25%, transparent); }
+.share-banner .share-actions button.share-btn-danger { color: var(--md-error, #b64545); border-color: color-mix(in srgb, var(--md-error, #b64545) 35%, var(--line)); }
+.share-banner .share-actions button.share-btn-danger:hover { background: color-mix(in srgb, var(--md-error) 10%, var(--surface)); }
 
 .modal-backdrop { position: fixed; z-index: 70; inset: 0; display: grid; place-items: center; overflow: hidden; padding: 20px; background: var(--md-scrim); }
 .modal-panel { position: relative; width: min(560px, calc(100vw - 32px)); max-height: min(760px, calc(100dvh - 32px)); overflow: auto; overscroll-behavior: contain; padding: 28px; border: 1px solid var(--line); border-radius: 24px; color: var(--ink); background: var(--surface); box-shadow: 0 24px 80px color-mix(in srgb, #000 34%, transparent); scrollbar-color: var(--line) transparent; scrollbar-width: thin; }
@@ -1697,6 +1707,40 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 .new-trip-steps span + span::before { padding-right: 5px; color: var(--line); content: "→"; }
 .new-trip-steps span.active { color: var(--p); }
 .new-trip-steps span.active b { color: var(--md-on-primary); background: var(--p); }
+
+@media (max-width: 640px) {
+  .map-notices, .redesign-notices {
+    top: 76px !important;
+    right: 12px !important;
+    left: 12px !important;
+    width: auto !important;
+    max-width: none !important;
+  }
+  .share-banner {
+    padding: 11px 12px !important;
+    gap: 7px !important;
+  }
+  .share-banner .share-actions {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+    width: 100% !important;
+  }
+  .share-banner .share-actions button {
+    width: 100% !important;
+    min-height: 32px !important;
+    font-size: 11px !important;
+    text-align: center !important;
+    justify-content: center !important;
+  }
+  .share-banner .share-actions button.share-btn-primary {
+    grid-column: 1 / -1 !important;
+    min-height: 36px !important;
+    font-size: 12px !important;
+    font-weight: 800 !important;
+  }
+}
+
 .new-trip-form { display: grid; gap: 14px; padding: 24px 30px 30px; }
 .new-trip-form label { display: grid; gap: 6px; color: var(--muted); font-size: 11px; font-weight: 800; }
 .new-trip-form input, .new-trip-form textarea { width: 100%; min-height: 43px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 11px; outline: none; color: var(--ink); background: var(--md-surface-container-low); font-size: 12px; }

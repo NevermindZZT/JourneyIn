@@ -7618,7 +7618,30 @@ onUnmounted(() => {
               <div v-if="historyView" class="history-readonly-banner"><span><strong>历史版本 · 只读</strong><small>{{ historyView.label || '保存于 ' + formatDateTime(historyView.created_at) }} · 工作版本 {{ historyView.source_revision }}</small></span><button type="button" @click="exitTripHistory">返回当前版本</button></div>
               <div v-if="error" class="global-error"><IonIcon :icon="cloudOfflineOutline" /><span>{{ error }}</span><button type="button" class="notice-close-btn" aria-label="关闭错误提示" @click="closeError">×</button></div>
               <div v-if="tripDetailsNotice" class="global-notice"><IonIcon :icon="createOutline" /><span>{{ tripDetailsNotice }}</span><button type="button" class="notice-close-btn" aria-label="关闭提示" @click="closeNotice">×</button></div>
-              <div v-if="shareNoticeVisible && shareURL && isAdmin" class="share-banner"><span><strong>{{ shareNoticeTitle }}</strong><a :href="shareURL" target="_blank" rel="noopener noreferrer">{{ shareURL }}</a><small v-if="shareExpiresAt">有效期至 {{ formatDateTime(shareExpiresAt) }}</small><small v-else class="permanent-badge">永久有效</small><small v-if="shareCopyMessage" class="share-copy-feedback">{{ shareCopyMessage }}</small></span><div class="share-actions"><button type="button" @click="copyShareURL">复制链接</button><button type="button" @click="openShareModal">分享设置</button><button type="button" @click="openTripPoster">生成海报</button><button type="button" @click="openTripAnimation">路线动画</button><button v-if="shareID" type="button" @click="revokeShare">撤销</button><button type="button" class="notice-close-btn" aria-label="关闭分享提示" @click="dismissShareNotice">×</button></div></div>
+              <div v-if="shareNoticeVisible && shareURL && isAdmin" class="share-banner">
+                <div class="share-banner-top">
+                  <div class="share-banner-meta">
+                    <strong>{{ shareNoticeTitle }}</strong>
+                    <span v-if="shareExpiresAt" class="share-expiry-pill">有效期至 {{ formatDateTime(shareExpiresAt) }}</span>
+                    <span v-else class="permanent-badge">永久有效</span>
+                  </div>
+                  <button type="button" class="notice-close-btn" aria-label="关闭分享提示" @click="dismissShareNotice">×</button>
+                </div>
+                <div class="share-banner-link-row">
+                  <a :href="shareURL" target="_blank" rel="noopener noreferrer" class="share-banner-link" :title="shareURL">
+                    <span class="share-banner-link-text">{{ shareURL }}</span>
+                    <span class="share-banner-open-icon">↗</span>
+                  </a>
+                  <small v-if="shareCopyMessage" class="share-copy-feedback">{{ shareCopyMessage }}</small>
+                </div>
+                <div class="share-actions">
+                  <button type="button" class="share-btn-primary" @click="copyShareURL">复制链接</button>
+                  <button type="button" @click="openShareModal">分享设置</button>
+                  <button type="button" @click="openTripPoster">生成海报</button>
+                  <button type="button" @click="openTripAnimation">路线动画</button>
+                  <button v-if="shareID" type="button" class="share-btn-danger" @click="revokeShare">撤销</button>
+                </div>
+              </div>
             </section>
           </section>
         </main>
