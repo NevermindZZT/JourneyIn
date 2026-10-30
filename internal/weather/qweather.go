@@ -140,7 +140,7 @@ func (p *QWeatherProvider) Weather(ctx context.Context, request WeatherRequest) 
 		return WeatherSnapshot{Provider: p.ID(), LocalDate: request.LocalDate, Available: false}, err
 	}
 	fReq.Header.Set("X-QW-Api-Key", key)
-	fReq.Header.Set("User-Agent", "JourneyIn-Weather/0.7.9")
+	fReq.Header.Set("User-Agent", "JourneyIn-Weather/0.7.10")
 
 	fResp, err := p.client.Do(fReq)
 	if err != nil {
