@@ -1183,10 +1183,20 @@ function updateDynamicSheetPeekHeight() {
 function currentSheetPeekHeight() {
   return measureActiveSheetPeekHeight()
 }
+function activeSheetTopOffset(): number {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return 60
+  const topbar = document.querySelector<HTMLElement>('.workspace-topbar, .atlas-topbar')
+  if (topbar) {
+    const bottom = topbar.getBoundingClientRect().bottom
+    if (bottom > 30) return Math.round(bottom + 8)
+  }
+  return 60
+}
 function sheetHeightBounds() {
   const viewportHeight = sheetViewportHeight()
   const peekHeight = currentSheetPeekHeight()
-  const max = Math.max(peekHeight, viewportHeight - SHEET_TOP_OFFSET - SHEET_BOTTOM_OFFSET)
+  const topOffset = activeSheetTopOffset()
+  const max = Math.max(peekHeight, viewportHeight - topOffset - SHEET_BOTTOM_OFFSET)
   const half = Math.min(max, Math.max(peekHeight, Math.round(viewportHeight * 0.53)))
   return { min: peekHeight, half, max }
 }
