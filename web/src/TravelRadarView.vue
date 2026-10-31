@@ -267,10 +267,33 @@ defineExpose({ loadMonitors, refreshMonitor, selectMonitorFromMap })
           <div class="radar-detail-section-heading"><h3>未来出行窗口</h3><span>45 天内</span></div>
           <div v-if="!selectedEvaluations.length" class="radar-state-message">{{ loadError || '暂无候选窗口；可以重新评估或继续等待条件变化。' }}</div>
           <div v-else class="radar-window-list">
-            <div v-for="evaluation in selectedEvaluations" :key="evaluation.id" class="radar-window-row" :class="[levelClass(evaluation.level), { selected: selectedEvaluation?.id === evaluation.id }]">
-              <button type="button" class="radar-window-select" @click="selectEvaluation(evaluation)"><strong>{{ evaluation.window_start }} ~ {{ evaluation.window_end }}</strong><small>{{ evaluation.details.summary || levelLabel(evaluation.level) }}</small></button>
-              <span class="radar-window-score">{{ Math.round(evaluation.score) }} 分</span>
-              <button type="button" class="radar-window-convert" :disabled="convertingID === selectedMonitor.id" @click="convertToTrip(selectedMonitor, evaluation)">生成行程</button>
+            <div
+              v-for="evaluation in selectedEvaluations"
+              :key="evaluation.id"
+              class="radar-window-card"
+              :class="[levelClass(evaluation.level), { selected: selectedEvaluation?.id === evaluation.id }]"
+              @click="selectEvaluation(evaluation)"
+            >
+              <div class="radar-window-main">
+                <div class="radar-window-date-row">
+                  <strong class="radar-window-date">{{ evaluation.window_start }} ~ {{ evaluation.window_end }}</strong>
+                  <span class="radar-window-level-tag">{{ levelLabel(evaluation.level) }}</span>
+                </div>
+                <div class="radar-window-summary" :title="evaluation.details.summary">
+                  {{ evaluation.details.summary || '待临近观测' }}
+                </div>
+              </div>
+              <div class="radar-window-side">
+                <span class="radar-window-score">{{ Math.round(evaluation.score) }}<small>分</small></span>
+                <button
+                  type="button"
+                  class="radar-window-convert-btn"
+                  :disabled="convertingID === selectedMonitor.id"
+                  @click.stop="convertToTrip(selectedMonitor, evaluation)"
+                >
+                  {{ convertingID === selectedMonitor.id ? '生成中…' : '生成' }}
+                </button>
+              </div>
             </div>
           </div>
         </section>
@@ -357,15 +380,26 @@ defineExpose({ loadMonitors, refreshMonitor, selectMonitorFromMap })
 .radar-factor-row > span { color:var(--muted); font-size:9px; font-weight:800; }
 .radar-factor-row > strong { overflow-wrap:anywhere; color:var(--ink); font-size:10px; font-weight:800; }
 .radar-factor-row > small { overflow-wrap:anywhere; color:var(--muted); font-size:9px; }
-.radar-window-list { display:grid; gap:6px; margin-top:8px; }
-.radar-window-row { display:grid; min-width:0; grid-template-columns:minmax(0,1fr) auto auto; align-items:center; gap:6px; padding:8px; border:1px solid var(--line); border-radius:10px; color:var(--ink); background:var(--surface); text-align:left; }
-.radar-window-row.selected { border-color:var(--p); background:color-mix(in srgb,var(--p) 7%,var(--surface)); }
-.radar-window-select { display:grid; min-width:0; gap:3px; padding:0; border:0; background:transparent; text-align:left; cursor:pointer; }
-.radar-window-select strong { overflow:hidden; color:var(--ink); font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
-.radar-window-select small { overflow:hidden; color:var(--muted); font-size:9px; text-overflow:ellipsis; white-space:nowrap; }
-.radar-window-score { color:#ff6b35; font-size:10px; font-weight:900; white-space:nowrap; }
-.radar-window-convert { padding:5px 6px; border:0; border-radius:7px; color:var(--p); background:var(--panel); font-size:9px; font-weight:800; white-space:nowrap; cursor:pointer; }
-.radar-window-convert:disabled { opacity:.5; cursor:not-allowed; }
+.radar-window-list { display:flex; flex-direction:column; gap:8px; margin-top:10px; }
+.radar-window-card { position:relative; display:flex; align-items:center; justify-content:space-between; gap:12px; min-width:0; padding:11px 13px; border:1px solid var(--line); border-radius:12px; color:var(--ink); background:var(--surface); text-align:left; cursor:pointer; user-select:none; transition:all .16s cubic-bezier(0.2,0,0,1); }
+.radar-window-card:hover { border-color:color-mix(in srgb,var(--p) 45%,var(--line)); background:color-mix(in srgb,var(--p) 3%,var(--surface)); }
+.radar-window-card.selected { border-color:var(--p); background:color-mix(in srgb,var(--p) 8%,var(--surface)); box-shadow:0 0 0 1.5px var(--p); }
+.radar-window-main { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:5px; }
+.radar-window-date-row { display:flex; align-items:center; gap:7px; min-width:0; }
+.radar-window-date { font-size:13px; font-weight:850; color:var(--ink); letter-spacing:-.01em; white-space:nowrap; }
+.radar-window-level-tag { display:inline-flex; align-items:center; padding:1px 6px; border-radius:999px; font-size:9.5px; font-weight:800; white-space:nowrap; }
+.radar-window-card.strongly_recommended .radar-window-level-tag { color:#c2410c; background:#ffedd5; }
+.radar-window-card.acceptable .radar-window-level-tag { color:#0369a1; background:#e0f2fe; }
+.radar-window-card.waiting .radar-window-level-tag { color:var(--muted); background:var(--panel); }
+.radar-window-summary { font-size:11px; color:var(--muted); line-height:1.4; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.radar-window-side { flex:0 0 auto; display:flex; flex-direction:column; align-items:flex-end; justify-content:center; gap:5px; min-width:60px; }
+.radar-window-score { font-size:16px; font-weight:900; color:#ff6b35; line-height:1; white-space:nowrap; }
+.radar-window-card.acceptable .radar-window-score { color:#0284c7; }
+.radar-window-card.waiting .radar-window-score { color:#64748b; }
+.radar-window-score small { font-size:10px; font-weight:750; margin-left:2px; }
+.radar-window-convert-btn { display:inline-flex; align-items:center; justify-content:center; min-height:24px; padding:0 9px; border:1px solid color-mix(in srgb,var(--p) 35%,var(--line)); border-radius:999px; background:color-mix(in srgb,var(--surface) 90%,transparent); color:var(--p); font-size:10.5px; font-weight:800; white-space:nowrap; cursor:pointer; transition:all .15s ease; }
+.radar-window-convert-btn:hover:not(:disabled) { background:var(--p); color:var(--md-on-primary); border-color:var(--p); }
+.radar-window-convert-btn:disabled { opacity:.5; cursor:not-allowed; }
 .radar-inline-error { color:#d34e3b; font-size:10px; }
 .radar-detail-actions { display:flex; flex:0 0 auto; gap:6px; padding:10px 12px calc(10px + env(safe-area-inset-bottom)); border-top:1px solid var(--line); background:var(--surface); }
 .radar-create-trip { display:flex; min-width:0; min-height:40px; flex:1 1 auto; align-items:center; justify-content:center; padding:0 9px; border:0; border-radius:10px; color:var(--md-on-primary); background:var(--p); font-size:10px; font-weight:850; cursor:pointer; }
@@ -389,7 +423,10 @@ defineExpose({ loadMonitors, refreshMonitor, selectMonitorFromMap })
   .radar-detail-actions { gap:4px; padding-inline:8px; }
   .radar-create-trip { font-size:9px; }
   .radar-icon-action { width:36px; min-width:36px; height:36px; flex-basis:36px; }
-  .radar-window-row { grid-template-columns:minmax(0,1fr) auto; }
-  .radar-window-convert { grid-column:1/-1; text-align:center; }
+  .radar-window-card { padding:9px 11px; gap:8px; }
+  .radar-window-date { font-size:12px; }
+  .radar-window-summary { font-size:10.5px; }
+  .radar-window-score { font-size:15px; }
+  .radar-window-convert-btn { min-height:22px; padding:0 8px; font-size:10px; }
 }
 </style>
