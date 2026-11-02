@@ -71,8 +71,39 @@ const filteredMonitors = computed(() => {
   })
 })
 
+const radarSummary = ref<{ total_monitors: number; recommended_count: number; top_opportunity?: any; top_place_name?: string; last_evaluated_at?: string; is_evaluating?: boolean } | null>(null)
+
+async function loadSummary() {
+  try {
+    const res = await props.apiFetch('/api/v1/monitors/radar-summary')
+    if (res.ok) {
+      radarSummary.value = await res.json()
+    }
+  } catch { /* best effort */ }
+}
+
+function formatSyncTime(isoTime?: string) {
+  if (!isoTime) return ''
+  try {
+    const d = new Date(isoTime)
+    const now = new Date()
+    const diffMs = now.getTime() - d.getTime()
+    const diffMin = Math.floor(diffMs / 60000)
+    if (diffMin < 2) return '刚刚'
+    if (diffMin < 60) return diffMin + '分钟前'
+    const hours = Math.floor(diffMin / 60)
+    if (hours < 24) return hours + '小时前'
+    return (d.getMonth() + 1) + '/' + d.getDate()
+  } catch {
+    return ''
+  }
+}
+
 watch(filteredMonitors, items => emit('visibleMonitorsChanged', items.map(item => item.id)), { immediate: true })
-onMounted(() => { void loadMonitors() })
+onMounted(() => {
+  void loadMonitors()
+  void loadSummary()
+})
 async function loadMonitors() {
   loading.value = true; loadError.value = ''
   try {
@@ -81,6 +112,7 @@ async function loadMonitors() {
     const payload = await res.json() as MonitorItem[]
     monitors.value = Array.isArray(payload) ? payload : []
     emit('monitorsUpdated', monitors.value)
+    void loadSummary()
     if (selectedMonitorID.value && !monitors.value.some(item => item.id === selectedMonitorID.value)) await returnToList()
   } catch (err) { loadError.value = err instanceof Error ? err.message : '读取监控列表失败' }
   finally { loading.value = false }
@@ -215,7 +247,16 @@ defineExpose({ loadMonitors, refreshMonitor, selectMonitorFromMap })
     </header>
 
     <template v-if="!selectedMonitor">
-      <div class="radar-list-summary"><span class="radar-list-count">{{ filteredMonitors.length }} 个景点</span><span class="radar-list-hint">按推荐度与窗口日期排序</span></div>
+      <div class="radar-list-summary">
+        <span class="radar-list-count">{{ filteredMonitors.length }} 个景点</span>
+        <span v-if="radarSummary?.is_evaluating" class="radar-sync-tag is-syncing" title="系统正在与外部最新天气预报和天文历算同步">
+          <i class="radar-sync-pulse"></i> 自动巡检中…
+        </span>
+        <span v-else-if="radarSummary?.last_evaluated_at" class="radar-sync-tag" title="系统每 2 小时自动与最新天气、天文及日历同步最新出行窗口">
+          <i class="radar-sync-dot"></i> {{ formatSyncTime(radarSummary.last_evaluated_at) }}巡检
+        </span>
+        <span v-else class="radar-list-hint">按推荐度排序</span>
+      </div>
       <div class="radar-filter-pills" role="group" aria-label="监控点筛选">
         <button type="button" :class="{ active: filterTab === 'all' }" @click="filterTab = 'all'">全部 {{ monitors.length }}</button>
         <button type="button" :class="{ active: filterTab === 'recommended' }" @click="filterTab = 'recommended'">强烈推荐 {{ recommendedCount }}</button>
@@ -324,6 +365,11 @@ defineExpose({ loadMonitors, refreshMonitor, selectMonitorFromMap })
 .radar-add-button { color:var(--md-on-primary); border-color:var(--p); background:var(--p); }
 .radar-add-button svg,.radar-detail-back svg { display:block; flex-shrink:0; }
 .radar-list-summary { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:13px 18px 8px; color:var(--muted); font-size:10px; }
+.radar-sync-tag { display:inline-flex; align-items:center; gap:5px; padding:2px 7px; border-radius:999px; font-size:9.5px; font-weight:750; color:var(--muted); background:color-mix(in srgb,var(--panel) 90%,transparent); border:1px solid color-mix(in srgb,var(--line) 60%,transparent); cursor:help; }
+.radar-sync-dot { width:6px; height:6px; border-radius:50%; background:var(--p); }
+.radar-sync-tag.is-syncing { color:var(--p); border-color:var(--p); }
+.radar-sync-pulse { width:6px; height:6px; border-radius:50%; background:#ff6b35; animation:radarSyncPulse 1.4s ease-in-out infinite; }
+@keyframes radarSyncPulse { 0%,100% { opacity:.3; transform:scale(.85); } 50% { opacity:1; transform:scale(1.2); } }
 .radar-list-count { color:var(--ink); font-size:11px; font-weight:800; }
 .radar-list-hint { text-align:right; }
 .radar-filter-pills { display:flex; gap:6px; padding:4px 18px 12px; overflow-x:auto; scrollbar-width:none; }

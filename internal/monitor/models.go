@@ -81,6 +81,8 @@ type RadarSummary struct {
 	RecommendedCount int         `json:"recommended_count"`
 	TopOpportunity   *Evaluation `json:"top_opportunity,omitempty"`
 	TopPlaceName     string      `json:"top_place_name,omitempty"`
+	LastEvaluatedAt  *time.Time  `json:"last_evaluated_at,omitempty"`
+	IsEvaluating     bool        `json:"is_evaluating,omitempty"`
 }
 
 type HolidayRecord struct {

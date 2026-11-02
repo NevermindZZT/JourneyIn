@@ -31,12 +31,19 @@ type TripCreator interface {
 	Create(ctx context.Context, document []byte, source string) (any, error)
 }
 
+const DefaultRadarRefreshInterval = 2 * time.Hour
+const StaleRadarThreshold = 4 * time.Hour
+
 type Service struct {
-	store      Store
-	weatherSvc *weather.Service
-	evaluator  *Evaluator
-	logger     *slog.Logger
-	mu         sync.RWMutex
+	store           Store
+	weatherSvc      *weather.Service
+	evaluator       *Evaluator
+	logger          *slog.Logger
+	mu              sync.RWMutex
+	evalMu          sync.Mutex
+	isEvaluating    bool
+	lastEvaluatedAt time.Time
+	stopScheduler   context.CancelFunc
 }
 
 func NewService(store Store, weatherSvc *weather.Service, logger *slog.Logger) *Service {
@@ -48,6 +55,89 @@ func NewService(store Store, weatherSvc *weather.Service, logger *slog.Logger) *
 		weatherSvc: weatherSvc,
 		evaluator:  NewEvaluator(weatherSvc),
 		logger:     logger,
+	}
+}
+
+// StartScheduler starts background periodic radar opportunity evaluations.
+func (s *Service) StartScheduler(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = DefaultRadarRefreshInterval
+	}
+	s.mu.Lock()
+	if s.stopScheduler != nil {
+		s.stopScheduler()
+	}
+	schedCtx, cancel := context.WithCancel(ctx)
+	s.stopScheduler = cancel
+	s.mu.Unlock()
+
+	go func() {
+		// Initial startup evaluation after brief delay
+		time.Sleep(2 * time.Second)
+		initCtx, initCancel := context.WithTimeout(schedCtx, 5*time.Minute)
+		if err := s.EvaluateAll(initCtx); err != nil && !errors.Is(err, context.Canceled) {
+			s.logger.Error("initial radar evaluation failed", "error", err)
+		}
+		initCancel()
+
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-schedCtx.Done():
+				return
+			case <-ticker.C:
+				runCtx, runCancel := context.WithTimeout(schedCtx, 10*time.Minute)
+				if err := s.EvaluateAll(runCtx); err != nil && !errors.Is(err, context.Canceled) {
+					s.logger.Error("periodic radar evaluation failed", "error", err)
+				}
+				runCancel()
+			}
+		}
+	}()
+}
+
+// StopScheduler stops the background scheduler if running.
+func (s *Service) StopScheduler() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopScheduler != nil {
+		s.stopScheduler()
+		s.stopScheduler = nil
+	}
+}
+
+// IsEvaluating reports whether a batch radar evaluation is currently in progress.
+func (s *Service) IsEvaluating() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.isEvaluating
+}
+
+// LastEvaluatedAt returns the completion time of the latest batch evaluation.
+func (s *Service) LastEvaluatedAt() time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lastEvaluatedAt
+}
+
+// TriggerBackgroundEvaluationIfStale silently refreshes radar evaluations if data is stale.
+func (s *Service) TriggerBackgroundEvaluationIfStale(ctx context.Context) {
+	s.mu.RLock()
+	isEvaluating := s.isEvaluating
+	lastEval := s.lastEvaluatedAt
+	s.mu.RUnlock()
+
+	if isEvaluating {
+		return
+	}
+	if lastEval.IsZero() || time.Since(lastEval) > StaleRadarThreshold {
+		go func() {
+			bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			_ = s.EvaluateAll(bgCtx)
+		}()
 	}
 }
 
@@ -82,6 +172,7 @@ func (s *Service) GetMonitor(ctx context.Context, id string) (Monitor, error) {
 }
 
 func (s *Service) ListMonitors(ctx context.Context, enabledOnly bool) ([]Monitor, error) {
+	s.TriggerBackgroundEvaluationIfStale(ctx)
 	return s.store.ListMonitors(ctx, enabledOnly)
 }
 
@@ -106,6 +197,8 @@ func (s *Service) GetEvaluations(ctx context.Context, monitorID string, limit in
 }
 
 func (s *Service) GetRadarSummary(ctx context.Context) (RadarSummary, error) {
+	s.TriggerBackgroundEvaluationIfStale(ctx)
+
 	monitors, err := s.store.ListMonitors(ctx, false)
 	if err != nil {
 		return RadarSummary{}, err
@@ -126,11 +219,20 @@ func (s *Service) GetRadarSummary(ctx context.Context) (RadarSummary, error) {
 	summary := RadarSummary{
 		TotalMonitors:    len(monitors),
 		RecommendedCount: recommendedCount,
+		IsEvaluating:     s.IsEvaluating(),
+	}
+
+	lastEval := s.LastEvaluatedAt()
+	if !lastEval.IsZero() {
+		summary.LastEvaluatedAt = &lastEval
 	}
 
 	if len(topEvals) > 0 {
 		top := topEvals[0]
 		summary.TopOpportunity = &top
+		if summary.LastEvaluatedAt == nil && !top.EvaluatedAt.IsZero() {
+			summary.LastEvaluatedAt = &top.EvaluatedAt
+		}
 		for _, m := range monitors {
 			if m.ID == top.MonitorID {
 				summary.TopPlaceName = m.PlaceName
@@ -157,15 +259,38 @@ func (s *Service) EvaluateOne(ctx context.Context, monitorID string) error {
 }
 
 func (s *Service) EvaluateAll(ctx context.Context) error {
+	if !s.evalMu.TryLock() {
+		s.logger.Info("radar evaluation already running, skipping overlapping run")
+		return nil
+	}
+	defer s.evalMu.Unlock()
+
+	s.mu.Lock()
+	s.isEvaluating = true
+	s.mu.Unlock()
+
+	defer func() {
+		s.mu.Lock()
+		s.isEvaluating = false
+		s.lastEvaluatedAt = time.Now().UTC()
+		s.mu.Unlock()
+	}()
+
 	monitors, err := s.store.ListMonitors(ctx, true)
 	if err != nil {
 		return err
+	}
+	if len(monitors) == 0 {
+		return nil
 	}
 
 	holidays, _ := s.store.GetHolidayCalendar(ctx, time.Now().Year())
 	now := time.Now()
 
 	for _, m := range monitors {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		evals, err := s.evaluator.EvaluateMonitor(ctx, m, holidays, now, 45)
 		if err != nil {
 			s.logger.Error("evaluate monitor failed", "id", m.ID, "error", err)

@@ -191,12 +191,7 @@ func main() {
 
 	monitorService := monitor.NewService(database, weatherService, logger)
 	api.SetMonitorService(monitorService)
-	go func() {
-		time.Sleep(2 * time.Second)
-		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-		_ = monitorService.EvaluateAll(bgCtx)
-	}()
+	monitorService.StartScheduler(ctx, monitor.DefaultRadarRefreshInterval)
 
 	mcpToken := strings.TrimSpace(settingValue(ctx, database, "mcp.token", os.Getenv("JOURNEYIN_MCP_TOKEN")))
 	if !isLoopback(listen) && mcpToken == "" && !authenticator.Enabled() {

@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -307,4 +308,146 @@ func TestEvaluator_StargazingModeHighAODInterceptedAsWaiting(t *testing.T) {
 	if !strings.Contains(top.Details.Summary, "气溶胶偏重") {
 		t.Errorf("expected summary to indicate heavy aerosol, got %s", top.Details.Summary)
 	}
+}
+
+type inMemoryMonitorStore struct {
+	monitors    map[string]Monitor
+	evaluations map[string][]Evaluation
+	holidays    map[string]HolidayRecord
+}
+
+func newInMemoryMonitorStore() *inMemoryMonitorStore {
+	return &inMemoryMonitorStore{
+		monitors:    make(map[string]Monitor),
+		evaluations: make(map[string][]Evaluation),
+		holidays:    make(map[string]HolidayRecord),
+	}
+}
+
+func (s *inMemoryMonitorStore) CreateMonitor(ctx context.Context, m Monitor) error {
+	s.monitors[m.ID] = m
+	return nil
+}
+
+func (s *inMemoryMonitorStore) GetMonitor(ctx context.Context, id string) (Monitor, error) {
+	m, ok := s.monitors[id]
+	if !ok {
+		return Monitor{}, errors.New("not found")
+	}
+	if evs, ok := s.evaluations[id]; ok && len(evs) > 0 {
+		top := evs[0]
+		m.LatestEvaluation = &top
+	}
+	return m, nil
+}
+
+func (s *inMemoryMonitorStore) ListMonitors(ctx context.Context, enabledOnly bool) ([]Monitor, error) {
+	var list []Monitor
+	for _, m := range s.monitors {
+		if enabledOnly && !m.Enabled {
+			continue
+		}
+		if evs, ok := s.evaluations[m.ID]; ok && len(evs) > 0 {
+			top := evs[0]
+			m.LatestEvaluation = &top
+		}
+		list = append(list, m)
+	}
+	return list, nil
+}
+
+func (s *inMemoryMonitorStore) UpdateMonitor(ctx context.Context, m Monitor) error {
+	s.monitors[m.ID] = m
+	return nil
+}
+
+func (s *inMemoryMonitorStore) DeleteMonitor(ctx context.Context, id string) error {
+	delete(s.monitors, id)
+	delete(s.evaluations, id)
+	return nil
+}
+
+func (s *inMemoryMonitorStore) SaveMonitorEvaluations(ctx context.Context, monitorID string, evals []Evaluation) error {
+	s.evaluations[monitorID] = evals
+	return nil
+}
+
+func (s *inMemoryMonitorStore) GetMonitorEvaluations(ctx context.Context, monitorID string, limit int) ([]Evaluation, error) {
+	return s.evaluations[monitorID], nil
+}
+
+func (s *inMemoryMonitorStore) GetTopEvaluations(ctx context.Context, limit int) ([]Evaluation, error) {
+	var tops []Evaluation
+	for _, evs := range s.evaluations {
+		if len(evs) > 0 {
+			tops = append(tops, evs[0])
+		}
+	}
+	return tops, nil
+}
+
+func (s *inMemoryMonitorStore) GetHolidayCalendar(ctx context.Context, year int) (map[string]HolidayRecord, error) {
+	return s.holidays, nil
+}
+
+func TestMonitorService_SchedulerAndStaleTrigger(t *testing.T) {
+	store := newInMemoryMonitorStore()
+	m := Monitor{
+		ID:        "mon_test",
+		Title:     "测试景点",
+		PlaceName: "测试地",
+		Lat:       30.25,
+		Lng:       120.15,
+		CRS:       "gcj02",
+		Enabled:   true,
+		Criteria: MonitorCriteria{
+			Months:          []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+			MinDurationDays: 2,
+			MaxDurationDays: 4,
+		},
+	}
+	_ = store.CreateMonitor(context.Background(), m)
+
+	service := NewService(store, nil, nil)
+
+	// 初始状态下未执行巡检
+	if service.IsEvaluating() {
+		t.Fatal("expected isEvaluating to be false initially")
+	}
+	if !service.LastEvaluatedAt().IsZero() {
+		t.Fatal("expected LastEvaluatedAt to be zero initially")
+	}
+
+	// 执行一次全量评估
+	if err := service.EvaluateAll(context.Background()); err != nil {
+		t.Fatalf("EvaluateAll failed: %v", err)
+	}
+
+	// 评估完成后记录时间非零
+	lastEval := service.LastEvaluatedAt()
+	if lastEval.IsZero() {
+		t.Fatal("expected LastEvaluatedAt to be updated after EvaluateAll")
+	}
+	if service.IsEvaluating() {
+		t.Fatal("expected isEvaluating to be false after completion")
+	}
+
+	// 获取 RadarSummary，应包含 LastEvaluatedAt
+	summary, err := service.GetRadarSummary(context.Background())
+	if err != nil {
+		t.Fatalf("GetRadarSummary failed: %v", err)
+	}
+	if summary.LastEvaluatedAt == nil {
+		t.Fatal("expected summary.LastEvaluatedAt to be populated")
+	}
+	if summary.TotalMonitors != 1 {
+		t.Errorf("expected 1 monitor in summary, got %d", summary.TotalMonitors)
+	}
+
+	// 启动并在后台测试调度器
+	ctx, cancel := context.WithCancel(context.Background())
+	service.StartScheduler(ctx, 100*time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
+	service.StopScheduler()
+	cancel()
 }
