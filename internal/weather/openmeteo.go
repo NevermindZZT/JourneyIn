@@ -150,7 +150,7 @@ func (p *OpenMeteoProvider) Weather(ctx context.Context, request WeatherRequest)
 	if err != nil {
 		return WeatherSnapshot{Provider: p.ID(), LocalDate: request.LocalDate, Available: false}, err
 	}
-	req.Header.Set("User-Agent", "JourneyIn-Weather/0.7.10")
+	req.Header.Set("User-Agent", "JourneyIn-Weather/0.7.11")
 
 	resp, err := p.client.Do(req)
 	if err != nil {
@@ -179,7 +179,7 @@ func (p *OpenMeteoProvider) Weather(ctx context.Context, request WeatherRequest)
 	}
 	airReq, airErr := http.NewRequestWithContext(ctx, http.MethodGet, airBaseURL+"?"+airParams.Encode(), nil)
 	if airErr == nil {
-		airReq.Header.Set("User-Agent", "JourneyIn-Weather/0.7.10")
+		airReq.Header.Set("User-Agent", "JourneyIn-Weather/0.7.11")
 		if airResp, err := p.client.Do(airReq); err == nil {
 			if airResp.StatusCode == http.StatusOK {
 				var decoded openMeteoAirResponse
