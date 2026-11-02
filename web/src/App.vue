@@ -47,7 +47,7 @@ type TripHistoryEntry = { id: string; history_id?: string; trip_id: string; sour
 type CollaborationShareSummary = { id: string; trip_id: string; permission: 'editor'; status: 'active' | 'expired' | 'revoked'; created_at: string; expires_at: string; revoked_at?: string }
 type TripSortMode = 'updated' | 'date'
 type Capabilities = { version?: string; default_map_provider?: 'baidu' | 'amap'; map_providers?: { baidu?: { browser_key_configured?: boolean; browser_key?: string }; amap?: { browser_key_configured?: boolean; browser_key?: string; security_proxy_path?: string; security_js_code_configured?: boolean } }; features?: { planning_point_edit?: boolean; coordinate_repair?: boolean }; mcp?: { http_endpoint?: string; transports?: string[]; token_configured?: boolean } }
-type KeySettings = { map?: { default_provider?: 'baidu' | 'amap'; baidu?: { browser_key_configured?: boolean; server_key_configured?: boolean }; amap?: { js_key_configured?: boolean; server_key_configured?: boolean; security_js_code_configured?: boolean } }; poi?: { provider_priority?: 'amap' | 'baidu'; local_directory_count?: number }; photos?: { root_dir?: string; configured?: boolean; match_missing_gps?: boolean; match_window_minutes?: number }; weather?: { default_provider?: 'auto' | 'openmeteo' | 'qweather' | 'caiyun' | 'amap' | 'baidu'; openmeteo?: { available?: boolean }; qweather?: { key_configured?: boolean; host?: string }; caiyun?: { token_configured?: boolean } }; mcp?: { http_endpoint?: string; token_configured?: boolean; token?: string } }
+type KeySettings = { map?: { default_provider?: 'baidu' | 'amap'; baidu?: { browser_key_configured?: boolean; server_key_configured?: boolean }; amap?: { js_key_configured?: boolean; server_key_configured?: boolean; security_js_code_configured?: boolean } }; poi?: { provider_priority?: 'amap' | 'baidu'; local_directory_count?: number }; photos?: { root_dir?: string; configured?: boolean; match_missing_gps?: boolean; match_window_minutes?: number; match_across_devices?: boolean }; weather?: { default_provider?: 'auto' | 'openmeteo' | 'qweather' | 'caiyun' | 'amap' | 'baidu'; openmeteo?: { available?: boolean }; qweather?: { key_configured?: boolean; host?: string }; caiyun?: { token_configured?: boolean } }; mcp?: { http_endpoint?: string; token_configured?: boolean; token?: string } }
 type PlaceCandidate = { id?: string; name: string; address?: string; location: Coord & { crs?: string }; provider?: string; citycode?: string; adcode?: string; typecode?: string }
 type TravelMode = 'driving' | 'walking' | 'cycling' | 'transit'
 
@@ -605,6 +605,7 @@ const poiProviderPriority = ref<'amap' | 'baidu'>('amap')
 const photosRootDirInput = ref('')
 const photoMatchMissingGPS = ref(false)
 const photoMatchWindowMinutes = ref('30')
+const photoMatchAcrossDevices = ref(false)
 const defaultWeatherProvider = ref<'auto' | 'openmeteo' | 'qweather' | 'caiyun' | 'amap' | 'baidu'>('auto')
 const qweatherKeyInput = ref('')
 const qweatherHostInput = ref('')
@@ -6764,6 +6765,7 @@ async function openSettings() {
     photosRootDirInput.value = settingsData.value.photos?.root_dir || photoStatus.value?.root_dir || ''
     photoMatchMissingGPS.value = settingsData.value.photos?.match_missing_gps === true
     photoMatchWindowMinutes.value = ['15', '30', '60', '120'].includes(String(settingsData.value.photos?.match_window_minutes || 30)) ? String(settingsData.value.photos?.match_window_minutes || 30) : '30'
+    photoMatchAcrossDevices.value = settingsData.value.photos?.match_across_devices === true
     if (settingsData.value.weather?.default_provider) {
       defaultWeatherProvider.value = settingsData.value.weather.default_provider
     } else {
@@ -6885,13 +6887,15 @@ async function savePhotosRootDir() {
       body: JSON.stringify({
         root_dir: photosRootDirInput.value.trim(),
         match_missing_gps: photoMatchMissingGPS.value,
-        match_window_minutes: Number(photoMatchWindowMinutes.value)
+        match_window_minutes: Number(photoMatchWindowMinutes.value),
+        match_across_devices: photoMatchAcrossDevices.value
       })
     })
-    const payload = await response.json() as { root_dir?: string; enabled?: boolean; match_missing_gps?: boolean; match_window_minutes?: number; scan_triggered?: boolean; error?: { message?: string } }
+    const payload = await response.json() as { root_dir?: string; enabled?: boolean; match_missing_gps?: boolean; match_window_minutes?: number; match_across_devices?: boolean; scan_triggered?: boolean; error?: { message?: string } }
     if (!response.ok) throw new Error(payload.error?.message || '保存照片设置失败')
     photoMatchMissingGPS.value = payload.match_missing_gps === true
     photoMatchWindowMinutes.value = String(payload.match_window_minutes || 30)
+    photoMatchAcrossDevices.value = payload.match_across_devices === true
     await loadPhotoStatus()
     if (photoStatus.value?.enabled) {
       await loadAtlasPhotos()
@@ -7964,10 +7968,14 @@ onUnmounted(() => {
                     若留空保存将清除配置；若宿主机配置了环境变量 <code>JOURNEYIN_PHOTOS_DIR</code>，将在未保存设置时自动生效。保存新目录后，系统将自动开始增量扫描并清理已失效点位。
                   </p>
                   <label class="photo-match-toggle">
-                    <span><strong>按拍摄时间估算缺少 GPS 的位置</strong><small>只对同目录、同机型且有可靠 EXIF 拍摄时间的照片尝试匹配；不会修改原图。</small></span>
+                    <span><strong>按拍摄时间估算缺少 GPS 的位置</strong><small>只对同目录且有可靠 EXIF 拍摄时间的照片尝试匹配；不会修改原图。</small></span>
                     <input v-model="photoMatchMissingGPS" type="checkbox" />
                   </label>
                   <label class="select-field photo-match-window">最大匹配时间差<UiSelect v-model="photoMatchWindowMinutes" aria-label="照片最大匹配时间差" :options="photoMatchWindowOptions" :disabled="!photoMatchMissingGPS" /></label>
+                  <label class="photo-match-toggle" style="margin-top: 10px;">
+                    <span><strong>允许跨设备匹配位置</strong><small>开启后，允许使用同目录下其他带 GPS 信息的设备（如手机）的照片，为未带 GPS 的设备（如相机）估算拍摄位置；关闭时则严格限制必须为同一相机型号。</small></span>
+                    <input v-model="photoMatchAcrossDevices" type="checkbox" :disabled="!photoMatchMissingGPS" />
+                  </label>
                   <p class="settings-help">仅使用原本带 GPS 的照片作为参考；若拍摄时间前后的位置差异较大，则不推断。估算点会在地图与照片详情中明确标注。</p>
                   <div v-if="photoStatus?.enabled" class="settings-cache-row">
                     <span>已索引照片</span>

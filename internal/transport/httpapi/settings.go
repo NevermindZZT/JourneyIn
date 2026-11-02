@@ -136,7 +136,7 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	if photosRootDir == "" && s.photosService != nil {
 		photosRootDir = s.photosService.RootDir()
 	}
-	matchMissingGPS, matchWindowMinutes := s.photoMatchSettings(r.Context())
+	matchMissingGPS, matchWindowMinutes, matchAcrossDevices := s.photoMatchSettings(r.Context())
 	defaultWeatherProvider := string(weather.ProviderAuto)
 	caiyunTokenConfigured := false
 	qweatherKeyConfigured := false
@@ -179,6 +179,7 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 			"configured":           photosRootDir != "",
 			"match_missing_gps":    matchMissingGPS,
 			"match_window_minutes": matchWindowMinutes,
+			"match_across_devices": matchAcrossDevices,
 		},
 		"weather": map[string]any{
 			"default_provider": defaultWeatherProvider,
@@ -362,10 +363,10 @@ func normalizePhotoRootPath(path string) string {
 	return filepath.Clean(path)
 }
 
-func (s *Server) photoMatchSettings(ctx context.Context) (bool, int) {
+func (s *Server) photoMatchSettings(ctx context.Context) (bool, int, bool) {
 	window := photos.DefaultPhotoMatchWindowMinutes
 	if s.settingsStore == nil {
-		return false, window
+		return false, window, false
 	}
 	enabled := false
 	if value, ok, err := s.settingsStore.GetSetting(ctx, "photos.match_missing_gps"); err == nil && ok {
@@ -378,13 +379,20 @@ func (s *Server) photoMatchSettings(ctx context.Context) (bool, int) {
 			window = parsed
 		}
 	}
-	return enabled, window
+	acrossDevices := false
+	if value, ok, err := s.settingsStore.GetSetting(ctx, "photos.match_across_devices"); err == nil && ok {
+		if parsed, parseErr := strconv.ParseBool(strings.TrimSpace(value)); parseErr == nil {
+			acrossDevices = parsed
+		}
+	}
+	return enabled, window, acrossDevices
 }
 
 type photosSettingsBody struct {
 	RootDir            *string `json:"root_dir"`
 	MatchMissingGPS    *bool   `json:"match_missing_gps"`
 	MatchWindowMinutes *int    `json:"match_window_minutes"`
+	MatchAcrossDevices *bool   `json:"match_across_devices"`
 }
 
 func (s *Server) updatePhotosSettings(w http.ResponseWriter, r *http.Request) {
@@ -407,7 +415,7 @@ func (s *Server) updatePhotosSettings(w http.ResponseWriter, r *http.Request) {
 	if value, ok, err := s.settingsStore.GetSetting(r.Context(), "photos.root_dir"); err == nil && ok && strings.TrimSpace(value) != "" {
 		newDir = strings.TrimSpace(value)
 	}
-	matchMissingGPS, matchWindowMinutes := s.photoMatchSettings(r.Context())
+	matchMissingGPS, matchWindowMinutes, matchAcrossDevices := s.photoMatchSettings(r.Context())
 	if body.MatchMissingGPS != nil {
 		matchMissingGPS = *body.MatchMissingGPS
 	}
@@ -417,6 +425,9 @@ func (s *Server) updatePhotosSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		matchWindowMinutes = *body.MatchWindowMinutes
+	}
+	if body.MatchAcrossDevices != nil {
+		matchAcrossDevices = *body.MatchAcrossDevices
 	}
 	var err error
 	scanTriggered := false
@@ -450,6 +461,9 @@ func (s *Server) updatePhotosSettings(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		err = s.settingsStore.SetSetting(r.Context(), "photos.match_window_minutes", strconv.Itoa(matchWindowMinutes), false)
 	}
+	if err == nil {
+		err = s.settingsStore.SetSetting(r.Context(), "photos.match_across_devices", strconv.FormatBool(matchAcrossDevices), false)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "settings_error", err.Error(), nil)
 		return
@@ -460,6 +474,7 @@ func (s *Server) updatePhotosSettings(w http.ResponseWriter, r *http.Request) {
 		"enabled":              s.photosService != nil && s.photosService.IsEnabled(),
 		"match_missing_gps":    matchMissingGPS,
 		"match_window_minutes": matchWindowMinutes,
+		"match_across_devices": matchAcrossDevices,
 		"scan_triggered":       scanTriggered,
 	})
 }

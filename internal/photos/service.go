@@ -394,7 +394,7 @@ func generatePhotoID(rootDir, fullPath string) string {
 }
 
 func (s *Service) GetAtlasPhotos(ctx context.Context, crs string) ([]PhotoAtlasItem, error) {
-	return s.GetAtlasPhotosWithMatching(ctx, crs, false, DefaultPhotoMatchWindowMinutes)
+	return s.GetAtlasPhotosWithMatching(ctx, crs, false, DefaultPhotoMatchWindowMinutes, false)
 }
 
 type photoAtlasRecord struct {
@@ -410,7 +410,7 @@ type photoAtlasRecord struct {
 	cameraModel        string
 }
 
-func (s *Service) GetAtlasPhotosWithMatching(ctx context.Context, crs string, includeInferred bool, matchWindowMinutes int) ([]PhotoAtlasItem, error) {
+func (s *Service) GetAtlasPhotosWithMatching(ctx context.Context, crs string, includeInferred bool, matchWindowMinutes int, allowCrossDevice bool) ([]PhotoAtlasItem, error) {
 	if s.db == nil || !s.IsEnabled() {
 		return []PhotoAtlasItem{}, nil
 	}
@@ -472,7 +472,7 @@ func (s *Service) GetAtlasPhotosWithMatching(ctx context.Context, crs string, in
 			if !record.hasGPS || record.takenAt.IsZero() || !validCaptureTimeSource(record.takenAtSource) {
 				continue
 			}
-			key := photoMatchGroupKey(root, record)
+			key := photoMatchGroupKey(root, record, allowCrossDevice)
 			if key != "" {
 				anchors[key] = append(anchors[key], record)
 			}
@@ -500,7 +500,7 @@ func (s *Service) GetAtlasPhotosWithMatching(ctx context.Context, crs string, in
 		if !includeInferred || record.takenAt.IsZero() || !validCaptureTimeSource(record.takenAtSource) {
 			continue
 		}
-		key := photoMatchGroupKey(root, record)
+		key := photoMatchGroupKey(root, record, allowCrossDevice)
 		group := anchors[key]
 		anchor, delta, ok := nearestStableGPSAnchor(record, group, window)
 		if !ok {
@@ -520,9 +520,8 @@ func validCaptureTimeSource(source string) bool {
 	return source == "exif_original" || source == "exif_digitized"
 }
 
-func photoMatchGroupKey(root string, record photoAtlasRecord) string {
-	makeName, model := strings.ToLower(strings.TrimSpace(record.cameraMake)), strings.ToLower(strings.TrimSpace(record.cameraModel))
-	if root == "" || makeName == "" || model == "" || record.filePath == "" || !validCaptureTimeSource(record.takenAtSource) {
+func photoMatchGroupKey(root string, record photoAtlasRecord, allowCrossDevice bool) string {
+	if root == "" || record.filePath == "" || !validCaptureTimeSource(record.takenAtSource) {
 		return ""
 	}
 	relDir, err := filepath.Rel(root, filepath.Dir(record.filePath))
@@ -530,7 +529,14 @@ func photoMatchGroupKey(root string, record photoAtlasRecord) string {
 		return ""
 	}
 	relDir = filepath.ToSlash(filepath.Clean(relDir))
-	return relDir + "\x1f" + makeName + "\x1f" + model + "\x1f" + record.takenAtSource + "\x1f" + fmt.Sprint(record.takenAtOffsetKnown)
+	if !allowCrossDevice {
+		makeName, model := strings.ToLower(strings.TrimSpace(record.cameraMake)), strings.ToLower(strings.TrimSpace(record.cameraModel))
+		if makeName == "" || model == "" {
+			return ""
+		}
+		return relDir + "" + makeName + "" + model + "" + record.takenAtSource + "" + fmt.Sprint(record.takenAtOffsetKnown)
+	}
+	return relDir + "" + record.takenAtSource + "" + fmt.Sprint(record.takenAtOffsetKnown)
 }
 
 func nearestStableGPSAnchor(target photoAtlasRecord, anchors []photoAtlasRecord, window time.Duration) (photoAtlasRecord, time.Duration, bool) {

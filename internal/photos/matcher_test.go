@@ -50,37 +50,76 @@ func TestPhotoMatchGroupRequiresSameFolderCameraAndTimeBasis(t *testing.T) {
 	root := filepath.Clean(t.TempDir())
 	taken := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
 	base := matchingRecord("a", filepath.Join(root, "trip", "a.jpg"), taken, 30, 120, true)
-	key := photoMatchGroupKey(root, base)
+	key := photoMatchGroupKey(root, base, false)
 	if key == "" {
 		t.Fatal("expected group key for complete capture metadata")
 	}
 	same := matchingRecord("b", filepath.Join(root, "trip", "b.jpg"), taken.Add(time.Minute), 30, 120, false)
-	if photoMatchGroupKey(root, same) != key {
+	if photoMatchGroupKey(root, same, false) != key {
 		t.Fatal("same folder/camera/time basis should share a group")
 	}
 	otherFolder := matchingRecord("c", filepath.Join(root, "other", "c.jpg"), taken, 30, 120, true)
-	if photoMatchGroupKey(root, otherFolder) == key {
+	if photoMatchGroupKey(root, otherFolder, false) == key {
 		t.Fatal("different folders must not match")
 	}
 	otherCamera := base
 	otherCamera.cameraModel = "Camera Y"
-	if photoMatchGroupKey(root, otherCamera) == key {
-		t.Fatal("different camera models must not match")
+	if photoMatchGroupKey(root, otherCamera, false) == key {
+		t.Fatal("different camera models must not match when cross device is disabled")
 	}
 	unknownZone := base
 	unknownZone.takenAtOffsetKnown = false
-	if photoMatchGroupKey(root, unknownZone) == key {
+	if photoMatchGroupKey(root, unknownZone, false) == key {
 		t.Fatal("known and unknown timezone bases must not mix")
 	}
 	unknownTime := base
 	unknownTime.takenAtSource = "file_mod_time"
-	if photoMatchGroupKey(root, unknownTime) != "" {
+	if photoMatchGroupKey(root, unknownTime, false) != "" {
 		t.Fatal("filesystem modification time must never be used for inference")
 	}
 	noCamera := base
 	noCamera.cameraModel = ""
-	if photoMatchGroupKey(root, noCamera) != "" {
-		t.Fatal("missing camera identity must not be inferred")
+	if photoMatchGroupKey(root, noCamera, false) != "" {
+		t.Fatal("missing camera identity must not be inferred when cross device is disabled")
+	}
+}
+
+func TestPhotoMatchGroupAllowsCrossDeviceWhenConfigured(t *testing.T) {
+	root := filepath.Clean(t.TempDir())
+	taken := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
+	phoneGPS := matchingRecord("phone", filepath.Join(root, "trip", "phone.jpg"), taken, 30, 120, true)
+	phoneGPS.cameraMake = "Apple"
+	phoneGPS.cameraModel = "iPhone 15 Pro"
+
+	cameraNoGPS := matchingRecord("camera", filepath.Join(root, "trip", "camera.jpg"), taken.Add(2*time.Minute), 0, 0, false)
+	cameraNoGPS.cameraMake = "Sony"
+	cameraNoGPS.cameraModel = "ILCE-7M4"
+
+	// 未开启跨设备：二者 group key 必须不同
+	if photoMatchGroupKey(root, phoneGPS, false) == photoMatchGroupKey(root, cameraNoGPS, false) {
+		t.Fatal("different camera models must not match when allowCrossDevice is false")
+	}
+
+	// 开启跨设备：同文件夹/同时间基准下二者必须共享 group key
+	crossKey := photoMatchGroupKey(root, phoneGPS, true)
+	if crossKey == "" {
+		t.Fatal("expected crossKey to be non-empty")
+	}
+	if photoMatchGroupKey(root, cameraNoGPS, true) != crossKey {
+		t.Fatal("different cameras in the same folder and time basis must share crossKey")
+	}
+
+	// 即使开启跨设备，不同子文件夹依然必须严格隔离
+	diffFolder := matchingRecord("other", filepath.Join(root, "other_trip", "other.jpg"), taken, 30, 120, true)
+	if photoMatchGroupKey(root, diffFolder, true) == crossKey {
+		t.Fatal("different folders must never share crossKey")
+	}
+
+	// 即使开启跨设备，文件修改时间依然绝对禁止参与
+	mtimePhoto := matchingRecord("mtime", filepath.Join(root, "trip", "mtime.jpg"), taken, 30, 120, false)
+	mtimePhoto.takenAtSource = "file_mod_time"
+	if photoMatchGroupKey(root, mtimePhoto, true) != "" {
+		t.Fatal("file_mod_time must never be matched even with cross device enabled")
 	}
 }
 
@@ -101,7 +140,7 @@ func TestGetAtlasPhotosWithMatchingIsOptInAndDoesNotChain(t *testing.T) {
 	if len(exact) != 1 || exact[0].ID != "gps" || exact[0].LocationSource != "gps" {
 		t.Fatalf("default GPS-only behavior changed: %+v", exact)
 	}
-	matched, err := service.GetAtlasPhotosWithMatching(context.Background(), "gcj02", true, 30)
+	matched, err := service.GetAtlasPhotosWithMatching(context.Background(), "gcj02", true, 30, false)
 	if err != nil {
 		t.Fatal(err)
 	}

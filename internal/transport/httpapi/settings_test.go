@@ -206,6 +206,7 @@ func TestPhotoMatchingSettingsPersistAndValidate(t *testing.T) {
 		Photos struct {
 			MatchMissingGPS    bool `json:"match_missing_gps"`
 			MatchWindowMinutes int  `json:"match_window_minutes"`
+			MatchAcrossDevices bool `json:"match_across_devices"`
 		} `json:"photos"`
 	}
 	readSettings := func() responseBody {
@@ -239,10 +240,10 @@ func TestPhotoMatchingSettingsPersistAndValidate(t *testing.T) {
 		return response
 	}
 	initial := readSettings()
-	if initial.Photos.MatchMissingGPS || initial.Photos.MatchWindowMinutes != 30 {
+	if initial.Photos.MatchMissingGPS || initial.Photos.MatchWindowMinutes != 30 || initial.Photos.MatchAcrossDevices {
 		t.Fatalf("unexpected photo match defaults: %+v", initial.Photos)
 	}
-	put := putSettings(map[string]any{"match_missing_gps": true, "match_window_minutes": 60})
+	put := putSettings(map[string]any{"match_missing_gps": true, "match_window_minutes": 60, "match_across_devices": true})
 	if put.StatusCode != http.StatusOK {
 		t.Fatalf("save match settings status=%d", put.StatusCode)
 	}
@@ -258,7 +259,7 @@ func TestPhotoMatchingSettingsPersistAndValidate(t *testing.T) {
 		t.Fatal("changing match settings should not rescan the photo directory")
 	}
 	saved := readSettings()
-	if !saved.Photos.MatchMissingGPS || saved.Photos.MatchWindowMinutes != 60 {
+	if !saved.Photos.MatchMissingGPS || saved.Photos.MatchWindowMinutes != 60 || !saved.Photos.MatchAcrossDevices {
 		t.Fatalf("settings did not persist: %+v", saved.Photos)
 	}
 	invalid := putSettings(map[string]any{"match_window_minutes": 45})
@@ -276,7 +277,7 @@ func TestPhotoMatchingSettingsPersistAndValidate(t *testing.T) {
 	}
 	partial.Body.Close()
 	final := readSettings()
-	if !final.Photos.MatchMissingGPS || final.Photos.MatchWindowMinutes != 120 {
+	if !final.Photos.MatchMissingGPS || final.Photos.MatchWindowMinutes != 120 || !final.Photos.MatchAcrossDevices {
 		t.Fatalf("partial update did not preserve toggle: %+v", final.Photos)
 	}
 }
