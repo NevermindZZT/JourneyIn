@@ -673,7 +673,7 @@ sequenceDiagram
     3. `all_trips_edit`：对所有行程具备编辑权。
 - **凭据治理**：
   - 密码使用带随机盐的 **PBKDF2-HMAC-SHA256** 单向哈希存储。
-  - 登录会话签发 24 小时有效的 **HttpOnly**、**SameSite=Lax** Cookie。
+  - 登录会话签发 **HttpOnly**、**SameSite=Lax** Cookie，默认有效期为 30 天（支持通过 `JOURNEYIN_SESSION_DAYS` 环境变量配置为 1~365 天），并在会话剩余时间少于一半时随活跃请求自动执行滑动续期（Sliding Window Renewal）。
   - 支持签发 90 天有效的用户级 API Token，数据库仅持久化 Token 原文的 SHA-256 哈希值，原文仅在创建时向用户展示一次。
 
 ---

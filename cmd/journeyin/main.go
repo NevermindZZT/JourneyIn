@@ -82,6 +82,7 @@ func main() {
 	}
 	api := httpapi.NewServer(app, webFS, schemaFS, version, logger)
 	authenticator := httpapi.NewAuthenticator(os.Getenv("JOURNEYIN_AUTH_USERNAME"), os.Getenv("JOURNEYIN_AUTH_PASSWORD"), os.Getenv("JOURNEYIN_API_TOKEN"))
+	userService.SetSessionLifetime(authenticator.SessionTTL())
 	authenticator.SetUserService(userService)
 	api.SetAuthenticator(authenticator)
 	api.SetUserService(userService)

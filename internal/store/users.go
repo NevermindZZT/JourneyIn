@@ -264,6 +264,37 @@ func (s *Store) GetUserBySessionHash(ctx context.Context, tokenHash, now string)
 	return scanUser(s.db.QueryRowContext(ctx, query, tokenHash, now))
 }
 
+func (s *Store) GetUserSessionInfo(ctx context.Context, tokenHash, now string) (UserRecord, string, error) {
+	query := "SELECT u.id, u.username, u.password_hash, u.role, u.access_mode, u.enabled, u.created_at, u.updated_at, s.expires_at FROM user_sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ? AND u.enabled = 1"
+	var user UserRecord
+	var enabled int
+	var expiresAt string
+	err := s.db.QueryRowContext(ctx, query, tokenHash, now).Scan(
+		&user.ID,
+		&user.Username,
+		&user.PasswordHash,
+		&user.Role,
+		&user.AccessMode,
+		&enabled,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+		&expiresAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return UserRecord{}, "", ErrNotFound
+		}
+		return UserRecord{}, "", err
+	}
+	user.Enabled = enabled != 0
+	return user, expiresAt, nil
+}
+
+func (s *Store) TouchUserSession(ctx context.Context, tokenHash, newExpiresAt string) error {
+	_, err := s.db.ExecContext(ctx, "UPDATE user_sessions SET expires_at = ? WHERE token_hash = ?", newExpiresAt, tokenHash)
+	return err
+}
+
 func (s *Store) DeleteUserSession(ctx context.Context, tokenHash string) error {
 	_, err := s.db.ExecContext(ctx, "DELETE FROM user_sessions WHERE token_hash = ?", tokenHash)
 	return err

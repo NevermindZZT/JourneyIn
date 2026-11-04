@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"journeyin/internal/security"
 )
@@ -103,3 +104,81 @@ func TestPrincipalForBearerMapsLegacyAPITokenToSystemAdmin(t *testing.T) {
 		t.Fatalf("legacy API token access mode=%s", principal.AccessMode)
 	}
 }
+func TestSessionLifetimeAndEnvOverride(t *testing.T) {
+	// Default should be 30 days
+	auth := NewAuthenticator("admin", "secret", "")
+	if auth.SessionTTL() != 30*24*time.Hour {
+		t.Fatalf("expected default 30 days, got %v", auth.SessionTTL())
+	}
+
+	// Environment variable override
+	t.Setenv("JOURNEYIN_SESSION_DAYS", "7")
+	auth7 := NewAuthenticator("admin", "secret", "")
+	if auth7.SessionTTL() != 7*24*time.Hour {
+		t.Fatalf("expected 7 days, got %v", auth7.SessionTTL())
+	}
+
+	// Invalid value falls back to default 30 days
+	t.Setenv("JOURNEYIN_SESSION_DAYS", "invalid")
+	authInvalid := NewAuthenticator("admin", "secret", "")
+	if authInvalid.SessionTTL() != 30*24*time.Hour {
+		t.Fatalf("expected fallback 30 days, got %v", authInvalid.SessionTTL())
+	}
+}
+
+func TestSlidingWindowSessionRenewal(t *testing.T) {
+	auth := NewAuthenticator("admin", "secret", "")
+	auth.SetSessionTTL(10 * time.Second) // 10s TTL, threshold is 5s
+
+	session, err := auth.Login("admin", "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	handler := RequireAPIAuthWithAuthenticator(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}), auth)
+
+	// 1. Fresh session (remaining ~10s > 5s threshold): should NOT renew (no Set-Cookie header)
+	req1 := httptest.NewRequest(http.MethodGet, "/api/v1/photos/status", nil)
+	req1.AddCookie(&http.Cookie{Name: authSessionCookie, Value: session})
+	res1 := httptest.NewRecorder()
+	handler.ServeHTTP(res1, req1)
+	if res1.Code != http.StatusOK {
+		t.Fatalf("req1 status=%d", res1.Code)
+	}
+	if len(res1.Result().Cookies()) != 0 {
+		t.Fatalf("expected no Set-Cookie for fresh session, got %+v", res1.Result().Cookies())
+	}
+
+	// 2. Age the session in memory so remaining is 3s (< 5s threshold)
+	auth.mu.Lock()
+	auth.sessions[session] = time.Now().Add(3 * time.Second)
+	auth.mu.Unlock()
+
+	// 3. Request with aged session: should trigger renewal and emit Set-Cookie with 10s Max-Age
+	req2 := httptest.NewRequest(http.MethodGet, "/api/v1/photos/status", nil)
+	req2.AddCookie(&http.Cookie{Name: authSessionCookie, Value: session})
+	res2 := httptest.NewRecorder()
+	handler.ServeHTTP(res2, req2)
+	if res2.Code != http.StatusOK {
+		t.Fatalf("req2 status=%d", res2.Code)
+	}
+	cookies := res2.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("expected Set-Cookie on eligible sliding renewal, got none")
+	}
+	renewedCookie := cookies[0]
+	if renewedCookie.Name != authSessionCookie || renewedCookie.Value != session || renewedCookie.MaxAge != 10 {
+		t.Fatalf("unexpected renewed cookie: %+v", renewedCookie)
+	}
+
+	// 4. Verify session expiry in auth was extended to ~10s
+	auth.mu.RLock()
+	newExpiry := auth.sessions[session]
+	auth.mu.RUnlock()
+	if time.Until(newExpiry) < 8*time.Second {
+		t.Fatalf("expected session expiry extended to ~10s, got remaining %v", time.Until(newExpiry))
+	}
+}
+

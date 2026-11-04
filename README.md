@@ -68,7 +68,7 @@ Linux rootful Docker 和常见 Docker Desktop 环境可直接使用。rootless D
 
 如果省略 `-data` 和 `JOURNEYIN_DATA_DIR`，Windows 默认保存到 `%AppData%/JourneyIn/journeyin.db`；Linux/macOS 使用用户配置目录。构建 Go 二进制不会清理数据库。建议验收时固定使用绝对数据路径。
 
-默认单文件模式绑定 localhost，可直接启动：没有配置 `JOURNEYIN_AUTH_USERNAME`/`JOURNEYIN_AUTH_PASSWORD` 或 `JOURNEYIN_API_TOKEN` 时不强制登录，即使数据库已有用户也可作为本机 System 管理员直接使用；显式提供有效的用户级 Bearer token 时，该请求仍按对应用户权限执行。远程监听仍要求启用 API 认证。配置了用户名/密码时，只有在数据库尚无用户的情况下才用它们引导创建首位管理员，密码以 PBKDF2 哈希保存；之后数据库用户为权威来源，修改环境变量不会重置数据库密码。首次运行且没有认证配置时，可在本地设置页创建首位管理员。认证启用后登录使用 24 小时 HttpOnly 会话 Cookie。
+默认单文件模式绑定 localhost，可直接启动：没有配置 `JOURNEYIN_AUTH_USERNAME`/`JOURNEYIN_AUTH_PASSWORD` 或 `JOURNEYIN_API_TOKEN` 时不强制登录，即使数据库已有用户也可作为本机 System 管理员直接使用；显式提供有效的用户级 Bearer token 时，该请求仍按对应用户权限执行。远程监听仍要求启用 API 认证。配置了用户名/密码时，只有在数据库尚无用户的情况下才用它们引导创建首位管理员，密码以 PBKDF2 哈希保存；之后数据库用户为权威来源，修改环境变量不会重置数据库密码。首次运行且没有认证配置时，可在本地设置页创建首位管理员。认证启用后登录签发 HttpOnly 会话 Cookie，默认有效期 30 天，支持通过 `JOURNEYIN_SESSION_DAYS` 环境变量自定义时限；同时提供活跃滑动续期机制（当剩余有效期少于一半且用户继续活跃时自动静默续期），保持长期免重复登录。
 
 未配置 `JOURNEYIN_MCP_TOKEN` 时不会阻止 localhost 单文件应用启动，本地 MCP 可免 token 使用。远程监听必须配置 `JOURNEYIN_MCP_TOKEN` 或 API 认证；若使用 API 认证，远程 `/mcp` 接受管理员或用户级 Bearer token。
 

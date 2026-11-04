@@ -155,7 +155,7 @@ transport -> application -> domain <- store / maps / weather / photos adapters
 - **用户角色与模式**：
   - 角色：`admin`（管理员）与 `user`（普通用户）。
   - 访问模式：`read_only`（全量只读）、`selected_trip_edit`（仅指定授权行程可编辑）、`all_trips_edit`（全量行程可编辑）。
-- **凭据存储**：密码采用 PBKDF2-HMAC-SHA256 哈希存储；会话使用 24 小时有效的 HttpOnly Cookie；API Token 仅存 SHA-256 哈希，原文仅展示一次。
+- **凭据存储**：密码采用 PBKDF2-HMAC-SHA256 哈希存储；会话签发 HttpOnly Cookie，默认有效期 30 天（支持 `JOURNEYIN_SESSION_DAYS` 自定义，并在剩余时间过半时随活跃请求滑动续期）；API Token 仅存 SHA-256 哈希，原文仅展示一次。
 - 权限隔离：普通用户不可访问系统设置和用户管理；多行程分享包仅允许管理员或对包内所有行程拥有编辑权的用户创建。
 
 ## 12. MCP 硬约束

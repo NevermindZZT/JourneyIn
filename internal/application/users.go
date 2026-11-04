@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -27,7 +28,7 @@ const (
 	passwordSaltBytes      = 16
 	passwordKeyBytes       = 32
 	minimumPasswordRunes   = 12
-	userSessionLifetime    = 24 * time.Hour
+	DefaultSessionLifetime = 30 * 24 * time.Hour
 )
 
 type ManagedUser struct {
@@ -41,9 +42,39 @@ type ManagedUser struct {
 	UpdatedAt       string   `json:"updated_at"`
 }
 
-type UserService struct{ store *store.Store }
+type UserService struct {
+	store           *store.Store
+	mu              sync.RWMutex
+	sessionLifetime time.Duration
+}
 
-func NewUserService(database *store.Store) *UserService { return &UserService{store: database} }
+func NewUserService(database *store.Store) *UserService {
+	return &UserService{
+		store:           database,
+		sessionLifetime: DefaultSessionLifetime,
+	}
+}
+
+func (s *UserService) SetSessionLifetime(d time.Duration) {
+	if s == nil || d <= 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessionLifetime = d
+}
+
+func (s *UserService) SessionLifetime() time.Duration {
+	if s == nil {
+		return DefaultSessionLifetime
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.sessionLifetime <= 0 {
+		return DefaultSessionLifetime
+	}
+	return s.sessionLifetime
+}
 
 func (s *UserService) BootstrapAdminIfEmpty(ctx context.Context, username, password string) (bool, error) {
 	if s == nil || s.store == nil {
@@ -99,11 +130,38 @@ func (s *UserService) CreateSession(ctx context.Context, userID string) (string,
 		return "", time.Time{}, err
 	}
 	now := time.Now().UTC()
-	expires := now.Add(userSessionLifetime)
+	expires := now.Add(s.SessionLifetime())
 	if err := s.store.CreateUserSession(ctx, tokenDigest(raw), userID, now.Format(time.RFC3339), expires.Format(time.RFC3339)); err != nil {
 		return "", time.Time{}, err
 	}
 	return raw, expires, nil
+}
+
+func (s *UserService) TouchSessionIfEligible(ctx context.Context, raw string, threshold, extension time.Duration) (bool, error) {
+	if s == nil || s.store == nil || raw == "" {
+		return false, nil
+	}
+	now := time.Now().UTC()
+	_, expiresAtStr, err := s.store.GetUserSessionInfo(ctx, tokenDigest(raw), now.Format(time.RFC3339))
+	if err != nil {
+		return false, err
+	}
+	expiresAt, err := time.Parse(time.RFC3339, expiresAtStr)
+	if err != nil {
+		expiresAt, err = time.Parse(time.RFC3339Nano, expiresAtStr)
+		if err != nil {
+			return false, err
+		}
+	}
+	remaining := expiresAt.Sub(now)
+	if remaining < threshold {
+		newExpires := now.Add(extension)
+		if err := s.store.TouchUserSession(ctx, tokenDigest(raw), newExpires.Format(time.RFC3339)); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	return false, nil
 }
 
 func (s *UserService) ResolveSession(ctx context.Context, raw string) (security.Principal, error) {

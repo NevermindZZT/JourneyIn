@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -16,9 +18,32 @@ import (
 )
 
 const (
-	authSessionCookie = "journeyin_session"
-	authSessionTTL    = 24 * time.Hour
+	authSessionCookie      = "journeyin_session"
+	authSessionTTL         = 30 * 24 * time.Hour
+	DefaultSessionLifetime = 30 * 24 * time.Hour
 )
+
+func parseSessionDays(raw string) int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	days, err := strconv.Atoi(raw)
+	if err != nil || days < 1 || days > 365 {
+		return 0
+	}
+	return days
+}
+
+func defaultSessionTTLFromEnv() time.Duration {
+	if days := parseSessionDays(os.Getenv("JOURNEYIN_SESSION_DAYS")); days > 0 {
+		return time.Duration(days) * 24 * time.Hour
+	}
+	if days := parseSessionDays(os.Getenv("JOURNEYIN_AUTH_SESSION_DAYS")); days > 0 {
+		return time.Duration(days) * 24 * time.Hour
+	}
+	return DefaultSessionLifetime
+}
 
 var ErrAuthNotConfigured = errors.New("username/password authentication is not configured")
 var ErrInvalidCredentials = errors.New("invalid username or password")
@@ -30,17 +55,40 @@ type Authenticator struct {
 
 	mu              sync.RWMutex
 	sessions        map[string]time.Time
+	sessionTTL      time.Duration
 	userService     *application.UserService
 	userModeEnabled bool
 }
 
 func NewAuthenticator(username, password, apiToken string) *Authenticator {
 	return &Authenticator{
-		username: strings.TrimSpace(username),
-		password: password,
-		apiToken: strings.TrimSpace(apiToken),
-		sessions: make(map[string]time.Time),
+		username:   strings.TrimSpace(username),
+		password:   password,
+		apiToken:   strings.TrimSpace(apiToken),
+		sessions:   make(map[string]time.Time),
+		sessionTTL: defaultSessionTTLFromEnv(),
 	}
+}
+
+func (a *Authenticator) SetSessionTTL(ttl time.Duration) {
+	if a == nil || ttl <= 0 {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.sessionTTL = ttl
+}
+
+func (a *Authenticator) SessionTTL() time.Duration {
+	if a == nil {
+		return defaultSessionTTLFromEnv()
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.sessionTTL <= 0 {
+		return defaultSessionTTLFromEnv()
+	}
+	return a.sessionTTL
 }
 
 func (a *Authenticator) SetUserService(users *application.UserService) {
@@ -115,8 +163,9 @@ func (a *Authenticator) Login(username, password string) (string, error) {
 		return "", err
 	}
 	token := hex.EncodeToString(raw)
+	ttl := a.SessionTTL()
 	a.mu.Lock()
-	a.sessions[token] = time.Now().Add(authSessionTTL)
+	a.sessions[token] = time.Now().Add(ttl)
 	a.mu.Unlock()
 	return token, nil
 }
@@ -194,15 +243,52 @@ func (a *Authenticator) Authorized(r *http.Request) bool {
 }
 
 func (a *Authenticator) SetSessionCookie(w http.ResponseWriter, token string, secure bool) {
+	ttl := a.SessionTTL()
 	http.SetCookie(w, &http.Cookie{
 		Name:     authSessionCookie,
 		Value:    token,
 		Path:     "/",
-		MaxAge:   int(authSessionTTL.Seconds()),
+		MaxAge:   int(ttl.Seconds()),
 		HttpOnly: true,
 		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 	})
+}
+
+func (a *Authenticator) RenewSessionIfEligible(ctx context.Context, w http.ResponseWriter, r *http.Request) {
+	if a == nil || w == nil || r == nil {
+		return
+	}
+	cookie, err := r.Cookie(authSessionCookie)
+	if err != nil || cookie.Value == "" {
+		return
+	}
+
+	ttl := a.SessionTTL()
+	threshold := ttl / 2
+	token := cookie.Value
+
+	users, userMode := a.userAuth()
+	if userMode && users != nil {
+		renewed, err := users.TouchSessionIfEligible(ctx, token, threshold, ttl)
+		if err == nil && renewed {
+			a.SetSessionCookie(w, token, r.TLS != nil)
+		}
+		return
+	}
+
+	a.mu.Lock()
+	expiresAt, ok := a.sessions[token]
+	if ok {
+		remaining := time.Until(expiresAt)
+		if remaining > 0 && remaining < threshold {
+			a.sessions[token] = time.Now().Add(ttl)
+			a.mu.Unlock()
+			a.SetSessionCookie(w, token, r.TLS != nil)
+			return
+		}
+	}
+	a.mu.Unlock()
 }
 
 func (a *Authenticator) ClearSession(w http.ResponseWriter, r *http.Request) {
@@ -245,6 +331,7 @@ func RequireAPIAuthWithAuthenticator(next http.Handler, authenticator *Authentic
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		authenticator.RenewSessionIfEligible(r.Context(), w, r)
 		r = r.WithContext(security.WithPrincipal(r.Context(), principal))
 		next.ServeHTTP(w, r)
 	})

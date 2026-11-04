@@ -241,7 +241,11 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.auth.SetSessionCookie(w, session, r.TLS != nil)
-	writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "username": strings.TrimSpace(body.Username), "expires_in": int(authSessionTTL.Seconds())})
+	expiresIn := int(authSessionTTL.Seconds())
+	if s.auth != nil {
+		expiresIn = int(s.auth.SessionTTL().Seconds())
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "username": strings.TrimSpace(body.Username), "expires_in": expiresIn})
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {

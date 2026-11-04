@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"journeyin/internal/security"
 	"journeyin/internal/store"
@@ -225,3 +226,59 @@ func TestLastAdministratorCannotBeDeletedOrDemoted(t *testing.T) {
 		t.Fatalf("demote last admin = %v, want last-admin denial", err)
 	}
 }
+func TestUserSessionTouchAndConfigurableLifetime(t *testing.T) {
+	ctx := context.Background()
+	_, users := testUserService(t)
+
+	// Default lifetime should be 30 days
+	if users.SessionLifetime() != 30*24*time.Hour {
+		t.Fatalf("expected default 30 days, got %v", users.SessionLifetime())
+	}
+
+	// Custom lifetime
+	users.SetSessionLifetime(10 * 24 * time.Hour)
+	if users.SessionLifetime() != 10*24*time.Hour {
+		t.Fatalf("expected 10 days, got %v", users.SessionLifetime())
+	}
+
+	if _, err := users.BootstrapAdminIfEmpty(ctx, "admin-test", "bootstrap-password-123"); err != nil {
+		t.Fatal(err)
+	}
+	admin, err := users.Authenticate(ctx, "admin-test", "bootstrap-password-123")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	token, expires, err := users.CreateSession(ctx, admin.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Until(expires) < 9*24*time.Hour || time.Until(expires) > 10*24*time.Hour+time.Minute {
+		t.Fatalf("expected ~10 days session, got expires=%v", expires)
+	}
+
+	// 1. When remaining is ~10 days and threshold is 5 days, TouchSessionIfEligible should return false
+	renewed, err := users.TouchSessionIfEligible(ctx, token, 5*24*time.Hour, 10*24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renewed {
+		t.Fatal("expected no renewal when remaining > threshold")
+	}
+
+	// 2. When threshold is 11 days (greater than remaining 10 days), TouchSessionIfEligible should return true
+	renewed, err = users.TouchSessionIfEligible(ctx, token, 11*24*time.Hour, 10*24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !renewed {
+		t.Fatal("expected renewal when remaining < threshold")
+	}
+
+	// 3. Verify session in store still resolves to user
+	principal, err := users.PrincipalForSession(ctx, token)
+	if err != nil || principal.UserID != admin.UserID {
+		t.Fatalf("principal=%+v err=%v", principal, err)
+	}
+}
+
