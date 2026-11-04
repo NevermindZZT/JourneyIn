@@ -2201,6 +2201,11 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
   height: max-content;
   min-height: min-content;
   transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  animation: atlasCardPointerGuard 0.25s backwards;
+}
+@keyframes atlasCardPointerGuard {
+  0%, 99% { pointer-events: none; }
+  100% { pointer-events: auto; }
 }
 .atlas-photo-item-card:hover {
   transform: translateY(-2px);

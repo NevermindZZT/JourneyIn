@@ -4017,7 +4017,13 @@ function renderPhotoMarkers(photos: PhotoAtlasItem[], enabled: boolean) {
         offset: new mapAPI.Pixel(-22, -50),
         zIndex: 140 + (cluster.count > 1 ? 20 : 0)
       }))
-      marker.on?.('click', () => handlePhotoClusterClick(cluster))
+      marker.on?.('click', (e?: any) => {
+        try {
+          e?.originEvent?.stopPropagation?.()
+          e?.originEvent?.preventDefault?.()
+        } catch {}
+        handlePhotoClusterClick(cluster)
+      })
       atlasPhotoMarkers.push(marker)
     } else {
       const pt = new mapAPI.Point(cluster.lng, cluster.lat)
@@ -4031,7 +4037,13 @@ function renderPhotoMarkers(photos: PhotoAtlasItem[], enabled: boolean) {
         padding: '0',
         cursor: 'pointer'
       })
-      label.addEventListener?.('click', () => handlePhotoClusterClick(cluster))
+      label.addEventListener?.('click', (e?: any) => {
+        try {
+          e?.domEvent?.stopPropagation?.()
+          e?.domEvent?.preventDefault?.()
+        } catch {}
+        handlePhotoClusterClick(cluster)
+      })
       mapInstance.addOverlay(label)
       atlasPhotoMarkers.push(label)
     }
@@ -4045,7 +4057,10 @@ function renderTripPhotoMarkers() {
   renderPhotoMarkers(tripMapPhotoMatches.value, tripMapShowPhotos.value && isAdmin.value && ownerWorkspace.value)
 }
 
+let photoClusterOpenedAt = 0
+
 function handlePhotoClusterClick(cluster: PhotoCluster) {
+  photoClusterOpenedAt = Date.now()
   selectedPhotoCluster.value = cluster
   if (cluster.count > 1) {
     const currentZoom = mapInstance?.getZoom?.() || 8
@@ -4059,6 +4074,14 @@ function handlePhotoClusterClick(cluster: PhotoCluster) {
   } else {
     openPhotoPreview(cluster.cover)
   }
+}
+
+function handlePhotoCardClick(photo: PhotoAtlasItem) {
+  // 防穿透/点透保护：如果距离抽屉呼出少于 350ms，判定为由打开抽屉的同一次地图手势/点击穿透残余，予以静默拦截
+  if (Date.now() - photoClusterOpenedAt < 350) {
+    return
+  }
+  openPhotoPreview(photo, selectedPhotoCluster.value?.photos)
 }
 
 function openPhotoPreview(photo: PhotoAtlasItem, list?: PhotoAtlasItem[]) {
@@ -7376,7 +7399,7 @@ onUnmounted(() => {
                   v-for="p in selectedPhotoCluster.photos"
                   :key="p.id"
                   class="atlas-photo-item-card"
-                  @click="openPhotoPreview(p, selectedPhotoCluster.photos)"
+                  @click="handlePhotoCardClick(p)"
                 >
                   <img :src="p.thumb_url + '?size=120'" class="atlas-photo-item-img" loading="lazy" />
                   <span class="atlas-photo-item-date">{{ formatPhotoTime(p.taken_at) }}</span>
@@ -7509,7 +7532,7 @@ onUnmounted(() => {
 
             <div v-if="selectedPhotoCluster" class="atlas-photo-drawer trip-photo-drawer" role="dialog" aria-label="地图区域照片">
   <div class="atlas-photo-drawer-head"><strong>该区域照片 ({{ selectedPhotoCluster.photos.length }} 张)</strong><button type="button" aria-label="关闭照片列表" @click="selectedPhotoCluster = null">×</button></div>
-  <div class="atlas-photo-grid"><div v-for="photo in selectedPhotoCluster.photos" :key="photo.id" class="atlas-photo-item-card" @click="openPhotoPreview(photo, selectedPhotoCluster.photos)"><img :src="photo.thumb_url + '?size=120'" class="atlas-photo-item-img" loading="lazy" /><span class="atlas-photo-item-date">{{ formatPhotoTime(photo.taken_at) }}</span></div></div>
+  <div class="atlas-photo-grid"><div v-for="photo in selectedPhotoCluster.photos" :key="photo.id" class="atlas-photo-item-card" @click="handlePhotoCardClick(photo)"><img :src="photo.thumb_url + '?size=120'" class="atlas-photo-item-img" loading="lazy" /><span class="atlas-photo-item-date">{{ formatPhotoTime(photo.taken_at) }}</span></div></div>
 </div>
 <aside v-if="tripDocument" class="floating-panel workspace-panel itinerary-panel" :class="['sheet-' + sheetBreakpoint, { 'panel-search-mode': panelMode === 'search', 'is-sheet-dragging': sheetDragActive, 'has-photo-drawer-open': Boolean(selectedPhotoCluster) }]" :style="sheetDragStyle" aria-label="行程时间线">
               <button class="sheet-handle" type="button" :aria-label="sheetBreakpoint === 'peek' ? '展开行程' : '收起行程'" @pointerdown="startSheetDrag" @click="cycleSheetBreakpoint"><span></span></button>
