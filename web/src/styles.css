@@ -479,8 +479,8 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
 .atlas-floating-panel.is-sheet-dragging {
   transition: none !important;
 }
-.atlas-floating-panel.sheet-peek .atlas-metrics-grid,
-.atlas-floating-panel.sheet-peek .atlas-trip-scroll {
+.atlas-floating-panel.sheet-peek:not(.is-sheet-dragging) .atlas-metrics-grid,
+.atlas-floating-panel.sheet-peek:not(.is-sheet-dragging) .atlas-trip-scroll {
   display: none !important;
 }
 
@@ -501,7 +501,7 @@ ion-chip { --background: var(--md-surface-container-high); --color: var(--ink); 
     transition: height 0.2s ease, top 0.2s ease;
   }
 
-  .atlas-floating-panel.sheet-peek {
+  .atlas-floating-panel.sheet-peek:not(.is-sheet-dragging):not([style*="height"]) {
     top: auto !important;
     height: auto !important;
     max-height: none !important;
@@ -1318,9 +1318,9 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
   .workspace-status { top: calc(var(--topbar-bottom) + 8px); right: auto; left: var(--topbar-side); width: fit-content; max-width: calc(100vw - 20px); justify-content: flex-start; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .redesign-notices { top: calc(var(--topbar-bottom) + 8px); right: var(--topbar-side); left: var(--topbar-side); width: auto; }
   .workspace-panel { top: auto; right: 8px; bottom: max(8px, var(--safe-bottom)); left: 8px; width: auto; height: 53%; max-height: 53%; border-radius: 24px; }
-  .workspace-panel.sheet-peek,
-  .workspace-panel.atlas-floating-panel.sheet-peek,
-  .workspace-panel.atlas-floating-panel.radar-floating-panel.sheet-peek {
+  .workspace-panel.sheet-peek:not(.is-sheet-dragging):not([style*="height"]),
+  .workspace-panel.atlas-floating-panel.sheet-peek:not(.is-sheet-dragging):not([style*="height"]),
+  .workspace-panel.atlas-floating-panel.radar-floating-panel.sheet-peek:not(.is-sheet-dragging):not([style*="height"]) {
     top: auto !important;
     height: auto !important;
     max-height: none !important;
@@ -1333,8 +1333,8 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
     max-height: none;
   }
   .workspace-panel .sheet-handle { display: grid; }
-  .workspace-panel.sheet-peek .itinerary-scroll { display: none; }
-  .workspace-panel.sheet-peek .peek-summary { display: flex; }
+  .workspace-panel.sheet-peek:not(.is-sheet-dragging) .itinerary-scroll { display: none; }
+  .workspace-panel.sheet-peek:not(.is-sheet-dragging) .peek-summary { display: flex; }
   .workspace-panel.sheet-half .peek-summary, .workspace-panel.sheet-expanded .peek-summary { display: none; }
   .workspace-panel-head { position: relative; padding: 6px 15px 11px; }
   .workspace-panel-head > div:first-child { width: 100%; padding-right: 178px; }
@@ -1346,7 +1346,8 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
   .workspace-panel-head,
   .atlas-panel-head,
   .detail-sticky-header,
-  .radar-panel-header {
+  .radar-panel-header,
+  .peek-summary {
     touch-action: none;
     cursor: grab;
     user-select: none;
@@ -1382,7 +1383,7 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
   .plan-button { flex: 1 1 100%; }
   .redesign-stop-main { padding-block: 7px; }
   .stop-detail-panel { top: 60px; right: 8px; bottom: max(8px, env(safe-area-inset-bottom)); left: 8px; width: auto; max-height: none; border-radius: 24px; }
-  .stop-detail-panel.sheet-peek { top: auto !important; height: auto !important; max-height: none !important; }
+  .stop-detail-panel.sheet-peek:not(.is-sheet-dragging):not([style*="height"]) { top: auto !important; height: auto !important; max-height: none !important; }
   .stop-detail-panel.sheet-half { top: auto; height: 53%; max-height: 53%; }
   .stop-detail-panel.sheet-expanded {
     top: calc(var(--topbar-bottom) + 8px);
@@ -1390,13 +1391,13 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
     height: calc(100% - (var(--topbar-bottom) + 8px + max(8px, var(--safe-bottom))));
     max-height: none;
   }
-  .stop-detail-panel.sheet-peek .redesign-detail-scroll { display: none !important; }
+  .stop-detail-panel.sheet-peek:not(.is-sheet-dragging) .redesign-detail-scroll { display: none !important; }
   .stop-detail-panel.sheet-peek .detail-sticky-header { border-bottom: 0 !important; padding-bottom: 14px; }
    .stop-detail-panel.sheet-peek .detail-sticky-header > h1 { margin-top: 2px; font-size: 22px; }
    .stop-detail-panel.sheet-peek .detail-date-row { display: flex; margin-top: 2px; }
 .stop-detail-panel.sheet-peek .detail-date-row .detail-date { color: var(--muted); font-size: 11px; line-height: 1.3; }
 .stop-detail-panel.sheet-peek .detail-date-edit { display: none; }
-   .stop-detail-panel.sheet-peek .detail-location, .stop-detail-panel.sheet-peek .detail-primary-actions, .stop-detail-panel.sheet-peek .detail-weather, .stop-detail-panel.sheet-peek .detail-section, .stop-detail-panel.sheet-peek .detail-parent-button, .stop-detail-panel.sheet-peek .detail-danger-button { display: none; }
+   .stop-detail-panel.sheet-peek:not(.is-sheet-dragging) .detail-location, .stop-detail-panel.sheet-peek:not(.is-sheet-dragging) .detail-primary-actions, .stop-detail-panel.sheet-peek:not(.is-sheet-dragging) .detail-weather, .stop-detail-panel.sheet-peek:not(.is-sheet-dragging) .detail-section, .stop-detail-panel.sheet-peek:not(.is-sheet-dragging) .detail-parent-button, .stop-detail-panel.sheet-peek:not(.is-sheet-dragging) .detail-danger-button { display: none; }
   .detail-sheet-toggle { display: grid; }
   .detail-sheet-handle { display: grid; height: 14px; min-height: 14px; place-items: center; padding: 5px 0 0; }
   .detail-sheet-handle button { display: grid; width: 100%; height: 14px; min-height: 14px; place-items: center; padding: 0; border: 0; background: transparent; touch-action: none; cursor: grab; }
@@ -3507,7 +3508,7 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
   white-space: nowrap;
 }
 
-.radar-floating-panel.sheet-peek .travel-radar-view > :not(.radar-panel-header) { display: none !important; }
+.radar-floating-panel.sheet-peek:not(.is-sheet-dragging) .travel-radar-view > :not(.radar-panel-header) { display: none !important; }
 .radar-map-pin { display: grid; place-items: center; width: max-content; height: max-content; filter: drop-shadow(0 3px 7px rgba(0,0,0,.42)); transform-origin: center; }
 .radar-map-pin.is-selected { filter: drop-shadow(0 0 5px rgba(255,255,255,.85)) drop-shadow(0 5px 9px rgba(0,0,0,.5)); }
 .radar-map-pin svg { display: block; overflow: visible; }
