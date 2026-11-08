@@ -4017,13 +4017,10 @@ function renderPhotoMarkers(photos: PhotoAtlasItem[], enabled: boolean) {
         offset: new mapAPI.Pixel(-22, -50),
         zIndex: 140 + (cluster.count > 1 ? 20 : 0)
       }))
-      marker.on?.('click', (e?: any) => {
-        try {
-          e?.originEvent?.stopPropagation?.()
-          e?.originEvent?.preventDefault?.()
-        } catch {}
-        handlePhotoClusterClick(cluster)
-      })
+      // Do not cancel or stop the provider's pointer/click sequence here: the map
+      // needs its matching mouseup/pointerup to clear its drag state. The drawer's
+      // click-through guard is handled by photoClusterOpenedAt and CSS instead.
+      marker.on?.('click', () => handlePhotoClusterClick(cluster))
       atlasPhotoMarkers.push(marker)
     } else {
       const pt = new mapAPI.Point(cluster.lng, cluster.lat)
@@ -4037,13 +4034,8 @@ function renderPhotoMarkers(photos: PhotoAtlasItem[], enabled: boolean) {
         padding: '0',
         cursor: 'pointer'
       })
-      label.addEventListener?.('click', (e?: any) => {
-        try {
-          e?.domEvent?.stopPropagation?.()
-          e?.domEvent?.preventDefault?.()
-        } catch {}
-        handlePhotoClusterClick(cluster)
-      })
+      // Preserve the map provider's pointer sequence so map dragging is released normally.
+      label.addEventListener?.('click', () => handlePhotoClusterClick(cluster))
       mapInstance.addOverlay(label)
       atlasPhotoMarkers.push(label)
     }
