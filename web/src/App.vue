@@ -7131,9 +7131,9 @@ onUnmounted(() => {
                 <span>旅行雷达良机</span>
               </div>
               <div class="banner-body">
-                <strong>{{ radarSummary.top_place_name }}</strong> · {{ radarSummary.top_opportunity.details?.summary || '近期迎来绝佳游玩窗口' }}
+                <strong>{{ radarSummary.top_place_name }}</strong>
+                <span>{{ radarSummary.top_opportunity.details?.summary || '近期迎来绝佳游玩窗口' }}</span>
               </div>
-              <button type="button" class="banner-action-btn">查看雷达时机 ↗</button>
             </div>
 
             <section class="list-summary-bar" aria-label="行程筛选">

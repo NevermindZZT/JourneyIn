@@ -3447,10 +3447,12 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 }
 
 .home-radar-banner {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  column-gap: 12px;
+  row-gap: 8px;
   max-width: 1120px;
   width: 100%;
   padding: 12px 20px;
@@ -3477,6 +3479,9 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 
 .home-radar-banner .banner-badge svg { flex-shrink: 0; display: block; }
 .home-radar-banner .banner-badge {
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: start;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -3491,21 +3496,21 @@ html.journey-touch-gesture .journey-redesign button:focus, html.journey-touch-ge
 }
 
 .home-radar-banner .banner-body {
-  flex: 1;
+  grid-column: 1;
+  grid-row: 2;
+  min-width: 0;
+  display: grid;
+  gap: 3px;
   font-size: 13px;
   color: var(--ink);
   line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
-.home-radar-banner .banner-action-btn {
-  padding: 4px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  color: var(--ink);
-  font-size: 12px;
-  font-weight: 700;
-  white-space: nowrap;
+.home-radar-banner .banner-body strong {
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.35;
 }
 
 .radar-floating-panel.sheet-peek:not(.is-sheet-dragging) .travel-radar-view > :not(.radar-panel-header) { display: none !important; }
