@@ -192,7 +192,7 @@ func (p *CaiyunProvider) Weather(ctx context.Context, request WeatherRequest) (W
 	if err != nil {
 		return WeatherSnapshot{Provider: p.ID(), LocalDate: request.LocalDate, Available: false}, err
 	}
-	req.Header.Set("User-Agent", "JourneyIn-Weather/0.7.12")
+	req.Header.Set("User-Agent", "JourneyIn-Weather/0.7.13")
 
 	resp, err := p.client.Do(req)
 	if err != nil {
