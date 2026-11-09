@@ -2248,6 +2248,9 @@ async function loadTrips() {
     const [tripResponse, capabilityResponse, settingsResponse] = await Promise.all([apiFetch('/api/v1/trips'), apiFetch('/api/v1/capabilities'), isAdmin.value ? apiFetch('/api/v1/settings') : Promise.resolve(null)])
     if (tripResponse.status === 401) return
     if (!tripResponse.ok) throw new Error('无法读取旅行规划')
+    // The home page also displays the top radar opportunity; fetch its summary
+    // whenever authenticated home data is loaded, not only after opening Radar.
+    void loadRadarSummary()
     trips.value = ((await tripResponse.json()) as { items?: TripSummary[] }).items || []
     capabilities.value = capabilityResponse.ok ? await capabilityResponse.json() as Capabilities : null
     let configuredDefault = defaultMapProvider.value
